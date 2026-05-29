@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: bitcoin-arbitrage-sentinel
+    env: node
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm start
+    envVars:
+      - key: MARKET_MODE
+        value: auto
+      - key: AUTO_EXECUTION
+        value: "true"

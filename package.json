@@ -1,0 +1,31 @@
+{
+  "name": "bitcoin-arbitrage-sentinel",
+  "version": "1.0.0",
+  "description": "WebSocket-first Bitcoin arbitrage simulator with CCXT Pro streams, Redis Pub/Sub, triangular routing, risk controls, and a live dashboard.",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "node src/server.js",
+    "start": "node src/server.js",
+    "check": "node --check src/server.js && node --check src/engine/arbitrageEngine.js && node --check src/engine/marketDataEngine.js && node --check src/engine/triangularArbitrageEngine.js && node --check src/engine/opportunityQueue.js && node --check src/exchanges/ccxtStreamProvider.js && node --check src/integrations/redisBus.js && node --check public/app.js && node --check tests/server.test.js && node --check tests/opportunityQueue.test.js && node --check tests/riskManager.test.js && node --check tests/triangular.test.js",
+    "test": "node --test tests/*.test.js"
+  },
+  "dependencies": {
+    "ccxt": "^4.5.0",
+    "ioredis": "^5.4.2"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "bitcoin",
+    "arbitrage",
+    "trading",
+    "websocket",
+    "ccxt-pro",
+    "redis",
+    "orderbook",
+    "sse"
+  ],
+  "license": "MIT"
+}
