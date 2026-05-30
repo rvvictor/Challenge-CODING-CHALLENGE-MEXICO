@@ -17,6 +17,8 @@ Aurelion es un bot de arbitraje de Bitcoin con arquitectura backend/frontend: ba
 - Exchanges ampliados: Binance, OKX, Kraken, Coinbase, Bitstamp, Bybit, KuCoin, Gate.io, Bitfinex y Gemini.
 - Metricas de fills parciales y calidad de ejecucion.
 - Circuit breaker por volatilidad, stale data y racha de perdidas.
+- Boton de stress de volatilidad para validar el circuit breaker en vivo.
+- Historial retenido de oportunidades, ejecuciones, P&L y eventos sin perderse al cambiar exchanges activos.
 - Modo demo deterministico para presentaciones sin depender de APIs externas.
 
 ## Arquitectura
@@ -110,14 +112,19 @@ npm run start
 | `WS_RECONNECT_DELAY_MS` | `2000` | Espera entre reconexiones |
 | `WS_FAILURE_THRESHOLD` | `5` | Fallos antes de REST fallback |
 | `POLL_INTERVAL_MS` | `1200` | REST fallback interval |
+| `MIN_TRADE_BTC` | `0.002` | Tamano minimo realista |
+| `MAX_TRADE_BTC` | `0.025` | Tamano maximo por trade para controlar riesgo y P&L demo |
+| `MIN_NET_BPS` | `0.75` | Edge neto minimo despues de costos |
+| `MAX_EXECUTIONS_PER_TICK` | `1` | Evita sobre-operar el mismo tick |
+| `PAIR_COOLDOWN_MS` | `20000` | Cooldown por ruta |
 | `REDIS_URL` | vacio | Redis Pub/Sub |
 | `MAX_VOLATILITY_PCT` | `2.4` | Umbral volatilidad |
 | `VOLATILITY_MIN_SAMPLES` | `8` | Muestras minimas |
 | `VOLATILITY_REARM_MS` | `45000` | Rearm de volatilidad |
 | `PAUSE_AFTER_LOSS_MS` | `60000` | Cooldown |
 | `TRIANGULAR_ENABLED` | `true` | Activa triangular |
-| `TRIANGULAR_QUOTE_SIZE` | `2500` | Tamano ciclo |
-| `ACTIVE_EXCHANGES` | vacio | Lista opcional, ej. `binance,okx,bybit,kucoin,kraken`, para priorizar velocidad |
+| `TRIANGULAR_QUOTE_SIZE` | `900` | Tamano ciclo |
+| `ACTIVE_EXCHANGES` | `okx,bybit,kucoin,kraken,bitstamp` | Perfil rapido. Usa `all` para activar los 10 |
 | `GLOBAL_MARKET_ENABLED` | `true` | Contexto CoinGecko |
 | `GLOBAL_MARKET_INTERVAL_MS` | `60000` | Frecuencia contexto global |
 
@@ -130,6 +137,8 @@ npm run start
 - `POST /api/reset`
 - `GET /events`
 
+`POST /api/control` acepta `mode`, `autoExecution`, `activeExchanges` y `volatilityShock`. Cambiar `activeExchanges` reinicia streams/libros temporales, pero conserva P&L realizado, conteos, ejecuciones e historial detectado de la sesion. `volatilityShock` inyecta una prueba controlada y activa el circuit breaker como validacion visual.
+
 ## Interpretacion Rapida de Estados
 
 - `blocked`: Aurelion vio una divergencia bruta, pero no la ejecuta porque no pasa tamano minimo, profundidad, balance o compuertas de riesgo. No es un error.
@@ -140,12 +149,14 @@ npm run start
 - `REST`: un stream WebSocket fallo 5 veces y ese par entro en polling REST temporalmente. Aurelion intenta volver a WebSocket despues de `REST_RECOVERY_ATTEMPT_MS`.
 - `Book Age`: frescura del ultimo order book recibido. Es mejor para leer la UI que la latencia de update de CCXT, porque algunos exchanges publican updates mas lento aunque la conexion este sana.
 - `Best Edge`: mejor edge neto detectado en bps despues de fees, slippage, latencia estimada y rebalanceo. No es el spread bruto.
+- `Closest miss`: cuando no hay oportunidad rentable, muestra cuantos bps faltaron para que la mejor ruta observada cubriera costos. No se presenta como edge negativo.
+- `Detection Tape`: historial reciente retenido de oportunidades ya rankeadas. Las marcas `detected now` muestran que la oportunidad fue identificada en el tick actual, no despues de ejecutarse.
 
 ## Auto/Live vs Demo
 
 Es normal ver menos operaciones rentables en `auto` o `live`. En mercado real los arbitrajes netos duran poco, y al descontar comisiones, slippage y latencia muchas oportunidades quedan `rejected` o `blocked`. `demo` inyecta shocks controlados para probar la experiencia, incluyendo fills parciales.
 
-Para evaluaciones de latencia, usa `ACTIVE_EXCHANGES=binance,okx,bybit,kucoin,kraken` como perfil rapido. Para demostrar cobertura global, deja la variable vacia y Aurelion monitorea todos los exchanges configurados.
+Para evaluaciones de latencia, el default usa el perfil rapido `okx,bybit,kucoin,kraken,bitstamp`. Binance queda en el catalogo porque es relevante, pero no se activa por default en este entorno porque puede bloquear `exchangeInfo` segun red/region. Para demostrar cobertura global, usa `ACTIVE_EXCHANGES=all` y Aurelion monitorea los 10 exchanges configurados; la UI mantiene visible el universo completo aun cuando solo opera el perfil rapido.
 
 ## Deploy
 

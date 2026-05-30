@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 import uuid
+from statistics import median
 
 from backend.app.core.config import Settings
 
@@ -23,9 +24,17 @@ class RiskManager:
         self.price_window: list[dict[str, float]] = []
         self.pending_events: list[dict] = []
         self.last_volatility_trigger = 0
+        self.last_condition = "healthy"
 
     def set_auto_execution(self, enabled: bool) -> None:
         self.auto_execution = enabled
+
+    def reset_market_window(self) -> None:
+        self.price_window.clear()
+        self.last_volatility_trigger = 0
+        if self.paused_until <= now_ms():
+            self.last_reason = "Healthy"
+            self.last_condition = "healthy"
 
     def evaluate_market(self, books: list[dict], current_ms: int | None = None) -> None:
         current_ms = current_ms or now_ms()
@@ -42,7 +51,7 @@ class RiskManager:
             )
             return
 
-        mid = sum((book["bestAsk"] + book["bestBid"]) / 2 for book in books) / len(books)
+        mid = median((book["bestAsk"] + book["bestBid"]) / 2 for book in books)
         self.price_window.append({"time": current_ms, "price": mid})
         self.price_window = [
             point for point in self.price_window
@@ -100,6 +109,7 @@ class RiskManager:
             return
         self.paused_until = current_ms + self.settings.pause_after_loss_ms
         self.last_reason = reason
+        self.last_condition = condition
         self.pending_events.append({
             "id": f"CB-{uuid.uuid4().hex[:10]}",
             "type": "circuit-breaker",
@@ -124,6 +134,9 @@ class RiskManager:
             "paused": current_ms < self.paused_until,
             "pausedUntil": self.paused_until,
             "reason": self.last_reason if current_ms < self.paused_until else "Healthy",
+            "condition": self.last_condition if current_ms < self.paused_until else "healthy",
+            "pausedFor": self.last_condition if current_ms < self.paused_until else "",
+            "cooldownRemainingMs": max(0, self.paused_until - current_ms),
             "volatilityWindowPoints": len(self.price_window),
             "volatilityThresholdPct": self.settings.max_volatility_pct,
             "volatilityMinSamples": self.settings.volatility_min_samples,

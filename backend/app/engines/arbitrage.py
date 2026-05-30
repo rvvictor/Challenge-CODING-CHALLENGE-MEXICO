@@ -46,23 +46,27 @@ class CrossExchangeArbitrageEngine:
         buy_wallet = self.ledger.get(buy_book.exchange_id)
         sell_wallet = self.ledger.get(sell_book.exchange_id)
         wallet_qty = min(float(sell_wallet["BTC"]), (float(buy_wallet["USDT"]) * 0.985) / ask.price)
-        target_qty = min(self.settings.max_trade_btc, depth_qty(buy_book.asks), depth_qty(sell_book.bids), wallet_qty)
+        buy_depth = depth_qty(buy_book.asks)
+        sell_depth = depth_qty(sell_book.bids)
+        target_qty = min(self.settings.max_trade_btc, buy_depth, sell_depth, wallet_qty)
 
         if target_qty < self.settings.min_trade_btc:
+            gross_bps = ((bid.price - ask.price) / ask.price) * 10000
+            blocked_reason = "Insufficient wallet inventory" if wallet_qty < self.settings.min_trade_btc else "Insufficient book depth"
             return Opportunity(
                 id=f"{current}-{buy_book.exchange_id}-{sell_book.exchange_id}-blocked",
                 strategy="simple",
                 time=current,
-                score=-1,
+                score=0,
                 status="blocked",
                 net_profit=0,
                 net_bps=0,
                 gross_profit=0,
-                gross_bps=((bid.price - ask.price) / ask.price) * 10000,
+                gross_bps=rounded(gross_bps, 3),
                 confidence=0,
-                partial=True,
+                partial=target_qty > 0,
                 source="mixed",
-                reason="Insufficient wallet balance or book depth",
+                reason=blocked_reason,
                 product=buy_book.symbol,
                 data={
                     "buyExchangeId": buy_book.exchange_id,
@@ -74,8 +78,9 @@ class CrossExchangeArbitrageEngine:
                     "filledRatio": rounded(target_qty / self.settings.max_trade_btc, 4) if self.settings.max_trade_btc else 0,
                     "buyPrice": ask.price,
                     "sellPrice": bid.price,
-                    "buyDepthBtc": rounded(depth_qty(buy_book.asks), 8),
-                    "sellDepthBtc": rounded(depth_qty(sell_book.bids), 8),
+                    "buyDepthBtc": rounded(buy_depth, 8),
+                    "sellDepthBtc": rounded(sell_depth, 8),
+                    "walletQtyBtc": rounded(wallet_qty, 8),
                 },
             )
 
@@ -147,8 +152,9 @@ class CrossExchangeArbitrageEngine:
                 "bestBid": bid.price,
                 "grossSpread": rounded(bid.price - ask.price, 2),
                 "fills": {"buyLevels": buy_fill.level_count, "sellLevels": sell_fill.level_count},
-                "buyDepthBtc": rounded(depth_qty(buy_book.asks), 8),
-                "sellDepthBtc": rounded(depth_qty(sell_book.bids), 8),
+                "buyDepthBtc": rounded(buy_depth, 8),
+                "sellDepthBtc": rounded(sell_depth, 8),
+                "walletQtyBtc": rounded(wallet_qty, 8),
                 "latencies": {"buyMs": buy_book.latency_ms, "sellMs": sell_book.latency_ms},
             },
         )

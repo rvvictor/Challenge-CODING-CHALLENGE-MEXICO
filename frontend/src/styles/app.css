@@ -14,6 +14,7 @@
   --amber-soft: #fff0cb;
   --blue: #1f6f96;
   --blue-soft: #dbeef6;
+  --galaxy: #102a56;
   --violet: #6057ba;
   --shadow: 0 20px 60px rgba(34, 43, 38, 0.11);
 }
@@ -62,8 +63,9 @@ button {
   place-items: center;
   border: 1px solid rgba(17, 24, 22, 0.72);
   border-radius: 8px;
-  background: #f4c65a;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
+  background: var(--galaxy);
+  color: #d9f1ff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
 }
 
 h1,
@@ -102,6 +104,7 @@ small,
 
 .conn,
 .toggle,
+.stressButton,
 .iconButton,
 .segmented {
   min-height: 38px;
@@ -111,7 +114,8 @@ small,
 }
 
 .conn,
-.toggle {
+.toggle,
+.stressButton {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -143,7 +147,8 @@ small,
 
 .segmented button,
 .iconButton,
-.toggle {
+.toggle,
+.stressButton {
   cursor: pointer;
   color: var(--ink);
 }
@@ -170,6 +175,12 @@ small,
 .toggle.on {
   border-color: rgba(13, 125, 103, 0.34);
   background: var(--green-soft);
+}
+
+.stressButton {
+  border-color: rgba(184, 122, 8, 0.36);
+  background: var(--amber-soft);
+  font-weight: 850;
 }
 
 .iconButton {
@@ -346,11 +357,17 @@ small,
 
 .micro {
   display: grid;
-  grid-template-columns: 1fr minmax(74px, auto) minmax(74px, auto);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 7px;
   margin-top: 15px;
   color: var(--muted);
   font-size: 12px;
+  line-height: 1.35;
+}
+
+.micro span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .table {
@@ -413,6 +430,19 @@ small,
   min-width: 0;
 }
 
+.liveStamp {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.liveStamp.on {
+  color: var(--green);
+}
+
 .cyclePath {
   display: flex !important;
   flex-wrap: wrap;
@@ -432,12 +462,26 @@ small,
 }
 
 .badge.profitable,
+.badge.profitable-partial,
 .badge.filled,
 .badge.partial-fill,
 .badge.partial-cycle,
+.badge.triangular,
+.badge.triangular-partial,
 .stream em.ws {
   color: var(--green);
   background: var(--green-soft);
+}
+
+.badge.profitable-partial,
+.badge.triangular-partial {
+  color: #0f5f8e;
+  background: var(--blue-soft);
+}
+
+.badge.triangular {
+  color: var(--blue);
+  background: var(--blue-soft);
 }
 
 .badge.rejected,
@@ -447,6 +491,11 @@ small,
 }
 
 .badge.blocked {
+  color: var(--red);
+  background: var(--red-soft);
+}
+
+.stream em.disabled {
   color: var(--red);
   background: var(--red-soft);
 }
@@ -461,7 +510,8 @@ small,
 .wallets,
 .tradeList,
 .streamList,
-.partialList {
+.partialList,
+.historyList {
   display: grid;
   gap: 10px;
   padding: 13px;
@@ -477,7 +527,8 @@ small,
 .wallets article,
 .tradeList article,
 .stream,
-.partialList article {
+.partialList article,
+.historyItem {
   display: grid;
   gap: 4px;
   padding: 12px;
@@ -490,6 +541,14 @@ small,
 .tradeList article {
   grid-template-columns: 1fr auto;
   align-items: center;
+}
+
+.tradeTop {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }
 
 .wallets small,
@@ -555,10 +614,92 @@ small,
   background: var(--green);
 }
 
+.historyToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 13px;
+  border-bottom: 1px solid var(--line);
+  background: #fcfdf9;
+}
+
+.historyToolbar button {
+  min-height: 30px;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--paper);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.historyToolbar button.active {
+  border-color: rgba(13, 125, 103, 0.34);
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.historyList {
+  max-height: 520px;
+  overflow: auto;
+  align-content: start;
+}
+
+.historyItem {
+  grid-template-columns: minmax(220px, 1.25fr) minmax(120px, 0.55fr) minmax(130px, 0.55fr);
+  align-items: center;
+}
+
+.historyEdge,
+.historyMeta {
+  display: grid;
+  gap: 3px;
+}
+
 .globalGrid {
   display: grid;
   gap: 10px;
   padding: 13px;
+}
+
+.coverageGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 13px;
+}
+
+.coverageGrid button {
+  display: grid;
+  gap: 2px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fcfdf9;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+
+.coverageGrid button.active {
+  border-color: rgba(31, 111, 150, 0.42);
+  background: var(--blue-soft);
+}
+
+.coverageGrid button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.coverageGrid b {
+  font-size: 13px;
+}
+
+.coverageGrid span {
+  color: var(--muted);
+  font-size: 11px;
 }
 
 .globalGrid article {
@@ -663,6 +804,7 @@ small,
   .segmented,
   .conn,
   .toggle,
+  .stressButton,
   .iconButton {
     width: 100%;
   }
@@ -674,5 +816,9 @@ small,
   .panelTitle {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .historyItem {
+    grid-template-columns: 1fr;
   }
 }

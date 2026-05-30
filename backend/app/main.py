@@ -70,16 +70,22 @@ async def config() -> dict:
         },
         "redis": {"enabled": settings.redis_enabled, "namespace": settings.redis_namespace},
         "exchanges": [exchange.__dict__ for exchange in settings.exchanges],
+        "exchangeUniverse": [exchange.__dict__ for exchange in settings.exchange_universe],
+        "exchangeProfile": settings.active_exchanges or "all",
     }
 
 
 @app.post("/api/control")
 async def control(request: Request) -> dict:
     body = await request.json()
+    if "activeExchanges" in body and isinstance(body["activeExchanges"], list):
+        await market_service.set_active_exchanges(body["activeExchanges"])
     if "autoExecution" in body:
         market_service.set_auto_execution(bool(body["autoExecution"]))
     if "mode" in body:
         await market_service.set_mode(str(body["mode"]))
+    if body.get("volatilityShock"):
+        await market_service.trigger_volatility_stress()
     return market_service.snapshot()
 
 

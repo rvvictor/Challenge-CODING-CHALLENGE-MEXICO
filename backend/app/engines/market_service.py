@@ -5,7 +5,7 @@ import json
 import time
 from collections.abc import AsyncIterator
 
-from backend.app.core.config import Settings, settings
+from backend.app.core.config import Settings, select_exchanges, settings
 from backend.app.core.models import OrderBook
 from backend.app.engines.arbitrage import CrossExchangeArbitrageEngine
 from backend.app.engines.event_store import EventStore
@@ -92,11 +92,55 @@ class MarketService:
         self.mode = mode
         self.books.clear()
         self.degraded_demo = False
+        self.risk.reset_market_window()
         if self.stream_provider:
             await self.stream_provider.stop()
             self.stream_provider = None
         if mode != "demo":
             await self.start_streams()
+
+    async def set_active_exchanges(self, exchange_ids: list[str]) -> None:
+        profile = ",".join(str(exchange_id).strip().lower() for exchange_id in exchange_ids if str(exchange_id).strip())
+        selected = select_exchanges(self.settings.exchange_universe, profile, max_count=5)
+        if len(selected) < 2:
+            return
+        if [exchange.id for exchange in selected] == [exchange.id for exchange in self.settings.exchanges]:
+            return
+
+        if self.stream_provider:
+            await self.stream_provider.stop()
+            self.stream_provider = None
+
+        object.__setattr__(self.settings, "exchanges", tuple(selected))
+        object.__setattr__(self.settings, "active_exchanges", ",".join(exchange.id for exchange in selected))
+        self.rebuild_runtime_state(preserve_performance=True)
+        if self.mode != "demo":
+            await self.start_streams()
+
+    async def trigger_volatility_stress(self) -> None:
+        current = now_ms()
+        if self.mode == "demo" or self.degraded_demo:
+            self.simulator.inject_volatility_stress()
+        requested = {
+            "id": f"ST-{current}",
+            "type": "stress-test",
+            "time": current,
+            "condition": "volatility-test",
+            "reason": "Manual volatility stress test requested",
+            "metadata": {"changePct": 3.2, "source": "dashboard"},
+        }
+        self.store.add_event(requested)
+        await self.redis.publish("risk", requested)
+        self.risk.activate(
+            "volatility",
+            "Stress test: BTC volatility 3.20% in <1s",
+            current,
+            {"changePct": 3.2, "windowMs": 1000, "stressTest": True},
+        )
+        self.flush_risk_events()
+        snapshot = self.snapshot()
+        await self.redis.publish("snapshots", snapshot)
+        self.broadcast(snapshot)
 
     def set_auto_execution(self, enabled: bool) -> None:
         self.risk.set_auto_execution(enabled)
@@ -107,6 +151,25 @@ class MarketService:
         self.risk.reset()
         self.executor.reset()
         self.started_at = now_ms()
+
+    def rebuild_runtime_state(self, preserve_performance: bool = True) -> None:
+        self.books.clear()
+        self.last_scan = []
+        self.last_executions = []
+        self.degraded_demo = False
+        self.simulator = SimulatedMarket(self.settings.exchanges)
+        if preserve_performance:
+            self.ledger.sync_exchanges(self.settings.exchanges)
+            self.risk.reset_market_window()
+        else:
+            self.store.reset()
+            self.ledger = WalletLedger(self.settings)
+            self.risk.reset()
+            self.started_at = now_ms()
+        self.cross_engine = CrossExchangeArbitrageEngine(self.settings, self.ledger)
+        self.triangular_engine = TriangularArbitrageEngine(self.settings, self.ledger)
+        self.queue = OpportunityQueue()
+        self.executor = ExecutionSimulator(self.settings, self.ledger, self.store, self.risk)
 
     async def loop(self) -> None:
         while True:
@@ -127,7 +190,7 @@ class MarketService:
         ranked = self.queue.rank(opportunities)
         self.last_scan = ranked
         if ranked:
-            self.store.add_opportunities(ranked[:30])
+            self.store.add_opportunities(ranked)
 
         self.last_executions = self.executor.try_execute(ranked, summaries)
         for trade in self.last_executions:
@@ -144,6 +207,7 @@ class MarketService:
             asyncio.create_task(self.redis.publish("risk", event))
 
     def generate_demo_books(self) -> None:
+        self.simulator.advance(self.settings.exchanges)
         for exchange in self.settings.exchanges:
             for symbol in dict.fromkeys((exchange.primary_symbol, *exchange.triangular_symbols)):
                 previous = self.books.get(f"{exchange.id}:{symbol}")
@@ -160,6 +224,7 @@ class MarketService:
         for book in books:
             ask = best(book.asks, "ask")
             bid = best(book.bids, "bid")
+            raw_age = current - book.timestamp
             summaries.append({
                 "exchangeId": book.exchange_id,
                 "exchangeName": book.exchange_name,
@@ -177,7 +242,8 @@ class MarketService:
                 "confidence": book.confidence,
                 "latencyMs": book.latency_ms,
                 "timestamp": book.timestamp,
-                "ageMs": current - book.timestamp,
+                "ageMs": max(0, raw_age),
+                "clockSkewMs": max(0, -raw_age),
                 "error": book.error,
             })
         return summaries
@@ -192,7 +258,8 @@ class MarketService:
                 "symbol": book.symbol,
                 "source": book.source,
                 "timestamp": book.timestamp,
-                "ageMs": current - book.timestamp,
+                "ageMs": max(0, current - book.timestamp),
+                "clockSkewMs": max(0, book.timestamp - current),
             }
             for book in self.books.values()
             if not book.primary
@@ -206,6 +273,10 @@ class MarketService:
         p95_index = min(len(book_ages) - 1, int(len(book_ages) * 0.95)) if book_ages else 0
         p95_freshness = book_ages[p95_index] if book_ages else 0
         latest = self.store.latest_opportunities()
+        opportunity_history = self.store.latest_opportunities(260)
+        current_scan = self.last_scan or latest[:40]
+        executable_edges = [item.get("netBps", 0) for item in current_scan if item.get("status") == "profitable"]
+        observed_edges = [item.get("netBps", 0) for item in current_scan if item.get("status") != "blocked"]
         return {
             "now": current,
             "botName": self.settings.app_name,
@@ -216,10 +287,11 @@ class MarketService:
             "books": books,
             "triangularBooks": triangular_books,
             "opportunities": latest,
+            "opportunityHistory": opportunity_history,
             "queuedOpportunities": self.last_scan[:40],
             "trades": trades,
-            "wallets": self.ledger.all(),
-            "totals": self.ledger.totals(mark_price),
+            "wallets": self.ledger.active(self.settings.exchanges),
+            "totals": self.ledger.totals(mark_price, self.settings.exchanges),
             "pnlSeries": self.store.pnl_series,
             "risk": self.risk.snapshot(current),
             "riskEvents": self.store.latest_events(),
@@ -227,6 +299,13 @@ class MarketService:
             "globalMarket": self.global_market.snapshot(),
             "streams": self.stream_provider.snapshot() if self.stream_provider else {"available": False, "unavailableReason": "Demo mode", "streams": []},
             "queue": self.queue.snapshot(),
+            "exchangeCoverage": {
+                "active": [exchange.__dict__ for exchange in self.settings.exchanges],
+                "universe": [exchange.__dict__ for exchange in self.settings.exchange_universe],
+                "activeCount": len(self.settings.exchanges),
+                "universeCount": len(self.settings.exchange_universe),
+                "profile": self.settings.active_exchanges or "all",
+            },
             "diagnostics": {
                 "blockedMeaning": "Spread exists, but Aurelion skipped it because size, balance, depth, or risk gates were not good enough.",
                 "redisMeaning": "Redis is optional Pub/Sub. Disabled means no REDIS_URL is configured; the dashboard still uses SSE.",
@@ -242,6 +321,7 @@ class MarketService:
                 "profitableCount": self.store.profitable_count,
                 "blockedCount": self.store.blocked_count,
                 "partialCount": self.store.partial_count,
+                "fullCount": max(0, self.store.executed_count - self.store.partial_count),
                 "executedSimpleCount": self.store.executed_simple_count,
                 "executedTriangularCount": self.store.executed_triangular_count,
                 "cumulativePnl": self.ledger.realized_pnl,
@@ -255,7 +335,14 @@ class MarketService:
                 "liveBooks": sum(1 for book in books if book["source"] == "websocket"),
                 "restBooks": sum(1 for book in books if book["source"] == "rest"),
                 "simulatedBooks": sum(1 for book in books if book["source"] == "simulated"),
-                "bestNetBps": max([item.get("netBps", 0) for item in latest[:20]] or [0]),
+                "bestNetBps": max([0, *executable_edges]),
+                "bestObservedNetBps": max(observed_edges or [0]),
+                "nearMissCount": sum(1 for item in current_scan if item.get("status") == "rejected" and item.get("netBps", 0) > -10),
+                "partialQueuedCount": sum(1 for item in current_scan if item.get("partial")),
+                "historyRetainedCount": len(self.store.opportunities),
+                "tradeRetainedCount": len(self.store.trades),
+                "opportunityHistoryCapacity": self.store.opportunities_limit,
+                "liveSignalCount": sum(1 for item in current_scan if current - item.get("time", 0) <= 1500),
                 "maxTradeBtc": self.settings.max_trade_btc,
                 "triangularQuoteSize": self.settings.triangular_quote_size,
             },

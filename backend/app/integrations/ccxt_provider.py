@@ -14,7 +14,9 @@ EventCallback = Callable[[dict], Awaitable[None]]
 
 
 VALID_ORDER_BOOK_LIMITS = {
+    "bitfinex": (25, 100),
     "bybit": (1, 50, 200, 1000),
+    "kraken": (10, 25, 100, 500, 1000),
     "kucoin": (5, 20, 50, 100),
 }
 
@@ -86,6 +88,8 @@ class CcxtStreamProvider:
                 "lastUpdate": 0,
                 "lastError": "",
                 "restStartedAt": 0,
+                "restFailures": 0,
+                "disabledReason": "",
             }
         return self.states[key]
 
@@ -122,6 +126,7 @@ class CcxtStreamProvider:
                 orderbook = await watch(symbol, self.order_book_limit(exchange))
                 latency_ms = max(1, round((time.perf_counter() - started) * 1000))
                 state["failures"] = 0
+                state["restFailures"] = 0
                 state["updates"] += 1
                 state["lastUpdate"] = int(time.time() * 1000)
                 state["lastError"] = ""
@@ -149,11 +154,18 @@ class CcxtStreamProvider:
                 orderbook = await client.fetch_order_book(symbol, self.order_book_limit(exchange))
                 latency_ms = max(1, round((time.perf_counter() - started) * 1000))
                 state["updates"] += 1
+                state["restFailures"] = 0
                 state["lastUpdate"] = int(time.time() * 1000)
                 self.on_book(self.normalize(exchange, symbol, orderbook, "rest", latency_ms))
             except Exception as exc:
+                state["restFailures"] += 1
                 state["lastError"] = str(exc)
                 await self.emit("rest-error", {"exchange": exchange.name, "symbol": symbol, "reason": str(exc)})
+                if state["restFailures"] >= 3:
+                    state["mode"] = "disabled"
+                    state["disabledReason"] = f"REST fallback failed {state['restFailures']} times"
+                    await self.emit("stream-disabled", {"exchange": exchange.name, "symbol": symbol, "reason": state["disabledReason"], "lastError": str(exc)})
+                    return
             if int(time.time() * 1000) - state["restStartedAt"] >= self.settings.rest_recovery_attempt_ms:
                 state["mode"] = "websocket"
                 state["failures"] = 0
@@ -203,7 +215,9 @@ class CcxtStreamProvider:
                     "updates": state["updates"],
                     "lastUpdate": state["lastUpdate"],
                     "lastError": state["lastError"],
+                    "disabledReason": state["disabledReason"],
                     "restFallback": state["mode"] == "rest",
+                    "disabled": state["mode"] == "disabled",
                 }
                 for state in self.states.values()
             ],

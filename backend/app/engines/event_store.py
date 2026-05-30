@@ -2,7 +2,7 @@ from __future__ import annotations
 
 
 class EventStore:
-    def __init__(self, opportunities_limit: int = 900, trades_limit: int = 350, pnl_limit: int = 500, event_limit: int = 250):
+    def __init__(self, opportunities_limit: int = 5000, trades_limit: int = 1000, pnl_limit: int = 1500, event_limit: int = 500):
         self.opportunities_limit = opportunities_limit
         self.trades_limit = trades_limit
         self.pnl_limit = pnl_limit

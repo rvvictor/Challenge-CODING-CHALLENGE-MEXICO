@@ -12,31 +12,51 @@ class SimulatedMarket:
     def __init__(self, exchanges: tuple[ExchangeConfig, ...]):
         self.random = random.Random(71021)
         self.tick = 0
+        self.book_tick = 0
+        self.global_btc = 70000.0
+        self.global_eth_btc = 0.052
         self.state: dict[str, dict[str, float]] = {}
         self.shock: dict | None = None
+        self.volatility_stress_until = 0
         for index, exchange in enumerate(exchanges):
-            self.state[f"{exchange.id}:BTC"] = {"mid": 70000 + index * 22, "drift": self.random.uniform(-3, 3), "liq": self.random.uniform(0.7, 1.35)}
-            self.state[f"{exchange.id}:ETHBTC"] = {"mid": 0.052 + index * 0.00003, "drift": self.random.uniform(-0.00002, 0.00002), "liq": self.random.uniform(8, 26)}
+            self.state[f"{exchange.id}:BTC"] = {"basis_bps": (index - len(exchanges) / 2) * 0.35, "liq": self.random.uniform(0.7, 1.35)}
+            self.state[f"{exchange.id}:ETHBTC"] = {"basis_bps": (index - len(exchanges) / 2) * 0.22, "liq": self.random.uniform(8, 26)}
+
+    def advance(self, exchanges: tuple[ExchangeConfig, ...]) -> None:
+        self.tick += 1
+        if self.tick < self.volatility_stress_until:
+            self.global_btc *= 1 + self.random.uniform(-8.0, 8.0) / 10000
+        else:
+            self.global_btc *= 1 + self.random.uniform(-0.65, 0.65) / 10000
+        self.global_eth_btc *= 1 + self.random.uniform(-0.35, 0.35) / 10000
+        self.maybe_shock(exchanges)
+
+    def inject_volatility_stress(self, change_pct: float = 3.2, duration_ticks: int = 18) -> None:
+        direction = 1 if self.random.random() >= 0.5 else -1
+        self.global_btc *= 1 + direction * change_pct / 100
+        self.volatility_stress_until = self.tick + duration_ticks
 
     def maybe_shock(self, exchanges: tuple[ExchangeConfig, ...]) -> None:
         if self.shock and self.shock["until"] > self.tick:
             return
-        if self.tick % 9 == 0:
+        if self.tick % 18 == 0:
             cheap = self.random.choice(exchanges).id
             rich = self.random.choice(exchanges).id
             if rich == cheap:
                 rich = exchanges[(list(exchange.id for exchange in exchanges).index(rich) + 1) % len(exchanges)].id
             self.shock = {
+                "started": self.tick,
                 "cheap": cheap,
                 "rich": rich,
-                "cheap_bps": self.random.uniform(-18, -7),
-                "rich_bps": self.random.uniform(7, 20),
-                "until": self.tick + 4,
+                "cheap_bps": self.random.uniform(-38, -24),
+                "rich_bps": self.random.uniform(24, 42),
+                "until": self.tick + 8,
             }
 
     def generate(self, exchange: ExchangeConfig, exchanges: tuple[ExchangeConfig, ...], symbol: str, anchor_mid: float | None = None) -> OrderBook:
-        self.tick += 1
-        self.maybe_shock(exchanges)
+        self.book_tick += 1
+        if self.tick == 0:
+            self.advance(exchanges)
         kind = "ETHBTC" if "ETH/BTC" in symbol else "ETHQUOTE" if "ETH/" in symbol else "BTC"
         state_key = f"{exchange.id}:ETHBTC" if kind == "ETHBTC" else f"{exchange.id}:BTC"
         state = self.state[state_key]
@@ -44,39 +64,37 @@ class SimulatedMarket:
         eth_btc_state = self.state[f"{exchange.id}:ETHBTC"]
 
         if kind == "ETHBTC":
-            state["mid"] = max(0.035, state["mid"] + self.random.uniform(-0.00008, 0.00008) + state["drift"])
-            mid = state["mid"]
+            mid = self.global_eth_btc * (1 + (state["basis_bps"] + self.random.uniform(-0.25, 0.25)) / 10000)
         elif kind == "ETHQUOTE":
-            mid = btc_state["mid"] * eth_btc_state["mid"] * (1 + self.random.uniform(-8, 8) / 10000)
+            basis_bps = btc_state["basis_bps"] + eth_btc_state["basis_bps"]
+            mid = self.global_btc * self.global_eth_btc * (1 + (basis_bps + self.random.uniform(-0.55, 0.55)) / 10000)
         else:
-            anchor = anchor_mid if anchor_mid else state["mid"]
-            state["mid"] = anchor * 0.985 + (state["mid"] + self.random.uniform(-18, 18) + state["drift"]) * 0.015
-            mid = state["mid"]
+            mid = self.global_btc * (1 + (state["basis_bps"] + self.random.uniform(-0.45, 0.45)) / 10000)
 
         if self.shock and self.shock["cheap"] == exchange.id:
             mid *= 1 + self.shock["cheap_bps"] / 10000
         if self.shock and self.shock["rich"] == exchange.id:
             mid *= 1 + self.shock["rich_bps"] / 10000
 
-        spread_bps = self.random.uniform(4, 12) if kind == "ETHBTC" else self.random.uniform(2.5, 8.5)
+        spread_bps = self.random.uniform(4, 12) if kind == "ETHBTC" else self.random.uniform(1.4, 5.2)
         half_spread = mid * spread_bps / 20000
         asks: list[Level] = []
         bids: list[Level] = []
+        book_liquidity_crunch = (
+            kind == "BTC"
+            and self.shock
+            and exchange.id in {self.shock["cheap"], self.shock["rich"]}
+            and (self.tick - self.shock["started"] in {1, 2, 3, 5} or self.random.random() < 0.18)
+        )
         for i in range(20):
             gap = i * self.random.uniform(0.000004, 0.000018) if kind == "ETHBTC" else i * self.random.uniform(2, 8)
-            liquidity_crunch = (
-                kind == "BTC"
-                and self.shock
-                and exchange.id in {self.shock["cheap"], self.shock["rich"]}
-                and self.tick % 7 in {0, 1, 2}
-            )
             qty = (
                 self.random.uniform(0.4, 8) * (eth_btc_state["liq"] / 12) * (1 + i / 12)
                 if kind in {"ETHBTC", "ETHQUOTE"}
-                else self.random.uniform(0.012, 0.42) * state["liq"] * (1 + i / 12)
+                else self.random.uniform(0.006, 0.18) * state["liq"] * (1 + i / 12)
             )
-            if liquidity_crunch:
-                qty = self.random.uniform(0.00035, 0.0018)
+            if book_liquidity_crunch:
+                qty = self.random.uniform(0.00012, 0.0009)
             decimals = 8 if kind == "ETHBTC" else 2
             asks.append(Level(round(mid + half_spread + gap, decimals), round(qty, 6)))
             bids.append(Level(round(mid - half_spread - gap, decimals), round(qty * self.random.uniform(0.85, 1.18), 6)))

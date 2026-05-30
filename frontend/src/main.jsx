@@ -1,6 +1,6 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
-import { Activity, ArrowRightLeft, ChartNoAxesCombined, CirclePause, DatabaseZap, Gauge, Globe2, Network, Power, Radar, RefreshCw, ShieldAlert, Sparkles, Split, Triangle } from "lucide-react";
+import { Activity, ArrowRightLeft, ChartNoAxesCombined, CirclePause, Clock3, DatabaseZap, Gauge, Globe2, ListChecks, Network, Power, Radar, RefreshCw, ShieldAlert, Sparkles, Split, Triangle, Zap } from "lucide-react";
 import "./styles/app.css";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "";
@@ -32,9 +32,14 @@ function clampRatio(value) {
 }
 
 function ago(ms) {
-  if (ms < 1000) return "now";
-  if (ms < 60000) return `${Math.round(ms / 1000)}s`;
-  return `${Math.round(ms / 60000)}m`;
+  const value = Math.max(0, Number(ms) || 0);
+  if (value < 1000) return "now";
+  if (value < 60000) return `${Math.round(value / 1000)}s`;
+  return `${Math.round(value / 60000)}m`;
+}
+
+function signalAge(item, now) {
+  return ago((now || Date.now()) - (item?.time || now || Date.now()));
 }
 
 function useAurelion() {
@@ -127,6 +132,10 @@ function Header({ snapshot, connected, control, reset }) {
           {risk?.autoExecution ? <Power size={16} /> : <CirclePause size={16} />}
           {risk?.autoExecution ? "armed" : "paused"}
         </button>
+        <button className="stressButton" title="Simulate volatility circuit breaker" onClick={() => control({ volatilityShock: true })}>
+          <Zap size={16} />
+          stress
+        </button>
         <button className="iconButton" title="Reset session" onClick={reset}><RefreshCw size={17} /></button>
       </div>
     </header>
@@ -136,18 +145,27 @@ function Header({ snapshot, connected, control, reset }) {
 function Overview({ snapshot }) {
   const metrics = snapshot.metrics;
   const risk = snapshot.risk;
-  const stateLabel = risk.paused ? "cooldown" : risk.autoExecution ? "armed" : "manual";
-  const stateNote = risk.paused ? `${risk.reason} / ${ago(Math.max(0, risk.pausedUntil - snapshot.now))} left` : risk.reason;
-  const freshness = metrics.avgFreshnessMs ?? metrics.avgLatencyMs;
+  const stateLabel = risk.paused ? "circuit breaker" : risk.autoExecution ? "armed" : "manual stop";
+  const condition = risk.condition && risk.condition !== "healthy" ? risk.condition : "healthy";
+  const stateNote = risk.paused
+    ? `${condition} / ${risk.reason} / resumes in ${ago(risk.cooldownRemainingMs ?? risk.pausedUntil - snapshot.now)}`
+    : risk.reason;
+  const freshness = Math.max(0, metrics.avgFreshnessMs ?? metrics.avgLatencyMs);
+  const bestEdge = metrics.bestNetBps > 0 ? `${formatNumber(metrics.bestNetBps, 2)} bps` : "No edge";
+  const observed = metrics.bestNetBps > 0
+    ? `${snapshot.queue.executable} executable`
+    : metrics.bestObservedNetBps < 0
+      ? `closest miss ${formatNumber(Math.abs(metrics.bestObservedNetBps), 2)} bps short`
+      : "waiting for complete books";
   return (
     <section className="overview">
       <Metric icon={ChartNoAxesCombined} label="Realized P&L" value={formatMoney(metrics.cumulativePnl)} note={`${metrics.executedCount} fills`} tone={metrics.cumulativePnl >= 0 ? "good" : "bad"} />
       <Metric icon={ShieldAlert} label="State" value={stateLabel} note={stateNote} tone={risk.paused || !risk.autoExecution ? "bad" : "good"} />
-      <Metric icon={Radar} label="Best Edge" value={`${formatNumber(metrics.bestNetBps, 2)} bps`} note={`${snapshot.queue.executable} executable after costs`} />
-      <Metric icon={ArrowRightLeft} label="Detected" value={compact.format(metrics.detectedCount)} note={`${compact.format(metrics.triangularCount)} triangular`} />
+      <Metric icon={Radar} label="Best Edge" value={bestEdge} note={observed} />
+      <Metric icon={ArrowRightLeft} label="Detected" value={compact.format(metrics.detectedCount)} note={`${metrics.liveSignalCount || 0} live now / ${compact.format(metrics.triangularCount)} triangular`} />
       <Metric icon={Network} label="Books" value={`${metrics.liveBooks} WS / ${metrics.restBooks} REST`} note={`${metrics.simulatedBooks} demo`} />
-      <Metric icon={Split} label="Partial Fills" value={compact.format(metrics.partialCount || 0)} note={`${metrics.blockedCount || 0} blocked`} />
-      <Metric icon={Gauge} label="Book Age" value={`${Math.round(freshness)} ms`} note={`p95 ${Math.round(metrics.p95FreshnessMs || freshness)} ms / ${metrics.fastBooks || 0} fast`} tone={(metrics.staleBooks || 0) > 0 ? "bad" : "neutral"} />
+      <Metric icon={Split} label="Partial Fills" value={compact.format(metrics.partialCount || 0)} note={`${metrics.partialQueuedCount || 0} queued candidates`} />
+      <Metric icon={Gauge} label="Book Age" value={`${Math.round(freshness)} ms`} note={`p95 ${Math.max(0, Math.round(metrics.p95FreshnessMs || freshness))} ms / ${metrics.fastBooks || 0} fast`} tone={(metrics.staleBooks || 0) > 0 ? "bad" : "neutral"} />
     </section>
   );
 }
@@ -219,7 +237,27 @@ function opportunityTarget(item) {
   return `target ${formatBtc(item.targetQtyBtc || item.qtyBtc)}`;
 }
 
-function OpportunityTable({ opportunities, queue = {} }) {
+function statusClass(item) {
+  if (item.status === "profitable" && item.partial) return "profitable-partial";
+  if (item.status === "profitable") return "profitable";
+  return item.status;
+}
+
+function statusLabel(item) {
+  if (item.status === "profitable" && item.partial) return "profitable partial";
+  if (item.status === "profitable") return "profitable full";
+  if (item.status === "blocked") return "inventory gate";
+  return item.status;
+}
+
+function statusHelp(item) {
+  if (item.status === "profitable" && item.partial) return `${formatPercent(clampRatio(item.filledRatio))} target liquidity`;
+  if (item.status === "profitable") return "full target executable";
+  if (item.status === "blocked") return item.reason || "insufficient inventory/depth";
+  return item.reason;
+}
+
+function OpportunityTable({ opportunities, queue = {}, now }) {
   const rows = opportunities.slice(0, 18);
   return (
     <section className="surface queue">
@@ -234,7 +272,10 @@ function OpportunityTable({ opportunities, queue = {} }) {
         <div className="thead"><span>Route</span><span>Size</span><span>Net</span><span>Score</span><span>Status</span></div>
         {rows.map((opportunity) => (
           <div className="tr" key={opportunity.id}>
-            <RouteLabel item={opportunity} />
+            <span className="routeStack">
+              <RouteLabel item={opportunity} />
+              <small className={now - opportunity.time <= 1500 ? "liveStamp on" : "liveStamp"}><Clock3 size={12} /> detected {signalAge(opportunity, now)} ago</small>
+            </span>
             <span>
               <b>{opportunitySize(opportunity)}</b>
               <small>{opportunity.partial ? `${formatPercent(clampRatio(opportunity.filledRatio))} of target` : opportunityTarget(opportunity)}</small>
@@ -248,8 +289,8 @@ function OpportunityTable({ opportunities, queue = {} }) {
               <small>conf {formatNumber(opportunity.confidence, 2)}</small>
             </span>
             <span>
-              <em className={`badge ${opportunity.status}`}>{opportunity.status}</em>
-              <small>{opportunity.partial ? "partial liquidity" : opportunity.status === "blocked" ? "size/depth gate" : opportunity.reason}</small>
+              <em className={`badge ${statusClass(opportunity)}`}>{statusLabel(opportunity)}</em>
+              <small>{statusHelp(opportunity)}</small>
             </span>
           </div>
         ))}
@@ -258,9 +299,47 @@ function OpportunityTable({ opportunities, queue = {} }) {
   );
 }
 
+function OpportunityHistory({ opportunities = [], metrics = {}, now }) {
+  const [filter, setFilter] = React.useState("all");
+  const filtered = opportunities.filter((item) => {
+    if (filter === "all") return true;
+    if (filter === "live") return now - item.time <= 2500;
+    if (filter === "partial") return item.partial;
+    return item.status === filter || item.strategy === filter;
+  });
+  const rows = filtered.slice(0, 80);
+  return (
+    <section className="surface history">
+      <PanelTitle icon={ListChecks} title="Detection Tape" pill={`${metrics.historyRetainedCount || opportunities.length}/${compact.format(metrics.detectedCount || 0)} retained`} />
+      <div className="historyToolbar">
+        {["all", "live", "profitable", "rejected", "partial", "triangular"].map((item) => (
+          <button className={filter === item ? "active" : ""} key={item} onClick={() => setFilter(item)} type="button">{item}</button>
+        ))}
+      </div>
+      <div className="historyList">
+        {rows.map((item) => (
+          <article className={`historyItem ${statusClass(item)}`} key={`hist-${item.id}`}>
+            <RouteLabel item={item} />
+            <span className="historyEdge">
+              <b className={item.netProfit >= 0 ? "green" : "red"}>{formatNumber(item.netBps, 2)} bps</b>
+              <small>{formatMoney(item.netProfit)} net / score {formatNumber(item.score, 2)}</small>
+            </span>
+            <span className="historyMeta">
+              <em className={`badge ${statusClass(item)}`}>{statusLabel(item)}</em>
+              <small className={now - item.time <= 1500 ? "liveStamp on" : "liveStamp"}><Clock3 size={12} /> {signalAge(item, now)} ago</small>
+            </span>
+          </article>
+        ))}
+        {!rows.length && <div className="empty">No matching signals</div>}
+      </div>
+    </section>
+  );
+}
+
 function Streams({ streams, redis }) {
   const rows = streams.streams || [];
   const redisLabel = redis.enabled ? redis.status : "optional off";
+  const streamTone = (stream) => stream.disabled ? "disabled" : stream.restFallback ? "rest" : "ws";
   return (
     <section className="surface streams">
       <PanelTitle icon={DatabaseZap} title="Infrastructure" pill={redisLabel} />
@@ -269,8 +348,8 @@ function Streams({ streams, redis }) {
           <article className="stream" key={stream.key}>
             <b>{stream.exchangeName}</b>
             <span>{stream.symbol}</span>
-            <em className={stream.restFallback ? "rest" : "ws"}>{stream.mode}</em>
-            <small>{stream.updates} updates / {stream.failures} failures</small>
+            <em className={streamTone(stream)}>{stream.mode}</em>
+            <small>{stream.disabledReason || `${stream.updates} updates / ${stream.failures} failures`}</small>
           </article>
         ))}
         {!rows.length && <div className="empty">{streams.unavailableReason || "No stream telemetry"}</div>}
@@ -299,6 +378,31 @@ function GlobalMarket({ globalMarket }) {
           <b>{compact.format(globalMarket.btcMarketCap || 0)}</b>
           <small>{globalMarket.source || "CoinGecko"}</small>
         </article>
+      </div>
+    </section>
+  );
+}
+
+function ExchangeCoverage({ coverage = {}, control }) {
+  const active = new Set((coverage.active || []).map((exchange) => exchange.id));
+  const universe = coverage.universe || coverage.active || [];
+  const toggle = (exchange) => {
+    const next = active.has(exchange.id)
+      ? [...active].filter((id) => id !== exchange.id)
+      : [...active, exchange.id];
+    if (next.length < 2 || next.length > 5) return;
+    control({ activeExchanges: next });
+  };
+  return (
+    <section className="surface">
+      <PanelTitle icon={Network} title="Exchange Coverage" pill={`${coverage.activeCount || active.size}/${coverage.universeCount || universe.length} active`} />
+      <div className="coverageGrid">
+        {universe.map((exchange) => (
+          <button className={active.has(exchange.id) ? "active" : ""} disabled={!active.has(exchange.id) && active.size >= 5} key={exchange.id} onClick={() => toggle(exchange)} type="button">
+            <b>{exchange.name}</b>
+            <span>{active.has(exchange.id) ? "speed profile" : "coverage catalog"}</span>
+          </button>
+        ))}
       </div>
     </section>
   );
@@ -342,26 +446,14 @@ function PnlChart({ series }) {
   return <canvas className="chart" ref={ref} />;
 }
 
-function SideRail({ snapshot }) {
+function SideRail({ snapshot, control }) {
   return (
     <aside className="sideRail">
-      <section className="surface">
-        <PanelTitle icon={ShieldAlert} title="Risk Timeline" pill={`${snapshot.riskEvents.length} events`} />
-        <div className="events">
-          {snapshot.riskEvents.slice(0, 8).map((event) => (
-            <article className="event" key={event.id || `${event.type}-${event.time}`}>
-              <b>{event.condition || event.type}</b>
-              <span>{event.reason || "market event"}</span>
-              <small>{new Date(event.time).toLocaleTimeString()}</small>
-            </article>
-          ))}
-          {!snapshot.riskEvents.length && <div className="empty">No risk events</div>}
-        </div>
-      </section>
       <section className="surface">
         <PanelTitle icon={ChartNoAxesCombined} title="P&L" pill={formatMoney(snapshot.metrics.cumulativePnl)} />
         <PnlChart series={snapshot.pnlSeries} />
       </section>
+      <ExchangeCoverage coverage={snapshot.exchangeCoverage} control={control} />
       <GlobalMarket globalMarket={snapshot.globalMarket || {}} />
       <section className="surface">
         <PanelTitle icon={DatabaseZap} title="Inventory" pill={formatMoney(snapshot.totals.markToMarket)} />
@@ -373,6 +465,19 @@ function SideRail({ snapshot }) {
               <small>{formatBtc(wallet.BTC)} / {formatNumber(wallet.ETH, 3)} ETH</small>
             </article>
           ))}
+        </div>
+      </section>
+      <section className="surface">
+        <PanelTitle icon={ShieldAlert} title="Risk Timeline" pill={`${snapshot.riskEvents.length} events`} />
+        <div className="events">
+          {snapshot.riskEvents.slice(0, 8).map((event) => (
+            <article className="event" key={event.id || `${event.type}-${event.time}`}>
+              <b>{event.condition || event.type}</b>
+              <span>{event.reason || "market event"}</span>
+              <small>{new Date(event.time).toLocaleTimeString()}</small>
+            </article>
+          ))}
+          {!snapshot.riskEvents.length && <div className="empty">No risk events</div>}
         </div>
       </section>
     </aside>
@@ -392,13 +497,27 @@ function fillSubtitle(item) {
   return `${formatBtc(item.qtyBtc)} filled / ${formatMoney(item.buyPrice)} to ${formatMoney(item.sellPrice)}`;
 }
 
+function executionKind(item) {
+  if (item.strategy === "triangular" && item.partial) return "triangular partial";
+  if (item.strategy === "triangular") return "triangular";
+  if (item.partial) return "partial";
+  return "complete";
+}
+
+function executionKindClass(item) {
+  if (item.strategy === "triangular" && item.partial) return "triangular-partial";
+  if (item.strategy === "triangular") return "triangular";
+  if (item.partial) return "partial-fill";
+  return "filled";
+}
+
 function PartialFills({ trades, opportunities }) {
-  const executed = trades.filter((trade) => trade.partial).slice(0, 4).map((trade) => ({ ...trade, visualType: "executed" }));
-  const queued = opportunities.filter((opportunity) => opportunity.partial).slice(0, 4).map((opportunity) => ({ ...opportunity, visualType: "queued" }));
+  const executed = trades.filter((trade) => trade.partial).slice(0, 5).map((trade) => ({ ...trade, visualType: "executed" }));
+  const queued = opportunities.filter((opportunity) => opportunity.partial).slice(0, 5).map((opportunity) => ({ ...opportunity, visualType: "candidate" }));
   const items = [...executed, ...queued].slice(0, 6);
   return (
     <section className="surface partials">
-      <PanelTitle icon={Split} title="Partial Execution Watch" pill={`${executed.length} fills / ${queued.length} queued`} />
+      <PanelTitle icon={Split} title="Partial Execution Watch" pill={`${executed.length} fills / ${queued.length} candidates`} />
       <div className="partialList">
         {items.map((item) => {
           const ratio = clampRatio(item.filledRatio ?? (item.partial ? 0.72 : 1));
@@ -406,11 +525,11 @@ function PartialFills({ trades, opportunities }) {
             <article key={`${item.visualType}-${item.id}`}>
               <div className="partialHead">
                 <b>{fillTitle(item)}</b>
-                <em className={`badge ${item.status}`}>{item.visualType}</em>
+                <em className={`badge ${item.visualType === "executed" ? executionKindClass(item) : statusClass(item)}`}>{item.visualType === "executed" ? executionKind(item) : "candidate"}</em>
               </div>
               <span>{fillSubtitle(item)}</span>
               <div className="fillMeter" style={{ "--fill": `${ratio * 100}%` }}><i /></div>
-              <small>{formatPercent(ratio)} of target liquidity captured</small>
+              <small>{formatPercent(ratio)} captured / target {item.strategy === "triangular" ? formatMoney(item.targetQuote || item.quoteIn) : formatBtc(item.targetQtyBtc || item.qtyBtc)}</small>
             </article>
           );
         })}
@@ -427,13 +546,17 @@ function Trades({ trades }) {
       <div className="tradeList">
         {trades.slice(0, 8).map((trade) => (
           <article className={trade.partial ? "partialTrade" : ""} key={trade.id}>
-            <b>{fillTitle(trade)}</b>
+            <div className="tradeTop">
+              <b>{fillTitle(trade)}</b>
+              <em className={`badge ${executionKindClass(trade)}`}>{executionKind(trade)}</em>
+            </div>
             <span>{trade.strategy === "triangular" ? `${trade.cyclePath?.join(" -> ")} / ${formatMoney(trade.quoteIn)}` : formatBtc(trade.qtyBtc)}</span>
             <em className={trade.netProfit >= 0 ? "green" : "red"}>{formatMoney(trade.netProfit)}</em>
             <div className="tradeDetails">
-              <small>{trade.status} / {formatNumber(trade.executionQuality?.edgeCaptureBps || trade.netBps, 2)} bps captured</small>
+              <small>{formatNumber(trade.executionQuality?.edgeCaptureBps || trade.netBps, 2)} bps captured</small>
               {trade.strategy === "triangular" && <small>{trade.legs?.map((leg) => `${leg.from}->${leg.to}`).join(" / ")}</small>}
               {trade.partial && <small>{formatPercent(clampRatio(trade.filledRatio))} target fill</small>}
+              {!trade.partial && <small>100% target fill</small>}
             </div>
           </article>
         ))}
@@ -456,11 +579,12 @@ function App() {
         <section className="mainGrid">
           <div className="primary">
             <Books books={snapshot.books} />
-            <OpportunityTable opportunities={snapshot.queuedOpportunities} queue={snapshot.queue} />
+            <OpportunityTable opportunities={snapshot.queuedOpportunities} queue={snapshot.queue} now={snapshot.now} />
+            <OpportunityHistory opportunities={snapshot.opportunityHistory || snapshot.opportunities} metrics={snapshot.metrics} now={snapshot.now} />
             <PartialFills trades={snapshot.trades} opportunities={snapshot.queuedOpportunities} />
             <Trades trades={snapshot.trades} />
           </div>
-          <SideRail snapshot={snapshot} />
+          <SideRail snapshot={snapshot} control={control} />
         </section>
         <Streams streams={snapshot.streams} redis={snapshot.redis} />
       </main>

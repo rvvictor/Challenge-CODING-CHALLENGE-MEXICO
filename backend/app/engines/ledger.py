@@ -11,20 +11,34 @@ class WalletLedger:
     def reset(self) -> None:
         self.balances: dict[str, dict[str, float | str]] = {}
         for exchange in self.settings.exchanges:
-            self.balances[exchange.id] = {
-                "exchangeId": exchange.id,
-                "exchangeName": exchange.name,
-                "USDT": self.settings.starting_usdt,
-                "BTC": self.settings.starting_btc,
-                "ETH": self.settings.starting_eth,
-            }
+            self._add_wallet(exchange)
         self.realized_pnl = 0.0
+
+    def _add_wallet(self, exchange) -> None:
+        self.balances[exchange.id] = {
+            "exchangeId": exchange.id,
+            "exchangeName": exchange.name,
+            "USDT": self.settings.starting_usdt,
+            "BTC": self.settings.starting_btc,
+            "ETH": self.settings.starting_eth,
+        }
+
+    def sync_exchanges(self, exchanges) -> None:
+        for exchange in exchanges:
+            if exchange.id not in self.balances:
+                self._add_wallet(exchange)
+            else:
+                self.balances[exchange.id]["exchangeName"] = exchange.name
 
     def get(self, exchange_id: str) -> dict[str, float | str]:
         return self.balances[exchange_id]
 
     def all(self) -> list[dict[str, float | str]]:
         return [dict(wallet) for wallet in self.balances.values()]
+
+    def active(self, exchanges) -> list[dict[str, float | str]]:
+        self.sync_exchanges(exchanges)
+        return [dict(self.balances[exchange.id]) for exchange in exchanges]
 
     def apply_trade(self, trade: dict) -> None:
         if trade["strategy"] == "triangular":
@@ -43,8 +57,8 @@ class WalletLedger:
         sell["USDT"] = float(sell["USDT"]) + sell_credit
         self.realized_pnl += trade["netProfit"]
 
-    def totals(self, mark_price: float) -> dict[str, float]:
-        wallets = self.all()
+    def totals(self, mark_price: float, exchanges=None) -> dict[str, float]:
+        wallets = self.active(exchanges) if exchanges is not None else self.all()
         usdt = sum(float(wallet["USDT"]) for wallet in wallets)
         btc = sum(float(wallet["BTC"]) for wallet in wallets)
         eth = sum(float(wallet["ETH"]) for wallet in wallets)

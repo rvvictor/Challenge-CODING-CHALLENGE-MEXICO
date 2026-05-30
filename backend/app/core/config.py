@@ -37,6 +37,47 @@ class ExchangeConfig:
     order_book_limit: int | None = None
 
 
+FAST_EXCHANGE_PROFILE = "okx,bybit,kucoin,kraken,bitstamp"
+
+
+def exchange_catalog() -> tuple[ExchangeConfig, ...]:
+    return (
+        ExchangeConfig("binance", "Binance", "binance", "BTC/USDT", ("BTC/USDT", "ETH/BTC", "ETH/USDT"), 10, 1.4, 0.0002, 1.5, 0.98),
+        ExchangeConfig("okx", "OKX", "okx", "BTC/USDT", ("BTC/USDT", "ETH/BTC", "ETH/USDT"), 8, 1.7, 0.0001, 1, 0.96),
+        ExchangeConfig("kraken", "Kraken", "kraken", "BTC/USDT", ("BTC/USDT", "ETH/BTC", "ETH/USDT"), 26, 2.2, 0.00015, 2, 0.94, order_book_limit=25),
+        ExchangeConfig("coinbase", "Coinbase", "coinbase", "BTC/USD", ("BTC/USD", "ETH/BTC", "ETH/USD"), 40, 2.5, 0.00012, 3, 0.92),
+        ExchangeConfig("bitstamp", "Bitstamp", "bitstamp", "BTC/USD", ("BTC/USD", "ETH/BTC", "ETH/USD"), 30, 2.0, 0.00018, 2.5, 0.91),
+        ExchangeConfig("bybit", "Bybit", "bybit", "BTC/USDT", ("BTC/USDT", "ETH/BTC", "ETH/USDT"), 10, 1.8, 0.0002, 1.5, 0.90, order_book_limit=50),
+        ExchangeConfig("kucoin", "KuCoin", "kucoin", "BTC/USDT", ("BTC/USDT", "ETH/BTC", "ETH/USDT"), 10, 2.0, 0.0002, 1.5, 0.89, order_book_limit=20),
+        ExchangeConfig("gateio", "Gate.io", "gateio", "BTC/USDT", ("BTC/USDT", "ETH/BTC", "ETH/USDT"), 20, 2.4, 0.00025, 2, 0.88),
+        ExchangeConfig("bitfinex", "Bitfinex", "bitfinex", "BTC/USDT", ("BTC/USDT", "ETH/BTC", "ETH/USDT"), 20, 2.2, 0.0004, 2.5, 0.87, order_book_limit=25),
+        ExchangeConfig("gemini", "Gemini", "gemini", "BTC/USD", ("BTC/USD", "ETH/BTC", "ETH/USD"), 35, 2.8, 0.0001, 3, 0.86),
+    )
+
+
+def select_exchanges(catalog: tuple[ExchangeConfig, ...], profile: str, max_count: int | None = None) -> tuple[ExchangeConfig, ...]:
+    if not profile.strip() or profile.strip().lower() in {"all", "*"}:
+        return catalog
+
+    lookup: dict[str, ExchangeConfig] = {}
+    for exchange in catalog:
+        lookup[exchange.id] = exchange
+        lookup[exchange.ccxt_id] = exchange
+        lookup[exchange.name.lower()] = exchange
+
+    selected: list[ExchangeConfig] = []
+    seen: set[str] = set()
+    for token in (item.strip().lower() for item in profile.split(",")):
+        exchange = lookup.get(token)
+        if not exchange or exchange.id in seen:
+            continue
+        selected.append(exchange)
+        seen.add(exchange.id)
+        if max_count and len(selected) >= max_count:
+            break
+    return tuple(selected) if len(selected) >= 2 else catalog
+
+
 @dataclass(frozen=True)
 class Settings:
     app_name: str = "Aurelion"
@@ -51,13 +92,13 @@ class Settings:
     ws_reconnect_delay_ms: int = int_env("WS_RECONNECT_DELAY_MS", 2000)
     ws_failure_threshold: int = int_env("WS_FAILURE_THRESHOLD", 5)
     rest_recovery_attempt_ms: int = int_env("REST_RECOVERY_ATTEMPT_MS", 60000)
-    min_trade_btc: float = number_env("MIN_TRADE_BTC", 0.004)
-    max_trade_btc: float = number_env("MAX_TRADE_BTC", 0.09)
-    min_net_profit_usd: float = number_env("MIN_NET_PROFIT_USD", 0.75)
-    min_net_bps: float = number_env("MIN_NET_BPS", 1.25)
+    min_trade_btc: float = number_env("MIN_TRADE_BTC", 0.002)
+    max_trade_btc: float = number_env("MAX_TRADE_BTC", 0.025)
+    min_net_profit_usd: float = number_env("MIN_NET_PROFIT_USD", 0.35)
+    min_net_bps: float = number_env("MIN_NET_BPS", 0.75)
     withdrawal_fee_impact: float = number_env("WITHDRAWAL_FEE_IMPACT", 0.18)
-    pair_cooldown_ms: int = int_env("PAIR_COOLDOWN_MS", 7000)
-    max_executions_per_tick: int = int_env("MAX_EXECUTIONS_PER_TICK", 2)
+    pair_cooldown_ms: int = int_env("PAIR_COOLDOWN_MS", 20000)
+    max_executions_per_tick: int = int_env("MAX_EXECUTIONS_PER_TICK", 1)
     auto_execution: bool = bool_env("AUTO_EXECUTION", True)
     max_book_age_ms: int = int_env("MAX_BOOK_AGE_MS", 5000)
     max_loss_streak: int = int_env("MAX_LOSS_STREAK", 5)
@@ -70,42 +111,24 @@ class Settings:
     latency_risk_floor_bps: float = number_env("LATENCY_RISK_FLOOR_BPS", 0.15)
     min_confidence: float = number_env("MIN_CONFIDENCE", 0.42)
     triangular_enabled: bool = bool_env("TRIANGULAR_ENABLED", True)
-    triangular_quote_size: float = number_env("TRIANGULAR_QUOTE_SIZE", 2500)
-    triangular_min_net_profit_usd: float = number_env("TRIANGULAR_MIN_NET_PROFIT_USD", 0.35)
-    triangular_min_net_bps: float = number_env("TRIANGULAR_MIN_NET_BPS", 0.9)
+    triangular_quote_size: float = number_env("TRIANGULAR_QUOTE_SIZE", 900)
+    triangular_min_net_profit_usd: float = number_env("TRIANGULAR_MIN_NET_PROFIT_USD", 0.25)
+    triangular_min_net_bps: float = number_env("TRIANGULAR_MIN_NET_BPS", 0.65)
     global_market_enabled: bool = bool_env("GLOBAL_MARKET_ENABLED", True)
     global_market_interval_ms: int = int_env("GLOBAL_MARKET_INTERVAL_MS", 60000)
-    active_exchanges: str = os.getenv("ACTIVE_EXCHANGES", "")
+    active_exchanges: str = os.getenv("ACTIVE_EXCHANGES", FAST_EXCHANGE_PROFILE)
     redis_url: str = os.getenv("REDIS_URL", "")
     redis_enabled: bool = bool_env("REDIS_ENABLED", bool(os.getenv("REDIS_URL")))
     redis_namespace: str = os.getenv("REDIS_NAMESPACE", "aurelion")
-    starting_usdt: float = number_env("STARTING_USDT_PER_EXCHANGE", 120000)
-    starting_btc: float = number_env("STARTING_BTC_PER_EXCHANGE", 0.75)
-    starting_eth: float = number_env("STARTING_ETH_PER_EXCHANGE", 18)
-    exchanges: tuple[ExchangeConfig, ...] = field(default_factory=lambda: (
-        ExchangeConfig("binance", "Binance", "binance", "BTC/USDT", ("BTC/USDT", "ETH/BTC", "ETH/USDT"), 10, 1.4, 0.0002, 1.5, 0.98),
-        ExchangeConfig("okx", "OKX", "okx", "BTC/USDT", ("BTC/USDT", "ETH/BTC", "ETH/USDT"), 8, 1.7, 0.0001, 1, 0.96),
-        ExchangeConfig("kraken", "Kraken", "kraken", "BTC/USDT", ("BTC/USDT", "ETH/BTC", "ETH/USDT"), 26, 2.2, 0.00015, 2, 0.94),
-        ExchangeConfig("coinbase", "Coinbase", "coinbase", "BTC/USD", ("BTC/USD", "ETH/BTC", "ETH/USD"), 40, 2.5, 0.00012, 3, 0.92),
-        ExchangeConfig("bitstamp", "Bitstamp", "bitstamp", "BTC/USD", ("BTC/USD", "ETH/BTC", "ETH/USD"), 30, 2.0, 0.00018, 2.5, 0.91),
-        ExchangeConfig("bybit", "Bybit", "bybit", "BTC/USDT", ("BTC/USDT", "ETH/BTC", "ETH/USDT"), 10, 1.8, 0.0002, 1.5, 0.90, order_book_limit=50),
-        ExchangeConfig("kucoin", "KuCoin", "kucoin", "BTC/USDT", ("BTC/USDT", "ETH/BTC", "ETH/USDT"), 10, 2.0, 0.0002, 1.5, 0.89, order_book_limit=20),
-        ExchangeConfig("gateio", "Gate.io", "gateio", "BTC/USDT", ("BTC/USDT", "ETH/BTC", "ETH/USDT"), 20, 2.4, 0.00025, 2, 0.88),
-        ExchangeConfig("bitfinex", "Bitfinex", "bitfinex", "BTC/USDT", ("BTC/USDT", "ETH/BTC", "ETH/USDT"), 20, 2.2, 0.0004, 2.5, 0.87),
-        ExchangeConfig("gemini", "Gemini", "gemini", "BTC/USD", ("BTC/USD", "ETH/BTC", "ETH/USD"), 35, 2.8, 0.0001, 3, 0.86),
-    ))
+    starting_usdt: float = number_env("STARTING_USDT_PER_EXCHANGE", 35000)
+    starting_btc: float = number_env("STARTING_BTC_PER_EXCHANGE", 0.25)
+    starting_eth: float = number_env("STARTING_ETH_PER_EXCHANGE", 6)
+    exchange_universe: tuple[ExchangeConfig, ...] = field(default_factory=exchange_catalog)
+    exchanges: tuple[ExchangeConfig, ...] = field(default_factory=exchange_catalog)
 
     def __post_init__(self) -> None:
-        if not self.active_exchanges.strip():
-            return
-        requested = {item.strip().lower() for item in self.active_exchanges.split(",") if item.strip()}
-        filtered = tuple(
-            exchange
-            for exchange in self.exchanges
-            if exchange.id in requested or exchange.ccxt_id in requested or exchange.name.lower() in requested
-        )
-        if len(filtered) >= 2:
-            object.__setattr__(self, "exchanges", filtered)
+        object.__setattr__(self, "exchange_universe", self.exchange_universe or self.exchanges)
+        object.__setattr__(self, "exchanges", select_exchanges(self.exchange_universe, self.active_exchanges, max_count=5))
 
     def exchange_by_id(self, exchange_id: str) -> ExchangeConfig:
         for exchange in self.exchanges:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 import time
+import asyncio
 
 from backend.app.core.config import Settings
 from backend.app.core.models import Level, OrderBook
@@ -60,6 +61,14 @@ class EngineTests(unittest.TestCase):
         self.assertTrue(risk.snapshot(1200)["paused"])
         self.assertFalse(risk.snapshot(2301)["paused"])
 
+    def test_risk_market_window_can_reset_on_mode_change(self):
+        settings = Settings(volatility_min_samples=2)
+        risk = RiskManager(settings)
+        risk.evaluate_market([{"exchangeName": "Demo", "timestamp": 1000, "bestAsk": 70001, "bestBid": 69999}], 1000)
+        self.assertEqual(risk.snapshot(1000)["volatilityWindowPoints"], 1)
+        risk.reset_market_window()
+        self.assertEqual(risk.snapshot(1001)["volatilityWindowPoints"], 0)
+
     def test_triangular_profitable_cycle(self):
         settings = Settings(triangular_quote_size=2500, triangular_min_net_bps=0.5, triangular_min_net_profit_usd=0.1)
         exchange = settings.exchanges[0]
@@ -97,11 +106,15 @@ class EngineTests(unittest.TestCase):
         settings = Settings()
         simulator = SimulatedMarket(settings.exchanges)
         seen_low_depth = False
-        for _ in range(120):
-            orderbook = simulator.generate(settings.exchanges[0], settings.exchanges, "BTC/USDT")
-            total_ask = sum(level.qty for level in orderbook.asks)
-            if 0 < total_ask < settings.max_trade_btc:
-                seen_low_depth = True
+        for _ in range(220):
+            simulator.advance(settings.exchanges)
+            for exchange in settings.exchanges:
+                orderbook = simulator.generate(exchange, settings.exchanges, exchange.primary_symbol)
+                total_ask = sum(level.qty for level in orderbook.asks)
+                if 0 < total_ask < settings.max_trade_btc:
+                    seen_low_depth = True
+                    break
+            if seen_low_depth:
                 break
         self.assertTrue(seen_low_depth)
 
@@ -111,20 +124,62 @@ class EngineTests(unittest.TestCase):
         async def noop_event(_event):
             return None
 
-        settings = Settings(order_book_limit=25)
+        settings = Settings(order_book_limit=25, active_exchanges="all")
         provider = CcxtStreamProvider(settings, lambda _book: None, noop_event)
         self.assertEqual(provider.order_book_limit(settings.exchange_by_id("kucoin")), 20)
         self.assertEqual(provider.order_book_limit(settings.exchange_by_id("bybit")), 50)
+        self.assertEqual(provider.order_book_limit(settings.exchange_by_id("kraken")), 25)
+        self.assertEqual(provider.order_book_limit(settings.exchange_by_id("bitfinex")), 25)
 
     def test_settings_can_filter_active_exchanges_for_speed_profile(self):
         settings = Settings(active_exchanges="binance,okx,bybit")
         self.assertEqual([exchange.id for exchange in settings.exchanges], ["binance", "okx", "bybit"])
+        self.assertEqual(len(settings.exchange_universe), 10)
+
+    def test_settings_defaults_to_fast_profile(self):
+        settings = Settings()
+        self.assertEqual([exchange.id for exchange in settings.exchanges], ["okx", "bybit", "kucoin", "kraken", "bitstamp"])
+
+    def test_market_service_can_switch_active_exchanges(self):
+        from backend.app.engines.market_service import MarketService
+
+        service = MarketService(Settings(active_exchanges="okx,kraken,bybit"))
+        asyncio.run(service.set_active_exchanges(["kucoin", "bitstamp", "kraken", "okx", "bybit", "binance"]))
+        self.assertEqual([exchange.id for exchange in service.settings.exchanges], ["kucoin", "bitstamp", "kraken", "okx", "bybit"])
+        self.assertEqual(service.books, {})
+        self.assertIn("kucoin", service.ledger.balances)
+
+    def test_exchange_switch_preserves_performance_history(self):
+        from backend.app.engines.market_service import MarketService
+
+        service = MarketService(Settings(active_exchanges="okx,kraken,bybit"))
+        service.ledger.realized_pnl = 12.5
+        service.store.add_trade(
+            {"id": "T-test", "time": int(time.time() * 1000), "strategy": "simple", "partial": True, "netProfit": 12.5},
+            service.ledger.realized_pnl,
+        )
+        started_at = service.started_at
+        asyncio.run(service.set_active_exchanges(["kucoin", "bitstamp", "kraken", "okx", "bybit"]))
+        self.assertEqual(service.store.executed_count, 1)
+        self.assertEqual(service.store.partial_count, 1)
+        self.assertAlmostEqual(service.ledger.realized_pnl, 12.5)
+        self.assertEqual(service.started_at, started_at)
+
+    def test_volatility_stress_button_activates_circuit_breaker(self):
+        from backend.app.engines.market_service import MarketService
+
+        service = MarketService(Settings(market_mode="demo", pause_after_loss_ms=1000))
+        asyncio.run(service.trigger_volatility_stress())
+        snapshot = service.snapshot()
+        self.assertTrue(snapshot["risk"]["paused"])
+        self.assertEqual(snapshot["risk"]["condition"], "volatility")
+        self.assertTrue(any(event.get("type") == "stress-test" for event in snapshot["riskEvents"]))
 
     def test_executor_revalidates_inventory_between_same_tick_trades(self):
         from backend.app.engines.event_store import EventStore
         from backend.app.engines.execution import ExecutionSimulator
 
-        settings = Settings(max_executions_per_tick=2)
+        settings = Settings(max_executions_per_tick=2, active_exchanges="all")
         ledger = WalletLedger(settings)
         executor = ExecutionSimulator(settings, ledger, EventStore(), RiskManager(settings))
         base = {
@@ -137,8 +192,8 @@ class EngineTests(unittest.TestCase):
             "partial": False,
             "source": "test",
             "product": "BTC/USDT",
-            "qtyBtc": 0.6,
-            "targetQtyBtc": 0.6,
+            "qtyBtc": 0.2,
+            "targetQtyBtc": 0.2,
             "filledRatio": 1,
             "buyPrice": 70000,
             "sellPrice": 70500,
