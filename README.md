@@ -19,6 +19,7 @@ Aurelion es un bot de arbitraje de Bitcoin con arquitectura backend/frontend: ba
 - Circuit breaker por volatilidad, stale data y racha de perdidas.
 - Boton de stress de volatilidad para validar el circuit breaker en vivo.
 - Historial retenido de oportunidades, ejecuciones, P&L y eventos sin perderse al cambiar exchanges activos.
+- Reequilibrio virtual de inventario para demo/paper: evita que una buena ruta quede bloqueada solo porque BTC/USDT quedo concentrado en otro venue.
 - Modo demo deterministico para presentaciones sin depender de APIs externas.
 
 ## Arquitectura
@@ -117,6 +118,7 @@ npm run start
 | `MIN_NET_BPS` | `0.75` | Edge neto minimo despues de costos |
 | `MAX_EXECUTIONS_PER_TICK` | `1` | Evita sobre-operar el mismo tick |
 | `PAIR_COOLDOWN_MS` | `20000` | Cooldown por ruta |
+| `INVENTORY_REBALANCE_ENABLED` | `true` | Permite reubicar inventario simulado antes de ejecutar |
 | `REDIS_URL` | vacio | Redis Pub/Sub |
 | `MAX_VOLATILITY_PCT` | `2.4` | Umbral volatilidad |
 | `VOLATILITY_MIN_SAMPLES` | `8` | Muestras minimas |

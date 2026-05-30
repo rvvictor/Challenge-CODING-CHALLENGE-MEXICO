@@ -40,6 +40,85 @@ class WalletLedger:
         self.sync_exchanges(exchanges)
         return [dict(self.balances[exchange.id]) for exchange in exchanges]
 
+    def route_capacity_btc(self, buy_exchange_id: str, sell_exchange_id: str, ask_price: float, exchanges) -> dict[str, float | str]:
+        buy = self.get(buy_exchange_id)
+        sell = self.get(sell_exchange_id)
+        local_qty = min(float(sell["BTC"]), (float(buy["USDT"]) * 0.985) / ask_price)
+        if not self.settings.inventory_rebalance_enabled:
+            return {"qty": local_qty, "mode": "local"}
+
+        active_ids = {exchange.id for exchange in exchanges}
+        active_wallets = [wallet for exchange_id, wallet in self.balances.items() if exchange_id in active_ids]
+        reserve_btc = self.settings.min_trade_btc * max(1, len(active_wallets))
+        total_btc = max(0, sum(float(wallet["BTC"]) for wallet in active_wallets) - reserve_btc)
+        total_usdt = sum(float(wallet["USDT"]) for wallet in active_wallets) * 0.985 / ask_price
+        pooled_qty = min(total_btc, total_usdt)
+        if pooled_qty > local_qty:
+            return {"qty": pooled_qty, "mode": "rebalanced"}
+        return {"qty": local_qty, "mode": "local"}
+
+    def prepare_inventory_for_trade(self, trade: dict) -> list[dict]:
+        if not self.settings.inventory_rebalance_enabled or trade["strategy"] == "triangular":
+            return []
+
+        transfers: list[dict] = []
+        buy = self.get(trade["buyExchangeId"])
+        sell = self.get(trade["sellExchangeId"])
+        buy_debit = trade["buyQuote"] + trade["buyFee"] + trade["slippageCostBuy"] + trade["rebalanceCost"]
+        if self._available_asset("BTC", trade["sellExchangeId"]) < trade["qtyBtc"]:
+            return []
+        if self._available_asset("USDT", trade["buyExchangeId"]) < buy_debit:
+            return []
+        self._rebalance_asset("BTC", trade["sellExchangeId"], trade["qtyBtc"], transfers)
+        self._rebalance_asset("USDT", trade["buyExchangeId"], buy_debit, transfers)
+        buy["exchangeName"] = trade["buyExchange"]
+        sell["exchangeName"] = trade["sellExchange"]
+        return transfers
+
+    def _available_asset(self, asset: str, target_exchange_id: str) -> float:
+        floor = self.settings.min_trade_btc if asset == "BTC" else self.settings.min_trade_btc * 70000
+        target = self.get(target_exchange_id)
+        donor_capacity = sum(
+            max(0, float(wallet[asset]) - floor)
+            for exchange_id, wallet in self.balances.items()
+            if exchange_id != target_exchange_id
+        )
+        return float(target[asset]) + donor_capacity
+
+    def _rebalance_asset(self, asset: str, target_exchange_id: str, required: float, transfers: list[dict]) -> None:
+        target = self.get(target_exchange_id)
+        current = float(target[asset])
+        if current >= required:
+            return
+
+        needed = (required - current) * (1 + self.settings.inventory_rebalance_buffer)
+        floor = self.settings.min_trade_btc if asset == "BTC" else self.settings.min_trade_btc * 70000
+        donors = sorted(
+            (
+                (exchange_id, wallet)
+                for exchange_id, wallet in self.balances.items()
+                if exchange_id != target_exchange_id and float(wallet[asset]) > floor
+            ),
+            key=lambda item: float(item[1][asset]),
+            reverse=True,
+        )
+        for source_id, source in donors:
+            available = max(0, float(source[asset]) - floor)
+            moved = min(available, needed)
+            if moved <= 0:
+                continue
+            source[asset] = float(source[asset]) - moved
+            target[asset] = float(target[asset]) + moved
+            needed -= moved
+            transfers.append({
+                "asset": asset,
+                "from": source_id,
+                "to": target_exchange_id,
+                "amount": round(moved, 8 if asset == "BTC" else 4),
+            })
+            if needed <= 0:
+                break
+
     def apply_trade(self, trade: dict) -> None:
         if trade["strategy"] == "triangular":
             wallet = self.get(trade["exchangeId"])

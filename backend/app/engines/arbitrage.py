@@ -43,9 +43,8 @@ class CrossExchangeArbitrageEngine:
 
         buy_exchange = self.settings.exchange_by_id(buy_book.exchange_id)
         sell_exchange = self.settings.exchange_by_id(sell_book.exchange_id)
-        buy_wallet = self.ledger.get(buy_book.exchange_id)
-        sell_wallet = self.ledger.get(sell_book.exchange_id)
-        wallet_qty = min(float(sell_wallet["BTC"]), (float(buy_wallet["USDT"]) * 0.985) / ask.price)
+        capacity = self.ledger.route_capacity_btc(buy_book.exchange_id, sell_book.exchange_id, ask.price, self.settings.exchanges)
+        wallet_qty = float(capacity["qty"])
         buy_depth = depth_qty(buy_book.asks)
         sell_depth = depth_qty(sell_book.bids)
         target_qty = min(self.settings.max_trade_btc, buy_depth, sell_depth, wallet_qty)
@@ -81,6 +80,7 @@ class CrossExchangeArbitrageEngine:
                     "buyDepthBtc": rounded(buy_depth, 8),
                     "sellDepthBtc": rounded(sell_depth, 8),
                     "walletQtyBtc": rounded(wallet_qty, 8),
+                    "inventoryMode": capacity["mode"],
                 },
             )
 
@@ -155,6 +155,7 @@ class CrossExchangeArbitrageEngine:
                 "buyDepthBtc": rounded(buy_depth, 8),
                 "sellDepthBtc": rounded(sell_depth, 8),
                 "walletQtyBtc": rounded(wallet_qty, 8),
+                "inventoryMode": capacity["mode"],
                 "latencies": {"buyMs": buy_book.latency_ms, "sellMs": sell_book.latency_ms},
             },
         )

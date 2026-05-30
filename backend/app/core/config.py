@@ -99,6 +99,8 @@ class Settings:
     withdrawal_fee_impact: float = number_env("WITHDRAWAL_FEE_IMPACT", 0.18)
     pair_cooldown_ms: int = int_env("PAIR_COOLDOWN_MS", 20000)
     max_executions_per_tick: int = int_env("MAX_EXECUTIONS_PER_TICK", 1)
+    inventory_rebalance_enabled: bool = bool_env("INVENTORY_REBALANCE_ENABLED", True)
+    inventory_rebalance_buffer: float = number_env("INVENTORY_REBALANCE_BUFFER", 0.35)
     auto_execution: bool = bool_env("AUTO_EXECUTION", True)
     max_book_age_ms: int = int_env("MAX_BOOK_AGE_MS", 5000)
     max_loss_streak: int = int_env("MAX_LOSS_STREAK", 5)

@@ -39,6 +39,9 @@ class ExecutionSimulator:
             if self.cooldowns.get(key, 0) > current:
                 continue
             trade = self.build_trade(opportunity)
+            transfers = self.ledger.prepare_inventory_for_trade(trade)
+            if transfers:
+                trade["inventoryRebalance"] = transfers
             if not self.has_inventory(trade):
                 continue
             self.ledger.apply_trade(trade)

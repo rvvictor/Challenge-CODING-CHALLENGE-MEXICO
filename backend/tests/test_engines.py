@@ -179,7 +179,7 @@ class EngineTests(unittest.TestCase):
         from backend.app.engines.event_store import EventStore
         from backend.app.engines.execution import ExecutionSimulator
 
-        settings = Settings(max_executions_per_tick=2, active_exchanges="all")
+        settings = Settings(max_executions_per_tick=2, active_exchanges="all", inventory_rebalance_enabled=False)
         ledger = WalletLedger(settings)
         executor = ExecutionSimulator(settings, ledger, EventStore(), RiskManager(settings))
         base = {
@@ -213,6 +213,51 @@ class EngineTests(unittest.TestCase):
         ]
         trades = executor.try_execute(opportunities, [])
         self.assertEqual(len(trades), 1)
+        self.assertGreaterEqual(float(ledger.get("bybit")["BTC"]), 0)
+
+    def test_inventory_rebalance_prevents_local_wallet_gate(self):
+        from backend.app.engines.event_store import EventStore
+        from backend.app.engines.execution import ExecutionSimulator
+
+        settings = Settings(active_exchanges="okx,bybit,kraken", min_trade_btc=0.002)
+        ledger = WalletLedger(settings)
+        ledger.get("bybit")["BTC"] = 0.0
+        ledger.get("okx")["BTC"] = 0.5
+        executor = ExecutionSimulator(settings, ledger, EventStore(), RiskManager(settings))
+        opportunity = {
+            "id": "rebalance",
+            "dedupeKey": "rebalance",
+            "strategy": "simple",
+            "status": "profitable",
+            "grossProfit": 20,
+            "netProfit": 3,
+            "netBps": 1.7,
+            "confidence": 0.9,
+            "partial": False,
+            "filledRatio": 1,
+            "source": "test",
+            "product": "BTC/USDT",
+            "qtyBtc": 0.02,
+            "targetQtyBtc": 0.02,
+            "buyPrice": 70000,
+            "sellPrice": 70130,
+            "buyExchangeId": "kraken",
+            "sellExchangeId": "bybit",
+            "buyExchange": "Kraken",
+            "sellExchange": "Bybit",
+            "costs": {
+                "buyFee": 1,
+                "sellFee": 1,
+                "slippageCostBuy": 0.5,
+                "slippageCostSell": 0.5,
+                "latencyRiskCost": 0.2,
+                "rebalanceCost": 0.2,
+                "totalCosts": 3.4,
+            },
+        }
+        trades = executor.try_execute([opportunity], [])
+        self.assertEqual(len(trades), 1)
+        self.assertTrue(trades[0].get("inventoryRebalance"))
         self.assertGreaterEqual(float(ledger.get("bybit")["BTC"]), 0)
 
 

@@ -39,7 +39,7 @@ class SimulatedMarket:
     def maybe_shock(self, exchanges: tuple[ExchangeConfig, ...]) -> None:
         if self.shock and self.shock["until"] > self.tick:
             return
-        if self.tick % 18 == 0:
+        if self.tick % 34 == 0:
             cheap = self.random.choice(exchanges).id
             rich = self.random.choice(exchanges).id
             if rich == cheap:
@@ -48,9 +48,9 @@ class SimulatedMarket:
                 "started": self.tick,
                 "cheap": cheap,
                 "rich": rich,
-                "cheap_bps": self.random.uniform(-38, -24),
-                "rich_bps": self.random.uniform(24, 42),
-                "until": self.tick + 8,
+                "cheap_bps": self.random.uniform(-31, -20),
+                "rich_bps": self.random.uniform(20, 34),
+                "until": self.tick + 6,
             }
 
     def generate(self, exchange: ExchangeConfig, exchanges: tuple[ExchangeConfig, ...], symbol: str, anchor_mid: float | None = None) -> OrderBook:
@@ -84,7 +84,7 @@ class SimulatedMarket:
             kind == "BTC"
             and self.shock
             and exchange.id in {self.shock["cheap"], self.shock["rich"]}
-            and (self.tick - self.shock["started"] in {1, 2, 3, 5} or self.random.random() < 0.18)
+            and (self.tick - self.shock["started"] in {2, 4} or self.random.random() < 0.07)
         )
         for i in range(20):
             gap = i * self.random.uniform(0.000004, 0.000018) if kind == "ETHBTC" else i * self.random.uniform(2, 8)

@@ -53,6 +53,8 @@ class MarketService:
         self.last_scan: list[dict] = []
         self.last_executions: list[dict] = []
         self.degraded_demo = False
+        self.scan_tick = 0
+        self.recorded_signal_times: dict[str, int] = {}
 
     async def start(self) -> None:
         await self.redis.start()
@@ -151,12 +153,16 @@ class MarketService:
         self.risk.reset()
         self.executor.reset()
         self.started_at = now_ms()
+        self.scan_tick = 0
+        self.recorded_signal_times.clear()
 
     def rebuild_runtime_state(self, preserve_performance: bool = True) -> None:
         self.books.clear()
         self.last_scan = []
         self.last_executions = []
         self.degraded_demo = False
+        self.scan_tick = 0
+        self.recorded_signal_times.clear()
         self.simulator = SimulatedMarket(self.settings.exchanges)
         if preserve_performance:
             self.ledger.sync_exchanges(self.settings.exchanges)
@@ -177,6 +183,7 @@ class MarketService:
             await asyncio.sleep(self.settings.evaluation_interval_ms / 1000)
 
     def tick(self) -> None:
+        self.scan_tick += 1
         if self.mode == "demo" or self.degraded_demo:
             self.generate_demo_books()
 
@@ -190,7 +197,7 @@ class MarketService:
         ranked = self.queue.rank(opportunities)
         self.last_scan = ranked
         if ranked:
-            self.store.add_opportunities(ranked)
+            self.store.add_opportunities(self.curated_opportunities(ranked))
 
         self.last_executions = self.executor.try_execute(ranked, summaries)
         for trade in self.last_executions:
@@ -200,6 +207,36 @@ class MarketService:
         snapshot = self.snapshot()
         asyncio.create_task(self.redis.publish("snapshots", snapshot))
         self.broadcast(snapshot)
+
+    def curated_opportunities(self, ranked: list[dict]) -> list[dict]:
+        current = now_ms()
+        profitable = [item for item in ranked if item.get("status") == "profitable"]
+        partial = [item for item in ranked if item.get("partial") and item.get("status") != "profitable"]
+        demo_mode = self.mode == "demo" or self.degraded_demo
+        near_miss_limit = 2 if demo_mode and self.scan_tick % 4 == 0 else 0 if demo_mode else 4
+        near_miss = [item for item in ranked if item.get("status") == "rejected" and item.get("netBps", -999) > -12 and not item.get("partial")]
+        blocked = [item for item in ranked if item.get("status") == "blocked"]
+        target = 7 if demo_mode else 18
+        signal_cooldown = 5500 if demo_mode else 1400
+        curated: list[dict] = []
+        seen: set[str] = set()
+        for bucket in (profitable, partial[:3], near_miss[:near_miss_limit], blocked[:1]):
+            for item in bucket:
+                key = item.get("dedupeKey") or item.get("id")
+                if key in seen:
+                    continue
+                if current - self.recorded_signal_times.get(key, 0) < signal_cooldown:
+                    continue
+                curated.append(item)
+                seen.add(key)
+                self.recorded_signal_times[key] = current
+                if len(curated) >= target:
+                    return curated
+        self.recorded_signal_times = {
+            key: value for key, value in self.recorded_signal_times.items()
+            if current - value < 60000
+        }
+        return curated
 
     def flush_risk_events(self) -> None:
         for event in self.risk.drain_events():
@@ -273,7 +310,7 @@ class MarketService:
         p95_index = min(len(book_ages) - 1, int(len(book_ages) * 0.95)) if book_ages else 0
         p95_freshness = book_ages[p95_index] if book_ages else 0
         latest = self.store.latest_opportunities()
-        opportunity_history = self.store.latest_opportunities(260)
+        opportunity_history = self.store.latest_opportunities(120)
         current_scan = self.last_scan or latest[:40]
         executable_edges = [item.get("netBps", 0) for item in current_scan if item.get("status") == "profitable"]
         observed_edges = [item.get("netBps", 0) for item in current_scan if item.get("status") != "blocked"]

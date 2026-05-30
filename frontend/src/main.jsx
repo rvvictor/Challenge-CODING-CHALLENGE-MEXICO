@@ -246,7 +246,8 @@ function statusClass(item) {
 function statusLabel(item) {
   if (item.status === "profitable" && item.partial) return "profitable partial";
   if (item.status === "profitable") return "profitable full";
-  if (item.status === "blocked") return "inventory gate";
+  if (item.status === "blocked" && `${item.reason}`.toLowerCase().includes("wallet")) return "inventory gate";
+  if (item.status === "blocked") return "liquidity gate";
   return item.status;
 }
 
@@ -258,7 +259,9 @@ function statusHelp(item) {
 }
 
 function OpportunityTable({ opportunities, queue = {}, now }) {
-  const rows = opportunities.slice(0, 18);
+  const visible = opportunities.filter((item) => item.status !== "blocked");
+  const fallback = visible.length ? visible : opportunities;
+  const rows = fallback.slice(0, 10);
   return (
     <section className="surface queue">
       <PanelTitle icon={Triangle} title="Priority Queue" pill={`${rows.length} routes`} />
@@ -307,10 +310,10 @@ function OpportunityHistory({ opportunities = [], metrics = {}, now }) {
     if (filter === "partial") return item.partial;
     return item.status === filter || item.strategy === filter;
   });
-  const rows = filtered.slice(0, 80);
+  const rows = filtered.slice(0, 32);
   return (
     <section className="surface history">
-      <PanelTitle icon={ListChecks} title="Detection Tape" pill={`${metrics.historyRetainedCount || opportunities.length}/${compact.format(metrics.detectedCount || 0)} retained`} />
+      <PanelTitle icon={ListChecks} title="Detection Tape" pill={`${rows.length} shown / ${compact.format(metrics.historyRetainedCount || opportunities.length)} retained`} />
       <div className="historyToolbar">
         {["all", "live", "profitable", "rejected", "partial", "triangular"].map((item) => (
           <button className={filter === item ? "active" : ""} key={item} onClick={() => setFilter(item)} type="button">{item}</button>
@@ -539,12 +542,12 @@ function PartialFills({ trades, opportunities }) {
   );
 }
 
-function Trades({ trades }) {
+function Trades({ trades, metrics = {} }) {
   return (
     <section className="surface trades">
-      <PanelTitle icon={ArrowRightLeft} title="Executed Fills" pill={`${trades.length} recent`} />
+      <PanelTitle icon={ArrowRightLeft} title="Executed Fills" pill={`${trades.length}/${metrics.tradeRetainedCount || trades.length} recent`} />
       <div className="tradeList">
-        {trades.slice(0, 8).map((trade) => (
+        {trades.map((trade) => (
           <article className={trade.partial ? "partialTrade" : ""} key={trade.id}>
             <div className="tradeTop">
               <b>{fillTitle(trade)}</b>
@@ -553,6 +556,7 @@ function Trades({ trades }) {
             <span>{trade.strategy === "triangular" ? `${trade.cyclePath?.join(" -> ")} / ${formatMoney(trade.quoteIn)}` : formatBtc(trade.qtyBtc)}</span>
             <em className={trade.netProfit >= 0 ? "green" : "red"}>{formatMoney(trade.netProfit)}</em>
             <div className="tradeDetails">
+              <small>{new Date(trade.time).toLocaleTimeString()}</small>
               <small>{formatNumber(trade.executionQuality?.edgeCaptureBps || trade.netBps, 2)} bps captured</small>
               {trade.strategy === "triangular" && <small>{trade.legs?.map((leg) => `${leg.from}->${leg.to}`).join(" / ")}</small>}
               {trade.partial && <small>{formatPercent(clampRatio(trade.filledRatio))} target fill</small>}
@@ -580,9 +584,9 @@ function App() {
           <div className="primary">
             <Books books={snapshot.books} />
             <OpportunityTable opportunities={snapshot.queuedOpportunities} queue={snapshot.queue} now={snapshot.now} />
-            <OpportunityHistory opportunities={snapshot.opportunityHistory || snapshot.opportunities} metrics={snapshot.metrics} now={snapshot.now} />
+            <Trades trades={snapshot.trades} metrics={snapshot.metrics} />
             <PartialFills trades={snapshot.trades} opportunities={snapshot.queuedOpportunities} />
-            <Trades trades={snapshot.trades} />
+            <OpportunityHistory opportunities={snapshot.opportunityHistory || snapshot.opportunities} metrics={snapshot.metrics} now={snapshot.now} />
           </div>
           <SideRail snapshot={snapshot} control={control} />
         </section>

@@ -371,7 +371,9 @@ small,
 }
 
 .table {
+  max-height: 520px;
   overflow-x: auto;
+  overflow-y: auto;
 }
 
 .thead,
@@ -386,6 +388,9 @@ small,
 }
 
 .thead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   color: var(--muted);
   background: #fcfdf9;
   font-size: 12px;
@@ -543,6 +548,12 @@ small,
   align-items: center;
 }
 
+.tradeList {
+  max-height: 420px;
+  overflow: auto;
+  align-content: start;
+}
+
 .tradeTop {
   display: flex;
   grid-column: 1 / -1;
@@ -642,7 +653,7 @@ small,
 }
 
 .historyList {
-  max-height: 520px;
+  max-height: 340px;
   overflow: auto;
   align-content: start;
 }
