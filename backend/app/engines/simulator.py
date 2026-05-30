@@ -48,8 +48,8 @@ class SimulatedMarket:
                 "started": self.tick,
                 "cheap": cheap,
                 "rich": rich,
-                "cheap_bps": self.random.uniform(-31, -20),
-                "rich_bps": self.random.uniform(20, 34),
+                "cheap_bps": self.random.uniform(-27, -18),
+                "rich_bps": self.random.uniform(18, 29),
                 "until": self.tick + 6,
             }
 

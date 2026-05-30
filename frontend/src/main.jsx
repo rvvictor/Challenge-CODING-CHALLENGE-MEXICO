@@ -1,6 +1,6 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
-import { Activity, ArrowRightLeft, ChartNoAxesCombined, CirclePause, Clock3, DatabaseZap, Gauge, Globe2, ListChecks, Network, Power, Radar, RefreshCw, ShieldAlert, Sparkles, Split, Triangle, Zap } from "lucide-react";
+import { Activity, ArrowRightLeft, ChartNoAxesCombined, CirclePause, Clock3, DatabaseZap, FileDown, Gauge, Globe2, ListChecks, Network, Power, Radar, RefreshCw, ShieldAlert, Sparkles, Triangle, Zap } from "lucide-react";
 import "./styles/app.css";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "";
@@ -96,7 +96,21 @@ function useAurelion() {
     setSnapshot(await response.json());
   }, []);
 
-  return { snapshot, connected, control, reset };
+  const exportSession = React.useCallback(async () => {
+    const response = await fetch(`${API_BASE}/api/export/session`);
+    const payload = await response.json();
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `aurelion-session-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }, []);
+
+  return { snapshot, connected, control, reset, exportSession };
 }
 
 function Metric({ icon: Icon, label, value, note, tone = "neutral" }) {
@@ -110,7 +124,7 @@ function Metric({ icon: Icon, label, value, note, tone = "neutral" }) {
   );
 }
 
-function Header({ snapshot, connected, control, reset }) {
+function Header({ snapshot, connected, control, reset, exportSession }) {
   const risk = snapshot?.risk;
   return (
     <header className="topbar">
@@ -122,7 +136,7 @@ function Header({ snapshot, connected, control, reset }) {
         </div>
       </div>
       <div className="controls">
-        <span className={`conn ${connected ? "online" : "offline"}`}><i />{connected ? "streaming" : "syncing"}</span>
+        <span className={`conn ${connected ? "online" : "offline"}`}><i />{connected ? "en vivo" : "sincronizando"}</span>
         <div className="segmented">
           {["auto", "live", "demo"].map((mode) => (
             <button key={mode} className={snapshot?.mode === mode ? "active" : ""} onClick={() => control({ mode })}>{mode}</button>
@@ -130,12 +144,13 @@ function Header({ snapshot, connected, control, reset }) {
         </div>
         <button className={`toggle ${risk?.autoExecution ? "on" : ""}`} onClick={() => control({ autoExecution: !risk?.autoExecution })}>
           {risk?.autoExecution ? <Power size={16} /> : <CirclePause size={16} />}
-          {risk?.autoExecution ? "armed" : "paused"}
+          {risk?.autoExecution ? "activo" : "pausado"}
         </button>
         <button className="stressButton" title="Simulate volatility circuit breaker" onClick={() => control({ volatilityShock: true })}>
           <Zap size={16} />
-          stress
+          volatilidad
         </button>
+        <button className="iconButton" title="Export audit session" onClick={exportSession}><FileDown size={17} /></button>
         <button className="iconButton" title="Reset session" onClick={reset}><RefreshCw size={17} /></button>
       </div>
     </header>
@@ -145,27 +160,25 @@ function Header({ snapshot, connected, control, reset }) {
 function Overview({ snapshot }) {
   const metrics = snapshot.metrics;
   const risk = snapshot.risk;
-  const stateLabel = risk.paused ? "circuit breaker" : risk.autoExecution ? "armed" : "manual stop";
+  const stateLabel = risk.paused ? "Pausado por riesgo" : risk.autoExecution ? "Operando" : "Pausado manual";
   const condition = risk.condition && risk.condition !== "healthy" ? risk.condition : "healthy";
   const stateNote = risk.paused
     ? `${condition} / ${risk.reason} / resumes in ${ago(risk.cooldownRemainingMs ?? risk.pausedUntil - snapshot.now)}`
     : risk.reason;
   const freshness = Math.max(0, metrics.avgFreshnessMs ?? metrics.avgLatencyMs);
-  const bestEdge = metrics.bestNetBps > 0 ? `${formatNumber(metrics.bestNetBps, 2)} bps` : "No edge";
+  const bestEdge = metrics.bestNetBps > 0 ? `${formatNumber(metrics.bestNetBps, 2)} bps` : "Sin edge";
   const observed = metrics.bestNetBps > 0
-    ? `${snapshot.queue.executable} executable`
+    ? `${snapshot.queue.executable} listas para ejecutar`
     : metrics.bestObservedNetBps < 0
-      ? `closest miss ${formatNumber(Math.abs(metrics.bestObservedNetBps), 2)} bps short`
-      : "waiting for complete books";
+      ? `faltan ${formatNumber(Math.abs(metrics.bestObservedNetBps), 2)} bps`
+      : "esperando libros completos";
   return (
     <section className="overview">
-      <Metric icon={ChartNoAxesCombined} label="Realized P&L" value={formatMoney(metrics.cumulativePnl)} note={`${metrics.executedCount} fills`} tone={metrics.cumulativePnl >= 0 ? "good" : "bad"} />
-      <Metric icon={ShieldAlert} label="State" value={stateLabel} note={stateNote} tone={risk.paused || !risk.autoExecution ? "bad" : "good"} />
-      <Metric icon={Radar} label="Best Edge" value={bestEdge} note={observed} />
-      <Metric icon={ArrowRightLeft} label="Detected" value={compact.format(metrics.detectedCount)} note={`${metrics.liveSignalCount || 0} live now / ${compact.format(metrics.triangularCount)} triangular`} />
-      <Metric icon={Network} label="Books" value={`${metrics.liveBooks} WS / ${metrics.restBooks} REST`} note={`${metrics.simulatedBooks} demo`} />
-      <Metric icon={Split} label="Partial Fills" value={compact.format(metrics.partialCount || 0)} note={`${metrics.partialQueuedCount || 0} queued candidates`} />
-      <Metric icon={Gauge} label="Book Age" value={`${Math.round(freshness)} ms`} note={`p95 ${Math.max(0, Math.round(metrics.p95FreshnessMs || freshness))} ms / ${metrics.fastBooks || 0} fast`} tone={(metrics.staleBooks || 0) > 0 ? "bad" : "neutral"} />
+      <Metric icon={ChartNoAxesCombined} label="P&L realizado" value={formatMoney(metrics.cumulativePnl)} note={`${metrics.executedCount} trades ejecutados`} tone={metrics.cumulativePnl >= 0 ? "good" : "bad"} />
+      <Metric icon={ShieldAlert} label="Estado del bot" value={stateLabel} note={stateNote} tone={risk.paused || !risk.autoExecution ? "bad" : "good"} />
+      <Metric icon={Radar} label="Mejor oportunidad" value={bestEdge} note={observed} />
+      <Metric icon={ArrowRightLeft} label="Señales detectadas" value={compact.format(metrics.detectedCount)} note={`${metrics.liveSignalCount || 0} ocurriendo ahora`} />
+      <Metric icon={Gauge} label="Velocidad" value={`${Math.round(freshness)} ms`} note={`p95 ${Math.max(0, Math.round(metrics.p95FreshnessMs || freshness))} ms`} tone={(metrics.staleBooks || 0) > 0 ? "bad" : "neutral"} />
     </section>
   );
 }
@@ -173,7 +186,7 @@ function Overview({ snapshot }) {
 function Books({ books }) {
   return (
     <section className="surface books">
-      <PanelTitle icon={Activity} title="Market Books" pill={`${books.length} venues`} />
+      <PanelTitle icon={Activity} title="Mercado en Vivo" pill={`${books.length} exchanges`} />
       <div className="bookGrid">
         {books.map((book) => (
           <article className={`book ${book.source}`} key={book.exchangeId}>
@@ -222,7 +235,7 @@ function RouteLabel({ item }) {
   return (
     <span className="routeStack">
       <b>{item.buyExchange} {"->"} {item.sellExchange}</b>
-      <small>{formatMoney(item.buyPrice)} buy / {formatMoney(item.sellPrice)} sell</small>
+      <small>{formatMoney(item.buyPrice)} compra / {formatMoney(item.sellPrice)} venta</small>
     </span>
   );
 }
@@ -244,40 +257,59 @@ function statusClass(item) {
 }
 
 function statusLabel(item) {
-  if (item.status === "profitable" && item.partial) return "profitable partial";
-  if (item.status === "profitable") return "profitable full";
-  if (item.status === "blocked" && `${item.reason}`.toLowerCase().includes("wallet")) return "inventory gate";
-  if (item.status === "blocked") return "liquidity gate";
+  if (item.status === "profitable" && item.partial) return "rentable parcial";
+  if (item.status === "profitable") return "rentable";
+  if (item.status === "blocked" && `${item.reason}`.toLowerCase().includes("wallet")) return "inventario";
+  if (item.status === "blocked") return "liquidez";
+  if (item.status === "rejected") return "descartada";
   return item.status;
 }
 
 function statusHelp(item) {
-  if (item.status === "profitable" && item.partial) return `${formatPercent(clampRatio(item.filledRatio))} target liquidity`;
-  if (item.status === "profitable") return "full target executable";
-  if (item.status === "blocked") return item.reason || "insufficient inventory/depth";
+  if (item.status === "profitable" && item.partial) return `${formatPercent(clampRatio(item.filledRatio))} de liquidez`;
+  if (item.status === "profitable") return "lista para ejecutar";
+  if (item.status === "blocked") return item.reason || "inventario o profundidad insuficiente";
   return item.reason;
+}
+
+function decisionActionLabel(item) {
+  const action = item?.decision?.action;
+  if (action === "execute-partial") return "Ejecutar parcial";
+  if (action === "execute-full") return "Ejecutar completa";
+  if (action === "inventory-gate") return "Esperar inventario";
+  if (action === "liquidity-gate") return "Esperar liquidez";
+  if (action === "skip-costs") return "Descartar";
+  return statusLabel(item || {});
+}
+
+function decisionCaption(item) {
+  if (!item) return "";
+  if (item.status === "profitable" && item.partial) return "Rentable, pero con liquidez limitada.";
+  if (item.status === "profitable") return "Rentable después de fees, slippage y latencia.";
+  if (item.status === "blocked") return "No pasa una compuerta dura de inventario o profundidad.";
+  return "El costo total consume el spread observado.";
 }
 
 function OpportunityTable({ opportunities, queue = {}, now }) {
   const visible = opportunities.filter((item) => item.status !== "blocked");
   const fallback = visible.length ? visible : opportunities;
-  const rows = fallback.slice(0, 10);
+  const rows = fallback.slice(0, 7);
   return (
     <section className="surface queue">
-      <PanelTitle icon={Triangle} title="Priority Queue" pill={`${rows.length} routes`} />
+      <PanelTitle icon={Triangle} title="Oportunidades Priorizadas" pill={`${queue.executable || 0} ejecutables`} />
       <div className="queueStats">
-        <span><b>{queue.received || 0}</b> scanned</span>
-        <span><b>{queue.deduped || 0}</b> deduped</span>
-        <span><b>{queue.executable || 0}</b> executable</span>
-        <span><b>{queue.queued || 0}</b> ranked</span>
+        <span><b>{queue.received || 0}</b> analizadas</span>
+        <span><b>{queue.deduped || 0}</b> duplicadas fuera</span>
+        <span><b>{queue.executable || 0}</b> listas</span>
+        <span><b>{queue.queued || 0}</b> en ranking</span>
       </div>
       <div className="table">
-        <div className="thead"><span>Route</span><span>Size</span><span>Net</span><span>Score</span><span>Status</span></div>
+        <div className="thead"><span>Ruta</span><span>Tamaño</span><span>Ganancia neta</span><span>Score</span><span>Estado</span></div>
         {rows.map((opportunity) => (
           <div className="tr" key={opportunity.id}>
             <span className="routeStack">
               <RouteLabel item={opportunity} />
-              <small className={now - opportunity.time <= 1500 ? "liveStamp on" : "liveStamp"}><Clock3 size={12} /> detected {signalAge(opportunity, now)} ago</small>
+              <small className={now - opportunity.time <= 1500 ? "liveStamp on" : "liveStamp"}><Clock3 size={12} /> hace {signalAge(opportunity, now)}</small>
             </span>
             <span>
               <b>{opportunitySize(opportunity)}</b>
@@ -302,21 +334,110 @@ function OpportunityTable({ opportunities, queue = {}, now }) {
   );
 }
 
+function topDecision(opportunities = []) {
+  return opportunities.find((item) => item.status === "profitable") || opportunities.find((item) => item.decision) || opportunities[0];
+}
+
+function scoreTone(score) {
+  if (score >= 82) return "good";
+  if (score >= 58) return "watch";
+  return "bad";
+}
+
+function EdgeExplainability({ opportunities = [] }) {
+  const item = topDecision(opportunities);
+  if (!item) {
+    return (
+      <section className="surface edgePanel">
+        <PanelTitle icon={Radar} title="Decisión Actual" pill="esperando" />
+        <div className="empty">Aún no hay rutas rankeadas</div>
+      </section>
+    );
+  }
+  const decision = item.decision || {};
+  const breakdown = item.edgeBreakdown || {};
+  return (
+    <section className="surface edgePanel">
+      <PanelTitle icon={Radar} title="Decisión Actual" pill={`calidad ${decision.scoreGrade || "D"}`} />
+      <div className="edgeBody">
+        <div className={`decisionStamp ${statusClass(item)}`}>
+          <b>{decisionActionLabel(item)}</b>
+          <span>{decisionCaption(item)}</span>
+        </div>
+        <div className="edgeRoute">
+          <RouteLabel item={item} />
+          <small>{formatNumber(breakdown.netBps, 2)} bps net / {formatNumber(breakdown.costDragPct, 1)}% cost drag / {formatNumber(breakdown.latencyMs, 0)} ms</small>
+        </div>
+        <div className="scoreBars">
+          {(breakdown.components || []).map((component) => (
+            <div className="scoreBar" key={component.label}>
+              <span>{component.label}</span>
+              <i style={{ "--fill": `${(Number(component.value || 0) / Number(component.max || 1)) * 100}%` }} />
+              <b>{formatNumber(component.value, 1)}</b>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function RealityCheck({ opportunities = [] }) {
+  const item = topDecision(opportunities);
+  const reality = item?.paperVsSettlement;
+  if (!item || !reality) {
+    return (
+      <section className="surface realityPanel">
+        <PanelTitle icon={ArrowRightLeft} title="Costos Reales" pill="sin ruta" />
+        <div className="empty">No hay ruta para revisar</div>
+      </section>
+    );
+  }
+  return (
+    <section className="surface realityPanel">
+      <PanelTitle icon={ArrowRightLeft} title="Costos Reales" pill={reality.verdict} />
+      <div className="realityGrid">
+        <article>
+          <span>Sin rebalanceo</span>
+          <b className={reality.prefundedNetProfit >= 0 ? "green" : "red"}>{formatMoney(reality.prefundedNetProfit)}</b>
+        </article>
+        <article>
+          <span>Neto realista</span>
+          <b className={reality.settlementNetProfit >= 0 ? "green" : "red"}>{formatMoney(reality.settlementNetProfit)}</b>
+        </article>
+        <article>
+          <span>Costo extra</span>
+          <b>{formatMoney(reality.settlementDrag)}</b>
+          <small>{formatNumber(reality.settlementDragBps, 2)} bps</small>
+        </article>
+      </div>
+    </section>
+  );
+}
+
 function OpportunityHistory({ opportunities = [], metrics = {}, now }) {
   const [filter, setFilter] = React.useState("all");
+  const filters = [
+    ["all", "Todas"],
+    ["live", "Ahora"],
+    ["profitable", "Rentables"],
+    ["rejected", "Descartadas"],
+    ["partial", "Parciales"],
+    ["triangular", "Triangular"],
+  ];
   const filtered = opportunities.filter((item) => {
     if (filter === "all") return true;
     if (filter === "live") return now - item.time <= 2500;
     if (filter === "partial") return item.partial;
     return item.status === filter || item.strategy === filter;
   });
-  const rows = filtered.slice(0, 32);
+  const rows = filtered.slice(0, 18);
   return (
     <section className="surface history">
-      <PanelTitle icon={ListChecks} title="Detection Tape" pill={`${rows.length} shown / ${compact.format(metrics.historyRetainedCount || opportunities.length)} retained`} />
+      <PanelTitle icon={ListChecks} title="Historial de Señales" pill={`${rows.length} recientes`} />
       <div className="historyToolbar">
-        {["all", "live", "profitable", "rejected", "partial", "triangular"].map((item) => (
-          <button className={filter === item ? "active" : ""} key={item} onClick={() => setFilter(item)} type="button">{item}</button>
+        {filters.map(([id, label]) => (
+          <button className={filter === id ? "active" : ""} key={id} onClick={() => setFilter(id)} type="button">{label}</button>
         ))}
       </div>
       <div className="historyList">
@@ -325,15 +446,15 @@ function OpportunityHistory({ opportunities = [], metrics = {}, now }) {
             <RouteLabel item={item} />
             <span className="historyEdge">
               <b className={item.netProfit >= 0 ? "green" : "red"}>{formatNumber(item.netBps, 2)} bps</b>
-              <small>{formatMoney(item.netProfit)} net / score {formatNumber(item.score, 2)}</small>
+              <small>{formatMoney(item.netProfit)} neto / score {formatNumber(item.score, 2)}</small>
             </span>
             <span className="historyMeta">
               <em className={`badge ${statusClass(item)}`}>{statusLabel(item)}</em>
-              <small className={now - item.time <= 1500 ? "liveStamp on" : "liveStamp"}><Clock3 size={12} /> {signalAge(item, now)} ago</small>
+              <small className={now - item.time <= 1500 ? "liveStamp on" : "liveStamp"}><Clock3 size={12} /> hace {signalAge(item, now)}</small>
             </span>
           </article>
         ))}
-        {!rows.length && <div className="empty">No matching signals</div>}
+        {!rows.length && <div className="empty">No hay señales con este filtro</div>}
       </div>
     </section>
   );
@@ -345,7 +466,7 @@ function Streams({ streams, redis }) {
   const streamTone = (stream) => stream.disabled ? "disabled" : stream.restFallback ? "rest" : "ws";
   return (
     <section className="surface streams">
-      <PanelTitle icon={DatabaseZap} title="Infrastructure" pill={redisLabel} />
+      <PanelTitle icon={DatabaseZap} title="Infraestructura" pill={redisLabel} />
       <div className="streamList">
         {rows.slice(0, 12).map((stream) => (
           <article className="stream" key={stream.key}>
@@ -364,7 +485,7 @@ function Streams({ streams, redis }) {
 function GlobalMarket({ globalMarket }) {
   return (
     <section className="surface">
-      <PanelTitle icon={Globe2} title="Global Market" pill={globalMarket.status || "warming"} />
+      <PanelTitle icon={Globe2} title="Contexto Global" pill={globalMarket.status || "cargando"} />
       <div className="globalGrid">
         <article>
           <span>BTC reference</span>
@@ -386,9 +507,55 @@ function GlobalMarket({ globalMarket }) {
   );
 }
 
-function ExchangeCoverage({ coverage = {}, control }) {
+function LatencySloPanel({ slo = {} }) {
+  const age = slo.bookAgeMs || {};
+  const update = slo.updateLatencyMs || {};
+  return (
+    <section className={`surface sloPanel ${slo.status || "green"}`}>
+      <PanelTitle icon={Gauge} title="Velocidad" pill={slo.summary || "cargando"} />
+      <div className="sloGrid">
+        <article>
+          <span>Libros p95</span>
+          <b>{Math.round(age.p95 || 0)} ms</b>
+          <small>target {Math.round(age.targetP95 || 0)} ms</small>
+        </article>
+        <article>
+          <span>Update p95</span>
+          <b>{Math.round(update.p95 || 0)} ms</b>
+          <small>target {Math.round(update.targetP95 || 0)} ms</small>
+        </article>
+      </div>
+      <div className="sloStrip">
+        <span>p50 age {Math.round(age.p50 || 0)} ms</span>
+        <span>p99 age {Math.round(age.p99 || 0)} ms</span>
+        <span>p99 upd {Math.round(update.p99 || 0)} ms</span>
+      </div>
+    </section>
+  );
+}
+
+function DemoQualityPanel({ quality = {}, mode }) {
+  const tone = scoreTone(Number(quality.score || 0));
+  return (
+    <section className={`surface qualityPanel ${tone}`}>
+      <PanelTitle icon={Sparkles} title="Calidad Demo" pill={mode === "demo" ? quality.label || "cargando" : "observando"} />
+      <div className="qualityDial">
+        <b>{Math.round(quality.score || 0)}</b>
+        <span>calidad</span>
+      </div>
+      <div className="qualityStats">
+        <span>{formatMoney(quality.pnlPerMinute || 0)} / min</span>
+        <span>{formatNumber(quality.fillsPerMinute || 0, 2)} fills / min</span>
+        <span>{formatPercent(quality.partialRate || 0)} partial</span>
+      </div>
+    </section>
+  );
+}
+
+function ExchangeCoverage({ coverage = {}, quality = [], control }) {
   const active = new Set((coverage.active || []).map((exchange) => exchange.id));
   const universe = coverage.universe || coverage.active || [];
+  const qualityById = new Map((quality || []).map((venue) => [venue.exchangeId, venue]));
   const toggle = (exchange) => {
     const next = active.has(exchange.id)
       ? [...active].filter((id) => id !== exchange.id)
@@ -398,12 +565,12 @@ function ExchangeCoverage({ coverage = {}, control }) {
   };
   return (
     <section className="surface">
-      <PanelTitle icon={Network} title="Exchange Coverage" pill={`${coverage.activeCount || active.size}/${coverage.universeCount || universe.length} active`} />
+      <PanelTitle icon={Network} title="Exchanges" pill={`${coverage.activeCount || active.size} activos`} />
       <div className="coverageGrid">
         {universe.map((exchange) => (
           <button className={active.has(exchange.id) ? "active" : ""} disabled={!active.has(exchange.id) && active.size >= 5} key={exchange.id} onClick={() => toggle(exchange)} type="button">
             <b>{exchange.name}</b>
-            <span>{active.has(exchange.id) ? "speed profile" : "coverage catalog"}</span>
+            <span>{qualityById.has(exchange.id) ? `${qualityById.get(exchange.id).score} quality / ${qualityById.get(exchange.id).latencyMs} ms` : active.has(exchange.id) ? "speed profile" : "coverage catalog"}</span>
           </button>
         ))}
       </div>
@@ -456,10 +623,12 @@ function SideRail({ snapshot, control }) {
         <PanelTitle icon={ChartNoAxesCombined} title="P&L" pill={formatMoney(snapshot.metrics.cumulativePnl)} />
         <PnlChart series={snapshot.pnlSeries} />
       </section>
-      <ExchangeCoverage coverage={snapshot.exchangeCoverage} control={control} />
+      <LatencySloPanel slo={snapshot.latencySlo} />
+      <DemoQualityPanel quality={snapshot.demoQuality} mode={snapshot.mode} />
+      <ExchangeCoverage coverage={snapshot.exchangeCoverage} quality={snapshot.venueQuality} control={control} />
       <GlobalMarket globalMarket={snapshot.globalMarket || {}} />
       <section className="surface">
-        <PanelTitle icon={DatabaseZap} title="Inventory" pill={formatMoney(snapshot.totals.markToMarket)} />
+        <PanelTitle icon={DatabaseZap} title="Wallets" pill={formatMoney(snapshot.totals.markToMarket)} />
         <div className="wallets">
           {snapshot.wallets.map((wallet) => (
             <article key={wallet.exchangeId}>
@@ -471,7 +640,7 @@ function SideRail({ snapshot, control }) {
         </div>
       </section>
       <section className="surface">
-        <PanelTitle icon={ShieldAlert} title="Risk Timeline" pill={`${snapshot.riskEvents.length} events`} />
+        <PanelTitle icon={ShieldAlert} title="Riesgo" pill={`${snapshot.riskEvents.length} eventos`} />
         <div className="events">
           {snapshot.riskEvents.slice(0, 8).map((event) => (
             <article className="event" key={event.id || `${event.type}-${event.time}`}>
@@ -480,7 +649,7 @@ function SideRail({ snapshot, control }) {
               <small>{new Date(event.time).toLocaleTimeString()}</small>
             </article>
           ))}
-          {!snapshot.riskEvents.length && <div className="empty">No risk events</div>}
+          {!snapshot.riskEvents.length && <div className="empty">Sin eventos de riesgo</div>}
         </div>
       </section>
     </aside>
@@ -492,19 +661,11 @@ function fillTitle(item) {
   return `${item.buyExchange} -> ${item.sellExchange}`;
 }
 
-function fillSubtitle(item) {
-  if (item.strategy === "triangular") {
-    const path = item.cyclePath?.join(" -> ") || item.product;
-    return `${path} / ${formatMoney(item.quoteIn || 0)} in`;
-  }
-  return `${formatBtc(item.qtyBtc)} filled / ${formatMoney(item.buyPrice)} to ${formatMoney(item.sellPrice)}`;
-}
-
 function executionKind(item) {
-  if (item.strategy === "triangular" && item.partial) return "triangular partial";
+  if (item.strategy === "triangular" && item.partial) return "triangular parcial";
   if (item.strategy === "triangular") return "triangular";
-  if (item.partial) return "partial";
-  return "complete";
+  if (item.partial) return "parcial";
+  return "completa";
 }
 
 function executionKindClass(item) {
@@ -514,38 +675,10 @@ function executionKindClass(item) {
   return "filled";
 }
 
-function PartialFills({ trades, opportunities }) {
-  const executed = trades.filter((trade) => trade.partial).slice(0, 5).map((trade) => ({ ...trade, visualType: "executed" }));
-  const queued = opportunities.filter((opportunity) => opportunity.partial).slice(0, 5).map((opportunity) => ({ ...opportunity, visualType: "candidate" }));
-  const items = [...executed, ...queued].slice(0, 6);
-  return (
-    <section className="surface partials">
-      <PanelTitle icon={Split} title="Partial Execution Watch" pill={`${executed.length} fills / ${queued.length} candidates`} />
-      <div className="partialList">
-        {items.map((item) => {
-          const ratio = clampRatio(item.filledRatio ?? (item.partial ? 0.72 : 1));
-          return (
-            <article key={`${item.visualType}-${item.id}`}>
-              <div className="partialHead">
-                <b>{fillTitle(item)}</b>
-                <em className={`badge ${item.visualType === "executed" ? executionKindClass(item) : statusClass(item)}`}>{item.visualType === "executed" ? executionKind(item) : "candidate"}</em>
-              </div>
-              <span>{fillSubtitle(item)}</span>
-              <div className="fillMeter" style={{ "--fill": `${ratio * 100}%` }}><i /></div>
-              <small>{formatPercent(ratio)} captured / target {item.strategy === "triangular" ? formatMoney(item.targetQuote || item.quoteIn) : formatBtc(item.targetQtyBtc || item.qtyBtc)}</small>
-            </article>
-          );
-        })}
-        {!items.length && <div className="empty">No partial fills yet</div>}
-      </div>
-    </section>
-  );
-}
-
 function Trades({ trades, metrics = {} }) {
   return (
     <section className="surface trades">
-      <PanelTitle icon={ArrowRightLeft} title="Executed Fills" pill={`${trades.length}/${metrics.tradeRetainedCount || trades.length} recent`} />
+      <PanelTitle icon={ArrowRightLeft} title="Trades Ejecutados" pill={`${trades.length} recientes`} />
       <div className="tradeList">
         {trades.map((trade) => (
           <article className={trade.partial ? "partialTrade" : ""} key={trade.id}>
@@ -557,35 +690,38 @@ function Trades({ trades, metrics = {} }) {
             <em className={trade.netProfit >= 0 ? "green" : "red"}>{formatMoney(trade.netProfit)}</em>
             <div className="tradeDetails">
               <small>{new Date(trade.time).toLocaleTimeString()}</small>
-              <small>{formatNumber(trade.executionQuality?.edgeCaptureBps || trade.netBps, 2)} bps captured</small>
+              <small>{formatNumber(trade.executionQuality?.edgeCaptureBps || trade.netBps, 2)} bps capturados</small>
               {trade.strategy === "triangular" && <small>{trade.legs?.map((leg) => `${leg.from}->${leg.to}`).join(" / ")}</small>}
-              {trade.partial && <small>{formatPercent(clampRatio(trade.filledRatio))} target fill</small>}
-              {!trade.partial && <small>100% target fill</small>}
+              {trade.partial && <small>{formatPercent(clampRatio(trade.filledRatio))} del objetivo</small>}
+              {!trade.partial && <small>100% del objetivo</small>}
             </div>
           </article>
         ))}
-        {!trades.length && <div className="empty">No fills yet</div>}
+        {!trades.length && <div className="empty">Aún no hay trades ejecutados</div>}
       </div>
     </section>
   );
 }
 
 function App() {
-  const { snapshot, connected, control, reset } = useAurelion();
+  const { snapshot, connected, control, reset, exportSession } = useAurelion();
   if (!snapshot) {
     return <main className="loading"><div className="sigil"><Sparkles size={24} /></div><span>Starting Aurelion</span></main>;
   }
   return (
     <>
-      <Header snapshot={snapshot} connected={connected} control={control} reset={reset} />
+      <Header snapshot={snapshot} connected={connected} control={control} reset={reset} exportSession={exportSession} />
       <main className="layout">
         <Overview snapshot={snapshot} />
         <section className="mainGrid">
           <div className="primary">
             <Books books={snapshot.books} />
+            <div className="decisionDeck">
+              <EdgeExplainability opportunities={snapshot.queuedOpportunities} />
+              <RealityCheck opportunities={snapshot.queuedOpportunities} />
+            </div>
             <OpportunityTable opportunities={snapshot.queuedOpportunities} queue={snapshot.queue} now={snapshot.now} />
             <Trades trades={snapshot.trades} metrics={snapshot.metrics} />
-            <PartialFills trades={snapshot.trades} opportunities={snapshot.queuedOpportunities} />
             <OpportunityHistory opportunities={snapshot.opportunityHistory || snapshot.opportunities} metrics={snapshot.metrics} now={snapshot.now} />
           </div>
           <SideRail snapshot={snapshot} control={control} />

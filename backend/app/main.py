@@ -50,6 +50,17 @@ async def snapshot() -> dict:
     return market_service.snapshot()
 
 
+@app.get("/api/export/session")
+async def export_session() -> dict:
+    return market_service.export_session()
+
+
+@app.get("/api/replay")
+async def replay() -> dict:
+    snapshot = market_service.snapshot()
+    return snapshot["replay"]
+
+
 @app.get("/api/config")
 async def config() -> dict:
     return {

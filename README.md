@@ -19,6 +19,12 @@ Aurelion es un bot de arbitraje de Bitcoin con arquitectura backend/frontend: ba
 - Circuit breaker por volatilidad, stale data y racha de perdidas.
 - Boton de stress de volatilidad para validar el circuit breaker en vivo.
 - Historial retenido de oportunidades, ejecuciones, P&L y eventos sin perderse al cambiar exchanges activos.
+- Aurelion Edge Ledger: bitacora JSONL auditable de decisiones, eventos de riesgo y ejecuciones.
+- Replay Mode en el dashboard para recorrer la secuencia reciente de decisiones sin pausar el motor.
+- Score explicable por oportunidad: edge neto, costos, liquidez, confianza y penalizacion de latencia.
+- Reality check paper vs settlement para distinguir ganancias prefunded de ganancias con rebalanceo incluido.
+- Latency SLO, Demo Quality Meter y Venue Quality Score para demostrar velocidad, realismo y calidad de datos.
+- Exportacion de sesion en JSON con oportunidades, trades, P&L, eventos, metricas y ledger.
 - Reequilibrio virtual de inventario para demo/paper: evita que una buena ruta quede bloqueada solo porque BTC/USDT quedo concentrado en otro venue.
 - Modo demo deterministico para presentaciones sin depender de APIs externas.
 
@@ -33,6 +39,8 @@ backend/
   app/engines/arbitrage.py       Arbitraje cross-exchange
   app/engines/triangular.py      Arbitraje triangular
   app/engines/queue.py           Ranking y dedupe
+  app/engines/edge_analysis.py   Explicabilidad, SLO, venue quality, demo quality
+  app/engines/edge_ledger.py     Ledger JSONL y replay audit trail
   app/engines/risk.py            Circuit breaker
   app/integrations/ccxt_provider.py
   app/integrations/global_market.py
@@ -114,7 +122,7 @@ npm run start
 | `WS_FAILURE_THRESHOLD` | `5` | Fallos antes de REST fallback |
 | `POLL_INTERVAL_MS` | `1200` | REST fallback interval |
 | `MIN_TRADE_BTC` | `0.002` | Tamano minimo realista |
-| `MAX_TRADE_BTC` | `0.025` | Tamano maximo por trade para controlar riesgo y P&L demo |
+| `MAX_TRADE_BTC` | `0.015` | Tamano maximo por trade para controlar riesgo y P&L demo |
 | `MIN_NET_BPS` | `0.75` | Edge neto minimo despues de costos |
 | `MAX_EXECUTIONS_PER_TICK` | `1` | Evita sobre-operar el mismo tick |
 | `PAIR_COOLDOWN_MS` | `20000` | Cooldown por ruta |
@@ -125,7 +133,7 @@ npm run start
 | `VOLATILITY_REARM_MS` | `45000` | Rearm de volatilidad |
 | `PAUSE_AFTER_LOSS_MS` | `60000` | Cooldown |
 | `TRIANGULAR_ENABLED` | `true` | Activa triangular |
-| `TRIANGULAR_QUOTE_SIZE` | `900` | Tamano ciclo |
+| `TRIANGULAR_QUOTE_SIZE` | `650` | Tamano ciclo |
 | `ACTIVE_EXCHANGES` | `okx,bybit,kucoin,kraken,bitstamp` | Perfil rapido. Usa `all` para activar los 10 |
 | `GLOBAL_MARKET_ENABLED` | `true` | Contexto CoinGecko |
 | `GLOBAL_MARKET_INTERVAL_MS` | `60000` | Frecuencia contexto global |
@@ -135,11 +143,15 @@ npm run start
 - `GET /api/health`
 - `GET /api/snapshot`
 - `GET /api/config`
+- `GET /api/export/session`
+- `GET /api/replay`
 - `POST /api/control`
 - `POST /api/reset`
 - `GET /events`
 
 `POST /api/control` acepta `mode`, `autoExecution`, `activeExchanges` y `volatilityShock`. Cambiar `activeExchanges` reinicia streams/libros temporales, pero conserva P&L realizado, conteos, ejecuciones e historial detectado de la sesion. `volatilityShock` inyecta una prueba controlada y activa el circuit breaker como validacion visual.
+
+`GET /api/export/session` entrega un paquete auditable para jueces: oportunidades retenidas, fills ejecutados, P&L, eventos, SLO de latencia, quality scores, configuracion activa y Edge Ledger. El frontend tambien lo descarga desde el boton de exportacion del header.
 
 ## Interpretacion Rapida de Estados
 

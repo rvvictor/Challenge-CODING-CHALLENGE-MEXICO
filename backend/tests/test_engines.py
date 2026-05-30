@@ -260,6 +260,44 @@ class EngineTests(unittest.TestCase):
         self.assertTrue(trades[0].get("inventoryRebalance"))
         self.assertGreaterEqual(float(ledger.get("bybit")["BTC"]), 0)
 
+    def test_explainable_edge_adds_decision_and_settlement_reality(self):
+        from backend.app.engines.edge_analysis import explain_opportunity
+
+        opportunity = explain_opportunity({
+            "id": "edge",
+            "strategy": "simple",
+            "status": "profitable",
+            "grossProfit": 8,
+            "grossBps": 6.2,
+            "netProfit": 2.4,
+            "netBps": 1.7,
+            "score": 0.5,
+            "confidence": 0.91,
+            "partial": True,
+            "filledRatio": 0.63,
+            "buyExchange": "OKX",
+            "sellExchange": "Kraken",
+            "buyPrice": 70000,
+            "qtyBtc": 0.01,
+            "costs": {"totalCosts": 5.6, "rebalanceCost": 0.8},
+            "latencies": {"buyMs": 30, "sellMs": 40},
+        })
+        self.assertEqual(opportunity["decision"]["action"], "execute-partial")
+        self.assertIn("components", opportunity["edgeBreakdown"])
+        self.assertEqual(opportunity["paperVsSettlement"]["verdict"], "settlement-safe")
+
+    def test_market_service_exports_session_and_replay_ledger(self):
+        from backend.app.engines.market_service import MarketService
+
+        service = MarketService(Settings(market_mode="demo"))
+        service.edge_ledger.append("opportunity", {"route": "OKX -> Kraken", "netBps": 1.2})
+        export = service.export_session()
+        replay = service.snapshot()["replay"]
+        self.assertEqual(export["botName"], "Aurelion")
+        self.assertIn("latencySlo", export)
+        self.assertEqual(replay["eventCount"], 1)
+        self.assertEqual(export["edgeLedger"][0]["type"], "opportunity")
+
 
 if __name__ == "__main__":
     unittest.main()

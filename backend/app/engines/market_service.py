@@ -8,6 +8,15 @@ from collections.abc import AsyncIterator
 from backend.app.core.config import Settings, select_exchanges, settings
 from backend.app.core.models import OrderBook
 from backend.app.engines.arbitrage import CrossExchangeArbitrageEngine
+from backend.app.engines.edge_analysis import (
+    compact_opportunity_record,
+    demo_quality,
+    explain_opportunity,
+    latency_slo,
+    session_summary,
+    venue_quality,
+)
+from backend.app.engines.edge_ledger import EdgeLedger
 from backend.app.engines.event_store import EventStore
 from backend.app.engines.execution import ExecutionSimulator
 from backend.app.engines.fills import best
@@ -43,6 +52,7 @@ class MarketService:
         self.cross_engine = CrossExchangeArbitrageEngine(cfg, self.ledger)
         self.triangular_engine = TriangularArbitrageEngine(cfg, self.ledger)
         self.queue = OpportunityQueue()
+        self.edge_ledger = EdgeLedger()
         self.executor = ExecutionSimulator(cfg, self.ledger, self.store, self.risk)
         self.redis = RedisBus(cfg)
         self.global_market = GlobalMarketIntel(cfg)
@@ -84,6 +94,12 @@ class MarketService:
 
     async def handle_provider_event(self, event: dict) -> None:
         self.store.add_event(event)
+        self.edge_ledger.append("market-event", {
+            "type": event.get("type"),
+            "exchange": event.get("exchange"),
+            "symbol": event.get("symbol"),
+            "reason": event.get("reason") or event.get("error"),
+        })
         await self.redis.publish("market-events", event)
 
     async def set_mode(self, mode: str) -> None:
@@ -149,6 +165,7 @@ class MarketService:
 
     def reset(self) -> None:
         self.store.reset()
+        self.edge_ledger.reset()
         self.ledger.reset()
         self.risk.reset()
         self.executor.reset()
@@ -194,13 +211,16 @@ class MarketService:
 
         primary_map = {book.exchange_id: book for book in primary}
         opportunities = self.cross_engine.scan(primary_map) + self.triangular_engine.scan(self.books)
-        ranked = self.queue.rank(opportunities)
+        ranked = [explain_opportunity(item) for item in self.queue.rank(opportunities)]
         self.last_scan = ranked
         if ranked:
-            self.store.add_opportunities(self.curated_opportunities(ranked))
+            curated = self.curated_opportunities(ranked)
+            self.store.add_opportunities(curated)
+            self.record_edge_decisions(curated)
 
         self.last_executions = self.executor.try_execute(ranked, summaries)
         for trade in self.last_executions:
+            self.edge_ledger.append("trade", self.compact_trade_record(trade))
             asyncio.create_task(self.redis.publish("trades", trade))
         self.flush_risk_events()
 
@@ -238,9 +258,37 @@ class MarketService:
         }
         return curated
 
+    def record_edge_decisions(self, opportunities: list[dict]) -> None:
+        for opportunity in opportunities:
+            self.edge_ledger.append("opportunity", compact_opportunity_record(opportunity))
+
+    def compact_trade_record(self, trade: dict) -> dict:
+        if trade.get("strategy") == "triangular":
+            route = f"{trade.get('exchange')} / {' -> '.join(trade.get('cyclePath') or [])}"
+        else:
+            route = f"{trade.get('buyExchange')} -> {trade.get('sellExchange')}"
+        return {
+            "id": trade.get("id"),
+            "route": route,
+            "strategy": trade.get("strategy"),
+            "status": trade.get("status"),
+            "partial": trade.get("partial"),
+            "filledRatio": trade.get("filledRatio"),
+            "netProfit": trade.get("netProfit"),
+            "netBps": trade.get("netBps"),
+            "executionQuality": trade.get("executionQuality"),
+            "inventoryRebalance": bool(trade.get("inventoryRebalance")),
+        }
+
     def flush_risk_events(self) -> None:
         for event in self.risk.drain_events():
             self.store.add_event(event)
+            self.edge_ledger.append("risk-event", {
+                "type": event.get("type"),
+                "condition": event.get("condition"),
+                "reason": event.get("reason"),
+                "metadata": event.get("metadata", {}),
+            })
             asyncio.create_task(self.redis.publish("risk", event))
 
     def generate_demo_books(self) -> None:
@@ -314,6 +362,41 @@ class MarketService:
         current_scan = self.last_scan or latest[:40]
         executable_edges = [item.get("netBps", 0) for item in current_scan if item.get("status") == "profitable"]
         observed_edges = [item.get("netBps", 0) for item in current_scan if item.get("status") != "blocked"]
+        risk_snapshot = self.risk.snapshot(current)
+        metrics = {
+            "detectedCount": self.store.detected_count,
+            "rejectedCount": self.store.rejected_count,
+            "executedCount": self.store.executed_count,
+            "simpleCount": self.store.simple_count,
+            "triangularCount": self.store.triangular_count,
+            "profitableCount": self.store.profitable_count,
+            "blockedCount": self.store.blocked_count,
+            "partialCount": self.store.partial_count,
+            "fullCount": max(0, self.store.executed_count - self.store.partial_count),
+            "executedSimpleCount": self.store.executed_simple_count,
+            "executedTriangularCount": self.store.executed_triangular_count,
+            "cumulativePnl": self.ledger.realized_pnl,
+            "winRate": wins / len(trades) if trades else 0,
+            "avgLatencyMs": avg_latency,
+            "avgFreshnessMs": avg_freshness,
+            "p95FreshnessMs": p95_freshness,
+            "fastBooks": sum(1 for book in books if book["ageMs"] <= 1000),
+            "slowBooks": sum(1 for book in books if book["ageMs"] > 2500),
+            "staleBooks": sum(1 for book in books if book["ageMs"] > self.settings.max_book_age_ms),
+            "liveBooks": sum(1 for book in books if book["source"] == "websocket"),
+            "restBooks": sum(1 for book in books if book["source"] == "rest"),
+            "simulatedBooks": sum(1 for book in books if book["source"] == "simulated"),
+            "bestNetBps": max([0, *executable_edges]),
+            "bestObservedNetBps": max(observed_edges or [0]),
+            "nearMissCount": sum(1 for item in current_scan if item.get("status") == "rejected" and item.get("netBps", 0) > -10),
+            "partialQueuedCount": sum(1 for item in current_scan if item.get("partial")),
+            "historyRetainedCount": len(self.store.opportunities),
+            "tradeRetainedCount": len(self.store.trades),
+            "opportunityHistoryCapacity": self.store.opportunities_limit,
+            "liveSignalCount": sum(1 for item in current_scan if current - item.get("time", 0) <= 1500),
+            "maxTradeBtc": self.settings.max_trade_btc,
+            "triangularQuoteSize": self.settings.triangular_quote_size,
+        }
         return {
             "now": current,
             "botName": self.settings.app_name,
@@ -330,7 +413,7 @@ class MarketService:
             "wallets": self.ledger.active(self.settings.exchanges),
             "totals": self.ledger.totals(mark_price, self.settings.exchanges),
             "pnlSeries": self.store.pnl_series,
-            "risk": self.risk.snapshot(current),
+            "risk": risk_snapshot,
             "riskEvents": self.store.latest_events(),
             "redis": self.redis.snapshot(),
             "globalMarket": self.global_market.snapshot(),
@@ -343,45 +426,55 @@ class MarketService:
                 "universeCount": len(self.settings.exchange_universe),
                 "profile": self.settings.active_exchanges or "all",
             },
+            "latencySlo": latency_slo(books),
+            "venueQuality": venue_quality(books),
+            "demoQuality": demo_quality(self.mode, metrics, current - self.started_at, risk_snapshot),
+            "edgeLedger": self.edge_ledger.snapshot(),
+            "replay": {
+                "source": "edge-ledger-jsonl",
+                "eventCount": len(self.edge_ledger.records),
+                "events": self.edge_ledger.latest(90),
+            },
             "diagnostics": {
                 "blockedMeaning": "Spread exists, but Aurelion skipped it because size, balance, depth, or risk gates were not good enough.",
                 "redisMeaning": "Redis is optional Pub/Sub. Disabled means no REDIS_URL is configured; the dashboard still uses SSE.",
                 "restFallbackActive": any(book["source"] == "rest" for book in books),
                 "latencyMeaning": "Book age is the freshness of the latest order book. Update latency is how long the provider waited for the last exchange update.",
             },
-            "metrics": {
-                "detectedCount": self.store.detected_count,
-                "rejectedCount": self.store.rejected_count,
-                "executedCount": self.store.executed_count,
-                "simpleCount": self.store.simple_count,
-                "triangularCount": self.store.triangular_count,
-                "profitableCount": self.store.profitable_count,
-                "blockedCount": self.store.blocked_count,
-                "partialCount": self.store.partial_count,
-                "fullCount": max(0, self.store.executed_count - self.store.partial_count),
-                "executedSimpleCount": self.store.executed_simple_count,
-                "executedTriangularCount": self.store.executed_triangular_count,
-                "cumulativePnl": self.ledger.realized_pnl,
-                "winRate": wins / len(trades) if trades else 0,
-                "avgLatencyMs": avg_latency,
-                "avgFreshnessMs": avg_freshness,
-                "p95FreshnessMs": p95_freshness,
-                "fastBooks": sum(1 for book in books if book["ageMs"] <= 1000),
-                "slowBooks": sum(1 for book in books if book["ageMs"] > 2500),
-                "staleBooks": sum(1 for book in books if book["ageMs"] > self.settings.max_book_age_ms),
-                "liveBooks": sum(1 for book in books if book["source"] == "websocket"),
-                "restBooks": sum(1 for book in books if book["source"] == "rest"),
-                "simulatedBooks": sum(1 for book in books if book["source"] == "simulated"),
-                "bestNetBps": max([0, *executable_edges]),
-                "bestObservedNetBps": max(observed_edges or [0]),
-                "nearMissCount": sum(1 for item in current_scan if item.get("status") == "rejected" and item.get("netBps", 0) > -10),
-                "partialQueuedCount": sum(1 for item in current_scan if item.get("partial")),
-                "historyRetainedCount": len(self.store.opportunities),
-                "tradeRetainedCount": len(self.store.trades),
-                "opportunityHistoryCapacity": self.store.opportunities_limit,
-                "liveSignalCount": sum(1 for item in current_scan if current - item.get("time", 0) <= 1500),
+            "metrics": metrics,
+        }
+
+    def export_session(self) -> dict:
+        current = now_ms()
+        snapshot = self.snapshot()
+        opportunities = self.store.latest_opportunities(self.store.opportunities_limit)
+        trades = self.store.latest_trades(self.store.trades_limit)
+        events = self.store.latest_events(self.store.event_limit)
+        return {
+            "generatedAt": current,
+            "botName": self.settings.app_name,
+            "tagline": self.settings.tagline,
+            "mode": self.mode,
+            "uptimeMs": current - self.started_at,
+            "summary": session_summary(opportunities, trades, events),
+            "metrics": snapshot["metrics"],
+            "latencySlo": snapshot["latencySlo"],
+            "demoQuality": snapshot["demoQuality"],
+            "venueQuality": snapshot["venueQuality"],
+            "risk": snapshot["risk"],
+            "opportunities": opportunities,
+            "trades": trades,
+            "pnlSeries": self.store.pnl_series,
+            "riskEvents": events,
+            "edgeLedger": self.edge_ledger.latest(self.edge_ledger.memory_limit),
+            "config": {
+                "exchanges": [exchange.__dict__ for exchange in self.settings.exchanges],
+                "exchangeUniverse": [exchange.__dict__ for exchange in self.settings.exchange_universe],
+                "evaluationIntervalMs": self.settings.evaluation_interval_ms,
                 "maxTradeBtc": self.settings.max_trade_btc,
                 "triangularQuoteSize": self.settings.triangular_quote_size,
+                "wsFailureThreshold": self.settings.ws_failure_threshold,
+                "restFallbackMs": self.settings.poll_interval_ms,
             },
         }
 

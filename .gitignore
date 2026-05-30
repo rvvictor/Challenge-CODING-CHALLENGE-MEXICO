@@ -3,7 +3,9 @@ npm-debug.log*
 .env
 .env.*
 .server*.log
+.server*.err
 .aurelion*.log
+.aurelion/
 __pycache__/
 *.py[cod]
 .pytest_cache/
