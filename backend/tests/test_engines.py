@@ -118,6 +118,24 @@ class EngineTests(unittest.TestCase):
                 break
         self.assertTrue(seen_low_depth)
 
+    def test_demo_market_can_create_triangular_showcase_edge(self):
+        settings = Settings(active_exchanges="okx,bybit,kucoin", triangular_quote_size=650)
+        simulator = SimulatedMarket(settings.exchanges)
+        ledger = WalletLedger(settings)
+        engine = TriangularArbitrageEngine(settings, ledger)
+        seen_triangular = False
+        books = {}
+        for _ in range(90):
+            simulator.advance(settings.exchanges)
+            for exchange in settings.exchanges:
+                for symbol in exchange.triangular_symbols:
+                    books[f"{exchange.id}:{symbol}"] = simulator.generate(exchange, settings.exchanges, symbol)
+            opportunities = engine.scan(books)
+            if any(item["strategy"] == "triangular" and item["status"] == "profitable" for item in opportunities):
+                seen_triangular = True
+                break
+        self.assertTrue(seen_triangular)
+
     def test_ccxt_provider_uses_exchange_safe_order_book_limits(self):
         from backend.app.integrations.ccxt_provider import CcxtStreamProvider
 

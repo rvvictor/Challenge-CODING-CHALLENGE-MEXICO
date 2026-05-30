@@ -17,6 +17,7 @@ class SimulatedMarket:
         self.global_eth_btc = 0.052
         self.state: dict[str, dict[str, float]] = {}
         self.shock: dict | None = None
+        self.triangular_shock: dict | None = None
         self.volatility_stress_until = 0
         for index, exchange in enumerate(exchanges):
             self.state[f"{exchange.id}:BTC"] = {"basis_bps": (index - len(exchanges) / 2) * 0.35, "liq": self.random.uniform(0.7, 1.35)}
@@ -37,9 +38,8 @@ class SimulatedMarket:
         self.volatility_stress_until = self.tick + duration_ticks
 
     def maybe_shock(self, exchanges: tuple[ExchangeConfig, ...]) -> None:
-        if self.shock and self.shock["until"] > self.tick:
-            return
-        if self.tick % 34 == 0:
+        cross_active = self.shock and self.shock["until"] > self.tick
+        if not cross_active and self.tick % 26 == 0:
             cheap = self.random.choice(exchanges).id
             rich = self.random.choice(exchanges).id
             if rich == cheap:
@@ -48,8 +48,20 @@ class SimulatedMarket:
                 "started": self.tick,
                 "cheap": cheap,
                 "rich": rich,
-                "cheap_bps": self.random.uniform(-27, -18),
-                "rich_bps": self.random.uniform(18, 29),
+                "cheap_bps": self.random.uniform(-30, -21),
+                "rich_bps": self.random.uniform(21, 33),
+                "until": self.tick + 7,
+            }
+        triangular_active = self.triangular_shock and self.triangular_shock["until"] > self.tick
+        if not triangular_active and self.tick % 41 == 9:
+            candidates = [exchange for exchange in exchanges if exchange.taker_fee_bps <= 12] or list(exchanges)
+            exchange = self.random.choice(candidates)
+            self.triangular_shock = {
+                "started": self.tick,
+                "exchange": exchange.id,
+                "btc_bps": self.random.uniform(-5, -1),
+                "eth_btc_bps": self.random.uniform(-5, -1),
+                "eth_quote_bps": self.random.uniform(52, 72),
                 "until": self.tick + 6,
             }
 
@@ -75,6 +87,18 @@ class SimulatedMarket:
             mid *= 1 + self.shock["cheap_bps"] / 10000
         if self.shock and self.shock["rich"] == exchange.id:
             mid *= 1 + self.shock["rich_bps"] / 10000
+        if self.shock and self.shock["until"] > self.tick and self.tick - self.shock["started"] in {2, 5}:
+            if self.shock["cheap"] == exchange.id:
+                mid *= 1 - 28 / 10000
+            if self.shock["rich"] == exchange.id:
+                mid *= 1 + 28 / 10000
+        if self.triangular_shock and self.triangular_shock["until"] > self.tick and self.triangular_shock["exchange"] == exchange.id:
+            if kind == "BTC":
+                mid *= 1 + self.triangular_shock["btc_bps"] / 10000
+            elif kind == "ETHBTC":
+                mid *= 1 + self.triangular_shock["eth_btc_bps"] / 10000
+            elif kind == "ETHQUOTE":
+                mid *= 1 + self.triangular_shock["eth_quote_bps"] / 10000
 
         spread_bps = self.random.uniform(4, 12) if kind == "ETHBTC" else self.random.uniform(1.4, 5.2)
         half_spread = mid * spread_bps / 20000
@@ -84,7 +108,7 @@ class SimulatedMarket:
             kind == "BTC"
             and self.shock
             and exchange.id in {self.shock["cheap"], self.shock["rich"]}
-            and (self.tick - self.shock["started"] in {2, 4} or self.random.random() < 0.07)
+            and (self.tick - self.shock["started"] in {2, 5} or self.random.random() < 0.09)
         )
         for i in range(20):
             gap = i * self.random.uniform(0.000004, 0.000018) if kind == "ETHBTC" else i * self.random.uniform(2, 8)
@@ -94,7 +118,7 @@ class SimulatedMarket:
                 else self.random.uniform(0.006, 0.18) * state["liq"] * (1 + i / 12)
             )
             if book_liquidity_crunch:
-                qty = self.random.uniform(0.00012, 0.0009)
+                qty = self.random.uniform(0.00042, 0.00074)
             decimals = 8 if kind == "ETHBTC" else 2
             asks.append(Level(round(mid + half_spread + gap, decimals), round(qty, 6)))
             bids.append(Level(round(mid - half_spread - gap, decimals), round(qty * self.random.uniform(0.85, 1.18), 6)))

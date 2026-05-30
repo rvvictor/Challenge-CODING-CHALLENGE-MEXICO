@@ -125,7 +125,7 @@ npm run start
 | `MAX_TRADE_BTC` | `0.015` | Tamano maximo por trade para controlar riesgo y P&L demo |
 | `MIN_NET_BPS` | `0.75` | Edge neto minimo despues de costos |
 | `MAX_EXECUTIONS_PER_TICK` | `1` | Evita sobre-operar el mismo tick |
-| `PAIR_COOLDOWN_MS` | `20000` | Cooldown por ruta |
+| `PAIR_COOLDOWN_MS` | `14000` | Cooldown por ruta |
 | `INVENTORY_REBALANCE_ENABLED` | `true` | Permite reubicar inventario simulado antes de ejecutar |
 | `REDIS_URL` | vacio | Redis Pub/Sub |
 | `MAX_VOLATILITY_PCT` | `2.4` | Umbral volatilidad |

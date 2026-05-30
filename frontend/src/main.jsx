@@ -594,25 +594,60 @@ function PnlChart({ series }) {
     ctx.fillStyle = "#fbfcf8";
     ctx.fillRect(0, 0, rect.width, rect.height);
     ctx.strokeStyle = "#dfe6da";
-    for (let y = 28; y < rect.height; y += 42) {
+    ctx.lineWidth = 1;
+    for (let y = 26; y < rect.height; y += 40) {
       ctx.beginPath();
       ctx.moveTo(0, y);
       ctx.lineTo(rect.width, y);
       ctx.stroke();
     }
-    const points = series.length ? series : [{ pnl: 0 }, { pnl: 0 }];
-    const min = Math.min(0, ...points.map((point) => point.pnl));
-    const max = Math.max(1, ...points.map((point) => point.pnl));
-    const range = Math.max(1, max - min);
+    const source = series.length ? series : [{ pnl: 0 }];
+    const points = source.length === 1 ? [{ pnl: 0 }, source[0]] : source;
+    const rawMin = Math.min(0, ...points.map((point) => point.pnl));
+    const rawMax = Math.max(0, ...points.map((point) => point.pnl));
+    const padding = Math.max(0.25, (rawMax - rawMin) * 0.2);
+    const min = rawMin - padding;
+    const max = rawMax + padding;
+    const range = Math.max(0.5, max - min);
+    const mapY = (pnl) => rect.height - 22 - ((pnl - min) / range) * (rect.height - 44);
+    const zeroY = mapY(0);
+    ctx.strokeStyle = "#c8d4c5";
+    ctx.setLineDash([4, 5]);
+    ctx.beginPath();
+    ctx.moveTo(0, zeroY);
+    ctx.lineTo(rect.width, zeroY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    const coords = points.map((point, index) => {
+      const x = points.length === 1 ? rect.width : (index / (points.length - 1)) * rect.width;
+      return [x, mapY(point.pnl)];
+    });
+    ctx.beginPath();
+    coords.forEach(([x, y], index) => {
+      index === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.lineTo(rect.width, zeroY);
+    ctx.lineTo(0, zeroY);
+    ctx.closePath();
+    ctx.fillStyle = "rgba(13, 125, 103, 0.12)";
+    ctx.fill();
     ctx.strokeStyle = "#0d7d67";
     ctx.lineWidth = 3;
     ctx.beginPath();
-    points.forEach((point, index) => {
-      const x = points.length === 1 ? 0 : (index / (points.length - 1)) * rect.width;
-      const y = rect.height - 24 - ((point.pnl - min) / range) * (rect.height - 48);
+    coords.forEach(([x, y], index) => {
       index === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
     });
     ctx.stroke();
+    const [lastX, lastY] = coords[coords.length - 1];
+    ctx.fillStyle = "#0d7d67";
+    ctx.beginPath();
+    ctx.arc(lastX, lastY, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+    if (series.length === 0) {
+      ctx.fillStyle = "#66736d";
+      ctx.font = "700 12px Aptos, Segoe UI, sans-serif";
+      ctx.fillText("Esperando el primer trade", 14, rect.height - 16);
+    }
   }, [series]);
   return <canvas className="chart" ref={ref} />;
 }

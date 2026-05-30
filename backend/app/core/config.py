@@ -97,7 +97,7 @@ class Settings:
     min_net_profit_usd: float = number_env("MIN_NET_PROFIT_USD", 0.2)
     min_net_bps: float = number_env("MIN_NET_BPS", 0.75)
     withdrawal_fee_impact: float = number_env("WITHDRAWAL_FEE_IMPACT", 0.18)
-    pair_cooldown_ms: int = int_env("PAIR_COOLDOWN_MS", 20000)
+    pair_cooldown_ms: int = int_env("PAIR_COOLDOWN_MS", 14000)
     max_executions_per_tick: int = int_env("MAX_EXECUTIONS_PER_TICK", 1)
     inventory_rebalance_enabled: bool = bool_env("INVENTORY_REBALANCE_ENABLED", True)
     inventory_rebalance_buffer: float = number_env("INVENTORY_REBALANCE_BUFFER", 0.35)
