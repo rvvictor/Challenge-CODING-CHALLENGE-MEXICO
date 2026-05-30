@@ -24,6 +24,8 @@ class RiskManager:
         self.price_window: list[dict[str, float]] = []
         self.pending_events: list[dict] = []
         self.last_volatility_trigger = 0
+        self.last_volatility_review = 0
+        self.current_volatility_pct = 0.0
         self.last_condition = "healthy"
 
     def set_auto_execution(self, enabled: bool) -> None:
@@ -67,6 +69,14 @@ class RiskManager:
         if oldest["price"] <= 0:
             return
         change_pct = abs((mid - oldest["price"]) / oldest["price"]) * 100
+        self.current_volatility_pct = change_pct
+        if current_ms < self.paused_until and self.last_condition == "volatility":
+            if current_ms - self.last_volatility_review >= 2000:
+                self.last_volatility_review = current_ms
+                if change_pct > self.settings.max_volatility_pct:
+                    self.paused_until = max(self.paused_until, current_ms + 2000)
+                    self.last_reason = f"BTC still volatile {change_pct:.2f}%"
+            return
         if change_pct > self.settings.max_volatility_pct:
             self.last_volatility_trigger = current_ms
             self.activate(
@@ -107,6 +117,9 @@ class RiskManager:
     def activate(self, condition: str, reason: str, current_ms: int, metadata: dict) -> None:
         if current_ms < self.paused_until and self.last_reason == reason:
             return
+        if condition == "volatility":
+            self.last_volatility_trigger = current_ms
+            self.last_volatility_review = current_ms
         self.paused_until = current_ms + self.settings.pause_after_loss_ms
         self.last_reason = reason
         self.last_condition = condition
@@ -140,4 +153,7 @@ class RiskManager:
             "volatilityWindowPoints": len(self.price_window),
             "volatilityThresholdPct": self.settings.max_volatility_pct,
             "volatilityMinSamples": self.settings.volatility_min_samples,
+            "currentVolatilityPct": self.current_volatility_pct,
+            "operationalHalt": current_ms < self.paused_until,
+            "monitoringOnly": current_ms < self.paused_until,
         }

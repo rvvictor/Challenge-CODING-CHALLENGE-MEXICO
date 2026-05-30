@@ -175,6 +175,23 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(snapshot["risk"]["condition"], "volatility")
         self.assertTrue(any(event.get("type") == "stress-test" for event in snapshot["riskEvents"]))
 
+    def test_circuit_breaker_halts_signal_generation_while_monitoring_books(self):
+        from backend.app.engines.market_service import MarketService
+
+        async def run():
+            service = MarketService(Settings(market_mode="demo", pause_after_loss_ms=1000))
+            await service.trigger_volatility_stress()
+            service.tick()
+            await asyncio.sleep(0)
+            return service.snapshot()
+
+        snapshot = asyncio.run(run())
+        self.assertTrue(snapshot["risk"]["paused"])
+        self.assertEqual(snapshot["queuedOpportunities"], [])
+        self.assertEqual(snapshot["queue"]["paused"], True)
+        self.assertGreater(len(snapshot["books"]), 0)
+        self.assertEqual(snapshot["metrics"]["detectedCount"], 0)
+
     def test_executor_revalidates_inventory_between_same_tick_trades(self):
         from backend.app.engines.event_store import EventStore
         from backend.app.engines.execution import ExecutionSimulator

@@ -40,5 +40,17 @@ class OpportunityQueue:
         }
         return queued
 
+    def pause(self, reason: str) -> None:
+        self.last_stats = {
+            "received": 0,
+            "deduped": 0,
+            "queued": 0,
+            "executable": 0,
+            "blocked": 0,
+            "nearMiss": 0,
+            "paused": True,
+            "reason": reason,
+        }
+
     def snapshot(self) -> dict:
         return dict(self.last_stats)

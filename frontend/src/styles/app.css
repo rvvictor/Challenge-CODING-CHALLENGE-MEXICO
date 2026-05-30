@@ -183,6 +183,12 @@ small,
   font-weight: 850;
 }
 
+.stressButton.active {
+  border-color: rgba(191, 76, 65, 0.42);
+  background: var(--red-soft);
+  color: var(--red);
+}
+
 .iconButton {
   display: grid;
   width: 38px;
@@ -374,6 +380,13 @@ small,
   max-height: 420px;
   overflow-x: auto;
   overflow-y: auto;
+}
+
+.tableEmpty {
+  min-width: 920px;
+  padding: 20px;
+  color: var(--muted);
+  text-align: center;
 }
 
 .thead,
@@ -788,7 +801,8 @@ small,
   background: #f6fbf6;
 }
 
-.historyToolbar {
+.historyToolbar,
+.tradeToolbar {
   display: flex;
   flex-wrap: wrap;
   gap: 7px;
@@ -797,7 +811,8 @@ small,
   background: #fcfdf9;
 }
 
-.historyToolbar button {
+.historyToolbar button,
+.tradeToolbar button {
   min-height: 30px;
   padding: 5px 9px;
   border: 1px solid var(--line);
@@ -809,7 +824,8 @@ small,
   font-weight: 850;
 }
 
-.historyToolbar button.active {
+.historyToolbar button.active,
+.tradeToolbar button.active {
   border-color: rgba(13, 125, 103, 0.34);
   background: var(--green-soft);
   color: var(--green);

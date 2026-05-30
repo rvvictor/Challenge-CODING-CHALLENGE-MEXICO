@@ -208,6 +208,15 @@ class MarketService:
         summaries = self.book_summaries(primary)
         self.risk.evaluate_market(summaries)
         self.flush_risk_events()
+        risk_snapshot = self.risk.snapshot(now_ms())
+        if risk_snapshot["paused"]:
+            self.last_scan = []
+            self.last_executions = []
+            self.queue.pause(risk_snapshot["reason"])
+            snapshot = self.snapshot()
+            asyncio.create_task(self.redis.publish("snapshots", snapshot))
+            self.broadcast(snapshot)
+            return
 
         primary_map = {book.exchange_id: book for book in primary}
         opportunities = self.cross_engine.scan(primary_map) + self.triangular_engine.scan(self.books)
@@ -350,7 +359,7 @@ class MarketService:
             if not book.primary
         ]
         mark_price = sum((book["bestAsk"] + book["bestBid"]) / 2 for book in books) / len(books) if books else 0
-        trades = self.store.latest_trades()
+        trades = self.store.latest_trades(self.store.trades_limit)
         wins = sum(1 for trade in trades if trade["netProfit"] >= 0)
         avg_latency = sum(book["latencyMs"] for book in books) / len(books) if books else 0
         book_ages = sorted(book["ageMs"] for book in books)
@@ -359,10 +368,10 @@ class MarketService:
         p95_freshness = book_ages[p95_index] if book_ages else 0
         latest = self.store.latest_opportunities()
         opportunity_history = self.store.latest_opportunities(120)
-        current_scan = self.last_scan or latest[:40]
+        risk_snapshot = self.risk.snapshot(current)
+        current_scan = [] if risk_snapshot["paused"] else self.last_scan or latest[:40]
         executable_edges = [item.get("netBps", 0) for item in current_scan if item.get("status") == "profitable"]
         observed_edges = [item.get("netBps", 0) for item in current_scan if item.get("status") != "blocked"]
-        risk_snapshot = self.risk.snapshot(current)
         metrics = {
             "detectedCount": self.store.detected_count,
             "rejectedCount": self.store.rejected_count,

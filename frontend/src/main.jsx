@@ -146,9 +146,9 @@ function Header({ snapshot, connected, control, reset, exportSession }) {
           {risk?.autoExecution ? <Power size={16} /> : <CirclePause size={16} />}
           {risk?.autoExecution ? "activo" : "pausado"}
         </button>
-        <button className="stressButton" title="Simulate volatility circuit breaker" onClick={() => control({ volatilityShock: true })}>
+        <button className={`stressButton ${risk?.paused ? "active" : ""}`} title="Simulate volatility circuit breaker" onClick={() => control({ volatilityShock: true })}>
           <Zap size={16} />
-          volatilidad
+          {risk?.paused ? "riesgo activo" : "volatilidad"}
         </button>
         <button className="iconButton" title="Export audit session" onClick={exportSession}><FileDown size={17} /></button>
         <button className="iconButton" title="Reset session" onClick={reset}><RefreshCw size={17} /></button>
@@ -296,7 +296,7 @@ function OpportunityTable({ opportunities, queue = {}, now }) {
   const rows = fallback.slice(0, 7);
   return (
     <section className="surface queue">
-      <PanelTitle icon={Triangle} title="Oportunidades Priorizadas" pill={`${queue.executable || 0} ejecutables`} />
+      <PanelTitle icon={Triangle} title="Oportunidades Priorizadas" pill={queue.paused ? "pausado por riesgo" : `${queue.executable || 0} ejecutables`} />
       <div className="queueStats">
         <span><b>{queue.received || 0}</b> analizadas</span>
         <span><b>{queue.deduped || 0}</b> duplicadas fuera</span>
@@ -329,6 +329,7 @@ function OpportunityTable({ opportunities, queue = {}, now }) {
             </span>
           </div>
         ))}
+        {!rows.length && <div className="tableEmpty">{queue.paused ? "Operacion pausada: Aurelion sigue leyendo mercado, pero no genera nuevas senales hasta que pase el riesgo." : "Sin oportunidades rankeadas por ahora."}</div>}
       </div>
     </section>
   );
@@ -676,11 +677,29 @@ function executionKindClass(item) {
 }
 
 function Trades({ trades, metrics = {} }) {
+  const [filter, setFilter] = React.useState("all");
+  const filters = [
+    ["all", "Todas"],
+    ["partial", "Parciales"],
+    ["complete", "Completas"],
+    ["triangular", "Triangulares"],
+  ];
+  const visibleTrades = trades.filter((trade) => {
+    if (filter === "partial") return trade.partial;
+    if (filter === "complete") return !trade.partial;
+    if (filter === "triangular") return trade.strategy === "triangular";
+    return true;
+  });
   return (
     <section className="surface trades">
-      <PanelTitle icon={ArrowRightLeft} title="Trades Ejecutados" pill={`${trades.length} recientes`} />
+      <PanelTitle icon={ArrowRightLeft} title="Trades Ejecutados" pill={`${visibleTrades.length}/${trades.length} visibles`} />
+      <div className="tradeToolbar">
+        {filters.map(([id, label]) => (
+          <button className={filter === id ? "active" : ""} key={id} onClick={() => setFilter(id)} type="button">{label}</button>
+        ))}
+      </div>
       <div className="tradeList">
-        {trades.map((trade) => (
+        {visibleTrades.map((trade) => (
           <article className={trade.partial ? "partialTrade" : ""} key={trade.id}>
             <div className="tradeTop">
               <b>{fillTitle(trade)}</b>
@@ -697,7 +716,7 @@ function Trades({ trades, metrics = {} }) {
             </div>
           </article>
         ))}
-        {!trades.length && <div className="empty">Aún no hay trades ejecutados</div>}
+        {!visibleTrades.length && <div className="empty">{trades.length ? "No hay trades con este filtro" : "Aun no hay trades ejecutados"}</div>}
       </div>
     </section>
   );
