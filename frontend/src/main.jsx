@@ -21,6 +21,16 @@ function formatNumber(value, digits = 2) {
   return Number(value || 0).toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
 }
 
+function formatPercent(value, digits = 0) {
+  return `${formatNumber((Number(value) || 0) * 100, digits)}%`;
+}
+
+function clampRatio(value) {
+  const ratio = Number(value);
+  if (!Number.isFinite(ratio)) return 1;
+  return Math.max(0, Math.min(1, ratio));
+}
+
 function ago(ms) {
   if (ms < 1000) return "now";
   if (ms < 60000) return `${Math.round(ms / 1000)}s`;
@@ -126,14 +136,18 @@ function Header({ snapshot, connected, control, reset }) {
 function Overview({ snapshot }) {
   const metrics = snapshot.metrics;
   const risk = snapshot.risk;
+  const stateLabel = risk.paused ? "cooldown" : risk.autoExecution ? "armed" : "manual";
+  const stateNote = risk.paused ? `${risk.reason} / ${ago(Math.max(0, risk.pausedUntil - snapshot.now))} left` : risk.reason;
+  const freshness = metrics.avgFreshnessMs ?? metrics.avgLatencyMs;
   return (
     <section className="overview">
       <Metric icon={ChartNoAxesCombined} label="Realized P&L" value={formatMoney(metrics.cumulativePnl)} note={`${metrics.executedCount} fills`} tone={metrics.cumulativePnl >= 0 ? "good" : "bad"} />
-      <Metric icon={Radar} label="Best Edge" value={`${formatNumber(metrics.bestNetBps, 2)} bps`} note={`${snapshot.queue.executable} executable`} />
+      <Metric icon={ShieldAlert} label="State" value={stateLabel} note={stateNote} tone={risk.paused || !risk.autoExecution ? "bad" : "good"} />
+      <Metric icon={Radar} label="Best Edge" value={`${formatNumber(metrics.bestNetBps, 2)} bps`} note={`${snapshot.queue.executable} executable after costs`} />
       <Metric icon={ArrowRightLeft} label="Detected" value={compact.format(metrics.detectedCount)} note={`${compact.format(metrics.triangularCount)} triangular`} />
       <Metric icon={Network} label="Books" value={`${metrics.liveBooks} WS / ${metrics.restBooks} REST`} note={`${metrics.simulatedBooks} demo`} />
       <Metric icon={Split} label="Partial Fills" value={compact.format(metrics.partialCount || 0)} note={`${metrics.blockedCount || 0} blocked`} />
-      <Metric icon={Gauge} label="Latency" value={`${Math.round(metrics.avgLatencyMs)} ms`} note="average book" />
+      <Metric icon={Gauge} label="Book Age" value={`${Math.round(freshness)} ms`} note={`p95 ${Math.round(metrics.p95FreshnessMs || freshness)} ms / ${metrics.fastBooks || 0} fast`} tone={(metrics.staleBooks || 0) > 0 ? "bad" : "neutral"} />
     </section>
   );
 }
@@ -157,8 +171,8 @@ function Books({ books }) {
             </div>
             <div className="micro">
               <span>{formatBtc(book.depthBid)}</span>
-              <span>{Math.round(book.latencyMs)} ms</span>
-              <span>{ago(book.ageMs)}</span>
+              <span>{Math.round(book.ageMs)} ms age</span>
+              <span>{Math.round(book.latencyMs)} ms upd</span>
             </div>
           </article>
         ))}
@@ -176,25 +190,66 @@ function PanelTitle({ icon: Icon, title, pill }) {
   );
 }
 
-function OpportunityTable({ opportunities }) {
+function RouteLabel({ item }) {
+  if (item.strategy === "triangular") {
+    const path = item.cyclePath || ["USDT", "BTC", "ETH", "USDT"];
+    return (
+      <span className="routeStack">
+        <b>{item.exchange} triangular</b>
+        <span className="cyclePath">{path.map((node, index) => <React.Fragment key={`${node}-${index}`}><i>{node}</i>{index < path.length - 1 && <ArrowRightLeft size={12} />}</React.Fragment>)}</span>
+        <small>{item.legs?.map((leg) => leg.symbol).join(" / ") || item.product}</small>
+      </span>
+    );
+  }
+  return (
+    <span className="routeStack">
+      <b>{item.buyExchange} {"->"} {item.sellExchange}</b>
+      <small>{formatMoney(item.buyPrice)} buy / {formatMoney(item.sellPrice)} sell</small>
+    </span>
+  );
+}
+
+function opportunitySize(item) {
+  if (item.strategy === "triangular") return formatMoney(item.quoteIn);
+  return formatBtc(item.qtyBtc);
+}
+
+function opportunityTarget(item) {
+  if (item.strategy === "triangular") return `target ${formatMoney(item.targetQuote || item.quoteIn)}`;
+  return `target ${formatBtc(item.targetQtyBtc || item.qtyBtc)}`;
+}
+
+function OpportunityTable({ opportunities, queue = {} }) {
   const rows = opportunities.slice(0, 18);
   return (
     <section className="surface queue">
       <PanelTitle icon={Triangle} title="Priority Queue" pill={`${rows.length} routes`} />
+      <div className="queueStats">
+        <span><b>{queue.received || 0}</b> scanned</span>
+        <span><b>{queue.deduped || 0}</b> deduped</span>
+        <span><b>{queue.executable || 0}</b> executable</span>
+        <span><b>{queue.queued || 0}</b> ranked</span>
+      </div>
       <div className="table">
         <div className="thead"><span>Route</span><span>Size</span><span>Net</span><span>Score</span><span>Status</span></div>
         {rows.map((opportunity) => (
           <div className="tr" key={opportunity.id}>
+            <RouteLabel item={opportunity} />
             <span>
-              <b>{opportunity.strategy === "triangular" ? `${opportunity.exchange} triangle` : `${opportunity.buyExchange} -> ${opportunity.sellExchange}`}</b>
-              <small>{opportunity.strategy === "triangular" ? opportunity.cyclePath?.join(" -> ") : `${formatMoney(opportunity.buyPrice)} / ${formatMoney(opportunity.sellPrice)}`}</small>
+              <b>{opportunitySize(opportunity)}</b>
+              <small>{opportunity.partial ? `${formatPercent(clampRatio(opportunity.filledRatio))} of target` : opportunityTarget(opportunity)}</small>
             </span>
-            <span>{opportunity.strategy === "triangular" ? formatMoney(opportunity.quoteIn) : formatBtc(opportunity.qtyBtc)}</span>
-            <span className={opportunity.netProfit >= 0 ? "green" : "red"}>{formatMoney(opportunity.netProfit)}<small>{formatNumber(opportunity.netBps, 2)} bps</small></span>
-            <span>{formatNumber(opportunity.score, 3)}</span>
+            <span className={opportunity.netProfit >= 0 ? "green" : "red"}>
+              {formatMoney(opportunity.netProfit)}
+              <small>{formatNumber(opportunity.netBps, 2)} bps / costs {formatMoney(opportunity.costs?.totalCosts)}</small>
+            </span>
+            <span>
+              <b>{formatNumber(opportunity.score, 3)}</b>
+              <small>conf {formatNumber(opportunity.confidence, 2)}</small>
+            </span>
             <span>
               <em className={`badge ${opportunity.status}`}>{opportunity.status}</em>
-              <small>{opportunity.status === "blocked" ? "size/depth gate" : opportunity.reason}</small>
+              <small>{opportunity.partial ? "partial liquidity" : opportunity.status === "blocked" ? "size/depth gate" : opportunity.reason}</small>
             </span>
           </div>
         ))}
@@ -324,17 +379,62 @@ function SideRail({ snapshot }) {
   );
 }
 
+function fillTitle(item) {
+  if (item.strategy === "triangular") return `${item.exchange} triangular cycle`;
+  return `${item.buyExchange} -> ${item.sellExchange}`;
+}
+
+function fillSubtitle(item) {
+  if (item.strategy === "triangular") {
+    const path = item.cyclePath?.join(" -> ") || item.product;
+    return `${path} / ${formatMoney(item.quoteIn || 0)} in`;
+  }
+  return `${formatBtc(item.qtyBtc)} filled / ${formatMoney(item.buyPrice)} to ${formatMoney(item.sellPrice)}`;
+}
+
+function PartialFills({ trades, opportunities }) {
+  const executed = trades.filter((trade) => trade.partial).slice(0, 4).map((trade) => ({ ...trade, visualType: "executed" }));
+  const queued = opportunities.filter((opportunity) => opportunity.partial).slice(0, 4).map((opportunity) => ({ ...opportunity, visualType: "queued" }));
+  const items = [...executed, ...queued].slice(0, 6);
+  return (
+    <section className="surface partials">
+      <PanelTitle icon={Split} title="Partial Execution Watch" pill={`${executed.length} fills / ${queued.length} queued`} />
+      <div className="partialList">
+        {items.map((item) => {
+          const ratio = clampRatio(item.filledRatio ?? (item.partial ? 0.72 : 1));
+          return (
+            <article key={`${item.visualType}-${item.id}`}>
+              <div className="partialHead">
+                <b>{fillTitle(item)}</b>
+                <em className={`badge ${item.status}`}>{item.visualType}</em>
+              </div>
+              <span>{fillSubtitle(item)}</span>
+              <div className="fillMeter" style={{ "--fill": `${ratio * 100}%` }}><i /></div>
+              <small>{formatPercent(ratio)} of target liquidity captured</small>
+            </article>
+          );
+        })}
+        {!items.length && <div className="empty">No partial fills yet</div>}
+      </div>
+    </section>
+  );
+}
+
 function Trades({ trades }) {
   return (
     <section className="surface trades">
       <PanelTitle icon={ArrowRightLeft} title="Executed Fills" pill={`${trades.length} recent`} />
       <div className="tradeList">
         {trades.slice(0, 8).map((trade) => (
-          <article key={trade.id}>
-            <b>{trade.strategy === "triangular" ? `${trade.exchange} ${trade.cyclePath?.join(" -> ")}` : `${trade.buyExchange} -> ${trade.sellExchange}`}</b>
-            <span>{trade.strategy === "triangular" ? formatMoney(trade.quoteIn) : formatBtc(trade.qtyBtc)}</span>
+          <article className={trade.partial ? "partialTrade" : ""} key={trade.id}>
+            <b>{fillTitle(trade)}</b>
+            <span>{trade.strategy === "triangular" ? `${trade.cyclePath?.join(" -> ")} / ${formatMoney(trade.quoteIn)}` : formatBtc(trade.qtyBtc)}</span>
             <em className={trade.netProfit >= 0 ? "green" : "red"}>{formatMoney(trade.netProfit)}</em>
-            <small>{trade.status} / {formatNumber(trade.executionQuality?.edgeCaptureBps || trade.netBps, 2)} bps captured</small>
+            <div className="tradeDetails">
+              <small>{trade.status} / {formatNumber(trade.executionQuality?.edgeCaptureBps || trade.netBps, 2)} bps captured</small>
+              {trade.strategy === "triangular" && <small>{trade.legs?.map((leg) => `${leg.from}->${leg.to}`).join(" / ")}</small>}
+              {trade.partial && <small>{formatPercent(clampRatio(trade.filledRatio))} target fill</small>}
+            </div>
           </article>
         ))}
         {!trades.length && <div className="empty">No fills yet</div>}
@@ -356,7 +456,8 @@ function App() {
         <section className="mainGrid">
           <div className="primary">
             <Books books={snapshot.books} />
-            <OpportunityTable opportunities={snapshot.queuedOpportunities} />
+            <OpportunityTable opportunities={snapshot.queuedOpportunities} queue={snapshot.queue} />
+            <PartialFills trades={snapshot.trades} opportunities={snapshot.queuedOpportunities} />
             <Trades trades={snapshot.trades} />
           </div>
           <SideRail snapshot={snapshot} />

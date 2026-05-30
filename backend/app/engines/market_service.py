@@ -201,6 +201,10 @@ class MarketService:
         trades = self.store.latest_trades()
         wins = sum(1 for trade in trades if trade["netProfit"] >= 0)
         avg_latency = sum(book["latencyMs"] for book in books) / len(books) if books else 0
+        book_ages = sorted(book["ageMs"] for book in books)
+        avg_freshness = sum(book_ages) / len(book_ages) if book_ages else 0
+        p95_index = min(len(book_ages) - 1, int(len(book_ages) * 0.95)) if book_ages else 0
+        p95_freshness = book_ages[p95_index] if book_ages else 0
         latest = self.store.latest_opportunities()
         return {
             "now": current,
@@ -227,6 +231,7 @@ class MarketService:
                 "blockedMeaning": "Spread exists, but Aurelion skipped it because size, balance, depth, or risk gates were not good enough.",
                 "redisMeaning": "Redis is optional Pub/Sub. Disabled means no REDIS_URL is configured; the dashboard still uses SSE.",
                 "restFallbackActive": any(book["source"] == "rest" for book in books),
+                "latencyMeaning": "Book age is the freshness of the latest order book. Update latency is how long the provider waited for the last exchange update.",
             },
             "metrics": {
                 "detectedCount": self.store.detected_count,
@@ -242,10 +247,17 @@ class MarketService:
                 "cumulativePnl": self.ledger.realized_pnl,
                 "winRate": wins / len(trades) if trades else 0,
                 "avgLatencyMs": avg_latency,
+                "avgFreshnessMs": avg_freshness,
+                "p95FreshnessMs": p95_freshness,
+                "fastBooks": sum(1 for book in books if book["ageMs"] <= 1000),
+                "slowBooks": sum(1 for book in books if book["ageMs"] > 2500),
+                "staleBooks": sum(1 for book in books if book["ageMs"] > self.settings.max_book_age_ms),
                 "liveBooks": sum(1 for book in books if book["source"] == "websocket"),
                 "restBooks": sum(1 for book in books if book["source"] == "rest"),
                 "simulatedBooks": sum(1 for book in books if book["source"] == "simulated"),
                 "bestNetBps": max([item.get("netBps", 0) for item in latest[:20]] or [0]),
+                "maxTradeBtc": self.settings.max_trade_btc,
+                "triangularQuoteSize": self.settings.triangular_quote_size,
             },
         }
 

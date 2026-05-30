@@ -9,6 +9,7 @@ Aurelion es un bot de arbitraje de Bitcoin con arquitectura backend/frontend: ba
 - Market data WebSocket-first con `ccxt.pro` cuando esta disponible.
 - REST polling solo como fallback despues de 5 fallos WebSocket por stream.
 - Reconexion WebSocket cada 2 segundos.
+- Profundidad de order book validada por exchange para evitar errores de limites en KuCoin/Bybit.
 - Redis Pub/Sub opcional para snapshots, trades, risk events y market events.
 - Contexto global de mercado via CoinGecko (`/simple/price`) para BTC/ETH.
 - Arbitraje cross-exchange BTC y triangular `USDT -> BTC -> ETH -> USDT`.
@@ -105,6 +106,7 @@ npm run start
 | `PORT` | `8000` | Puerto backend |
 | `MARKET_MODE` | `auto` | `auto`, `live`, `demo` |
 | `EVALUATION_INTERVAL_MS` | `450` | Frecuencia del motor |
+| `ORDER_BOOK_LIMIT` | `20` | Profundidad base; algunos exchanges usan limites seguros propios |
 | `WS_RECONNECT_DELAY_MS` | `2000` | Espera entre reconexiones |
 | `WS_FAILURE_THRESHOLD` | `5` | Fallos antes de REST fallback |
 | `POLL_INTERVAL_MS` | `1200` | REST fallback interval |
@@ -115,6 +117,7 @@ npm run start
 | `PAUSE_AFTER_LOSS_MS` | `60000` | Cooldown |
 | `TRIANGULAR_ENABLED` | `true` | Activa triangular |
 | `TRIANGULAR_QUOTE_SIZE` | `2500` | Tamano ciclo |
+| `ACTIVE_EXCHANGES` | vacio | Lista opcional, ej. `binance,okx,bybit,kucoin,kraken`, para priorizar velocidad |
 | `GLOBAL_MARKET_ENABLED` | `true` | Contexto CoinGecko |
 | `GLOBAL_MARKET_INTERVAL_MS` | `60000` | Frecuencia contexto global |
 
@@ -135,10 +138,14 @@ npm run start
 - `partial-fill` / `partial-cycle`: se ejecuto menos que el tamano objetivo porque la liquidez disponible no cubria todo el volumen.
 - `Infrastructure optional off`: Redis esta apagado porque no hay `REDIS_URL`. La UI funciona por SSE; Redis solo agrega Pub/Sub externo.
 - `REST`: un stream WebSocket fallo 5 veces y ese par entro en polling REST temporalmente. Aurelion intenta volver a WebSocket despues de `REST_RECOVERY_ATTEMPT_MS`.
+- `Book Age`: frescura del ultimo order book recibido. Es mejor para leer la UI que la latencia de update de CCXT, porque algunos exchanges publican updates mas lento aunque la conexion este sana.
+- `Best Edge`: mejor edge neto detectado en bps despues de fees, slippage, latencia estimada y rebalanceo. No es el spread bruto.
 
 ## Auto/Live vs Demo
 
 Es normal ver menos operaciones rentables en `auto` o `live`. En mercado real los arbitrajes netos duran poco, y al descontar comisiones, slippage y latencia muchas oportunidades quedan `rejected` o `blocked`. `demo` inyecta shocks controlados para probar la experiencia, incluyendo fills parciales.
+
+Para evaluaciones de latencia, usa `ACTIVE_EXCHANGES=binance,okx,bybit,kucoin,kraken` como perfil rapido. Para demostrar cobertura global, deja la variable vacia y Aurelion monitorea todos los exchanges configurados.
 
 ## Deploy
 

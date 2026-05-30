@@ -39,12 +39,24 @@ class ExecutionSimulator:
             if self.cooldowns.get(key, 0) > current:
                 continue
             trade = self.build_trade(opportunity)
+            if not self.has_inventory(trade):
+                continue
             self.ledger.apply_trade(trade)
             self.cooldowns[key] = current + self.settings.pair_cooldown_ms
             self.risk.record_trade(trade, current)
             self.store.add_trade(trade, self.ledger.realized_pnl)
             executions.append(trade)
         return executions
+
+    def has_inventory(self, trade: dict) -> bool:
+        if trade["strategy"] == "triangular":
+            wallet = self.ledger.get(trade["exchangeId"])
+            return float(wallet["USDT"]) >= trade["quoteIn"]
+
+        buy = self.ledger.get(trade["buyExchangeId"])
+        sell = self.ledger.get(trade["sellExchangeId"])
+        buy_debit = trade["buyQuote"] + trade["buyFee"] + trade["slippageCostBuy"] + trade["rebalanceCost"]
+        return float(buy["USDT"]) >= buy_debit and float(sell["BTC"]) >= trade["qtyBtc"]
 
     def build_trade(self, opportunity: dict) -> dict:
         base = {
@@ -57,6 +69,11 @@ class ExecutionSimulator:
             "netBps": opportunity["netBps"],
             "confidence": opportunity["confidence"],
             "partial": opportunity["partial"],
+            "filledRatio": opportunity.get("filledRatio", 1),
+            "targetQtyBtc": opportunity.get("targetQtyBtc"),
+            "targetQuote": opportunity.get("targetQuote"),
+            "fills": opportunity.get("fills", {}),
+            "legPartials": opportunity.get("legPartials", []),
             "source": opportunity["source"],
             "totalCosts": opportunity.get("costs", {}).get("totalCosts", 0),
             "executionQuality": {

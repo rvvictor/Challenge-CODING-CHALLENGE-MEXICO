@@ -13,6 +13,12 @@ BookCallback = Callable[[OrderBook], None]
 EventCallback = Callable[[dict], Awaitable[None]]
 
 
+VALID_ORDER_BOOK_LIMITS = {
+    "bybit": (1, 50, 200, 1000),
+    "kucoin": (5, 20, 50, 100),
+}
+
+
 class CcxtStreamProvider:
     def __init__(self, settings: Settings, on_book: BookCallback, on_event: EventCallback):
         self.settings = settings
@@ -72,6 +78,7 @@ class CcxtStreamProvider:
                 "key": key,
                 "exchange": exchange,
                 "symbol": symbol,
+                "orderBookLimit": self.order_book_limit(exchange),
                 "mode": "websocket",
                 "failures": 0,
                 "reconnects": 0,
@@ -94,6 +101,14 @@ class CcxtStreamProvider:
         self.clients[exchange.id] = client
         return client
 
+    def order_book_limit(self, exchange: ExchangeConfig) -> int:
+        configured = exchange.order_book_limit if exchange.order_book_limit is not None else self.settings.order_book_limit
+        valid = VALID_ORDER_BOOK_LIMITS.get(exchange.ccxt_id)
+        if not valid or configured in valid:
+            return configured
+        larger = [limit for limit in valid if limit >= configured]
+        return larger[0] if larger else valid[-1]
+
     async def watch_loop(self, state: dict) -> None:
         while self.active and state["mode"] == "websocket":
             exchange = state["exchange"]
@@ -104,7 +119,7 @@ class CcxtStreamProvider:
                 if not watch:
                     raise RuntimeError(f"{exchange.name} has no watchOrderBook")
                 started = time.perf_counter()
-                orderbook = await watch(symbol, self.settings.order_book_limit)
+                orderbook = await watch(symbol, self.order_book_limit(exchange))
                 latency_ms = max(1, round((time.perf_counter() - started) * 1000))
                 state["failures"] = 0
                 state["updates"] += 1
@@ -130,10 +145,12 @@ class CcxtStreamProvider:
             symbol = state["symbol"]
             try:
                 client = self.client(exchange)
-                orderbook = await client.fetch_order_book(symbol, self.settings.order_book_limit)
+                started = time.perf_counter()
+                orderbook = await client.fetch_order_book(symbol, self.order_book_limit(exchange))
+                latency_ms = max(1, round((time.perf_counter() - started) * 1000))
                 state["updates"] += 1
                 state["lastUpdate"] = int(time.time() * 1000)
-                self.on_book(self.normalize(exchange, symbol, orderbook, "rest", self.settings.request_timeout_ms))
+                self.on_book(self.normalize(exchange, symbol, orderbook, "rest", latency_ms))
             except Exception as exc:
                 state["lastError"] = str(exc)
                 await self.emit("rest-error", {"exchange": exchange.name, "symbol": symbol, "reason": str(exc)})
@@ -145,8 +162,9 @@ class CcxtStreamProvider:
             await asyncio.sleep(self.settings.poll_interval_ms / 1000)
 
     def normalize(self, exchange: ExchangeConfig, symbol: str, orderbook: dict, source: str, latency_ms: float) -> OrderBook:
-        asks = [Level(float(level[0]), float(level[1])) for level in orderbook.get("asks", [])[: self.settings.order_book_limit]]
-        bids = [Level(float(level[0]), float(level[1])) for level in orderbook.get("bids", [])[: self.settings.order_book_limit]]
+        limit = self.order_book_limit(exchange)
+        asks = [Level(float(level[0]), float(level[1])) for level in orderbook.get("asks", [])[:limit]]
+        bids = [Level(float(level[0]), float(level[1])) for level in orderbook.get("bids", [])[:limit]]
         timestamp = orderbook.get("timestamp") or int(time.time() * 1000)
         return OrderBook(
             key=f"{exchange.id}:{symbol}",
@@ -178,6 +196,7 @@ class CcxtStreamProvider:
                     "exchangeId": state["exchange"].id,
                     "exchangeName": state["exchange"].name,
                     "symbol": state["symbol"],
+                    "orderBookLimit": state["orderBookLimit"],
                     "mode": state["mode"],
                     "failures": state["failures"],
                     "reconnects": state["reconnects"],

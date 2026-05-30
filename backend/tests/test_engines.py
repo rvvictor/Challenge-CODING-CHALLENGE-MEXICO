@@ -105,6 +105,61 @@ class EngineTests(unittest.TestCase):
                 break
         self.assertTrue(seen_low_depth)
 
+    def test_ccxt_provider_uses_exchange_safe_order_book_limits(self):
+        from backend.app.integrations.ccxt_provider import CcxtStreamProvider
+
+        async def noop_event(_event):
+            return None
+
+        settings = Settings(order_book_limit=25)
+        provider = CcxtStreamProvider(settings, lambda _book: None, noop_event)
+        self.assertEqual(provider.order_book_limit(settings.exchange_by_id("kucoin")), 20)
+        self.assertEqual(provider.order_book_limit(settings.exchange_by_id("bybit")), 50)
+
+    def test_settings_can_filter_active_exchanges_for_speed_profile(self):
+        settings = Settings(active_exchanges="binance,okx,bybit")
+        self.assertEqual([exchange.id for exchange in settings.exchanges], ["binance", "okx", "bybit"])
+
+    def test_executor_revalidates_inventory_between_same_tick_trades(self):
+        from backend.app.engines.event_store import EventStore
+        from backend.app.engines.execution import ExecutionSimulator
+
+        settings = Settings(max_executions_per_tick=2)
+        ledger = WalletLedger(settings)
+        executor = ExecutionSimulator(settings, ledger, EventStore(), RiskManager(settings))
+        base = {
+            "strategy": "simple",
+            "status": "profitable",
+            "grossProfit": 300,
+            "netProfit": 120,
+            "netBps": 28,
+            "confidence": 0.9,
+            "partial": False,
+            "source": "test",
+            "product": "BTC/USDT",
+            "qtyBtc": 0.6,
+            "targetQtyBtc": 0.6,
+            "filledRatio": 1,
+            "buyPrice": 70000,
+            "sellPrice": 70500,
+            "costs": {
+                "buyFee": 10,
+                "sellFee": 10,
+                "slippageCostBuy": 2,
+                "slippageCostSell": 2,
+                "latencyRiskCost": 1,
+                "rebalanceCost": 1,
+                "totalCosts": 26,
+            },
+        }
+        opportunities = [
+            {**base, "id": "one", "dedupeKey": "one", "buyExchangeId": "binance", "sellExchangeId": "bybit", "buyExchange": "Binance", "sellExchange": "Bybit"},
+            {**base, "id": "two", "dedupeKey": "two", "buyExchangeId": "okx", "sellExchangeId": "bybit", "buyExchange": "OKX", "sellExchange": "Bybit"},
+        ]
+        trades = executor.try_execute(opportunities, [])
+        self.assertEqual(len(trades), 1)
+        self.assertGreaterEqual(float(ledger.get("bybit")["BTC"]), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

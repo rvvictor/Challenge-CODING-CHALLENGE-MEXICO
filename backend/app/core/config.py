@@ -34,6 +34,7 @@ class ExchangeConfig:
     withdrawal_fee_btc: float
     withdrawal_fee_quote: float
     confidence: float
+    order_book_limit: int | None = None
 
 
 @dataclass(frozen=True)
@@ -46,7 +47,7 @@ class Settings:
     evaluation_interval_ms: int = int_env("EVALUATION_INTERVAL_MS", 450)
     poll_interval_ms: int = int_env("POLL_INTERVAL_MS", 1200)
     request_timeout_ms: int = int_env("REQUEST_TIMEOUT_MS", 2500)
-    order_book_limit: int = int_env("ORDER_BOOK_LIMIT", 25)
+    order_book_limit: int = int_env("ORDER_BOOK_LIMIT", 20)
     ws_reconnect_delay_ms: int = int_env("WS_RECONNECT_DELAY_MS", 2000)
     ws_failure_threshold: int = int_env("WS_FAILURE_THRESHOLD", 5)
     rest_recovery_attempt_ms: int = int_env("REST_RECOVERY_ATTEMPT_MS", 60000)
@@ -74,6 +75,7 @@ class Settings:
     triangular_min_net_bps: float = number_env("TRIANGULAR_MIN_NET_BPS", 0.9)
     global_market_enabled: bool = bool_env("GLOBAL_MARKET_ENABLED", True)
     global_market_interval_ms: int = int_env("GLOBAL_MARKET_INTERVAL_MS", 60000)
+    active_exchanges: str = os.getenv("ACTIVE_EXCHANGES", "")
     redis_url: str = os.getenv("REDIS_URL", "")
     redis_enabled: bool = bool_env("REDIS_ENABLED", bool(os.getenv("REDIS_URL")))
     redis_namespace: str = os.getenv("REDIS_NAMESPACE", "aurelion")
@@ -86,12 +88,24 @@ class Settings:
         ExchangeConfig("kraken", "Kraken", "kraken", "BTC/USDT", ("BTC/USDT", "ETH/BTC", "ETH/USDT"), 26, 2.2, 0.00015, 2, 0.94),
         ExchangeConfig("coinbase", "Coinbase", "coinbase", "BTC/USD", ("BTC/USD", "ETH/BTC", "ETH/USD"), 40, 2.5, 0.00012, 3, 0.92),
         ExchangeConfig("bitstamp", "Bitstamp", "bitstamp", "BTC/USD", ("BTC/USD", "ETH/BTC", "ETH/USD"), 30, 2.0, 0.00018, 2.5, 0.91),
-        ExchangeConfig("bybit", "Bybit", "bybit", "BTC/USDT", ("BTC/USDT", "ETH/BTC", "ETH/USDT"), 10, 1.8, 0.0002, 1.5, 0.90),
-        ExchangeConfig("kucoin", "KuCoin", "kucoin", "BTC/USDT", ("BTC/USDT", "ETH/BTC", "ETH/USDT"), 10, 2.0, 0.0002, 1.5, 0.89),
+        ExchangeConfig("bybit", "Bybit", "bybit", "BTC/USDT", ("BTC/USDT", "ETH/BTC", "ETH/USDT"), 10, 1.8, 0.0002, 1.5, 0.90, order_book_limit=50),
+        ExchangeConfig("kucoin", "KuCoin", "kucoin", "BTC/USDT", ("BTC/USDT", "ETH/BTC", "ETH/USDT"), 10, 2.0, 0.0002, 1.5, 0.89, order_book_limit=20),
         ExchangeConfig("gateio", "Gate.io", "gateio", "BTC/USDT", ("BTC/USDT", "ETH/BTC", "ETH/USDT"), 20, 2.4, 0.00025, 2, 0.88),
         ExchangeConfig("bitfinex", "Bitfinex", "bitfinex", "BTC/USDT", ("BTC/USDT", "ETH/BTC", "ETH/USDT"), 20, 2.2, 0.0004, 2.5, 0.87),
         ExchangeConfig("gemini", "Gemini", "gemini", "BTC/USD", ("BTC/USD", "ETH/BTC", "ETH/USD"), 35, 2.8, 0.0001, 3, 0.86),
     ))
+
+    def __post_init__(self) -> None:
+        if not self.active_exchanges.strip():
+            return
+        requested = {item.strip().lower() for item in self.active_exchanges.split(",") if item.strip()}
+        filtered = tuple(
+            exchange
+            for exchange in self.exchanges
+            if exchange.id in requested or exchange.ccxt_id in requested or exchange.name.lower() in requested
+        )
+        if len(filtered) >= 2:
+            object.__setattr__(self, "exchanges", filtered)
 
     def exchange_by_id(self, exchange_id: str) -> ExchangeConfig:
         for exchange in self.exchanges:

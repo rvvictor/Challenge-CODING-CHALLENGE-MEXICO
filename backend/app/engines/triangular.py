@@ -72,7 +72,11 @@ class TriangularArbitrageEngine:
         confidence = min(exchange.confidence, btc_quote.confidence, eth_btc.confidence, eth_quote.confidence, max(0.2, 1 - max_age / self.settings.max_book_age_ms))
         total_costs = quote_in * cost_rate + float(step2["quote_spent"]) * cost_rate * float(step1["avg_price"]) + gross_quote_out * cost_rate + latency_risk_cost
         profitable = net_profit >= self.settings.triangular_min_net_profit_usd and net_bps >= self.settings.triangular_min_net_bps and confidence >= self.settings.min_confidence
+        step1_ratio = float(step1["quote_spent"]) / quote_in if quote_in else 0
+        step2_ratio = float(step2["quote_spent"]) / btc_after_costs if btc_after_costs else 0
+        step3_ratio = step3.filled_qty / eth_after_costs if eth_after_costs else 0
         partial = bool(step1["partial"] or step2["partial"] or step3.partial)
+        filled_ratio = min(1, step1_ratio, step2_ratio, step3_ratio)
         score = (net_bps * confidence * math.log10(max(quote_in, 10))) / (1 + latency_ms / 1200) if profitable else net_bps * confidence
         source = "websocket" if all(book.source == "websocket" for book in (btc_quote, eth_btc, eth_quote)) else "mixed"
         cycle_path = ["USDT" if "USDT" in btc_quote_symbol else "USD", "BTC", "ETH", "USDT" if "USDT" in eth_quote_symbol else "USD"]
@@ -100,15 +104,18 @@ class TriangularArbitrageEngine:
                 "cycleId": cycle_id,
                 "cyclePath": cycle_path,
                 "quoteIn": rounded(quote_in, 4),
+                "targetQuote": self.settings.triangular_quote_size,
                 "quoteOut": rounded(final_quote_out, 4),
                 "qtyBtc": rounded(float(step1["base_received"]), 8),
                 "qtyEth": rounded(float(step2["base_received"]), 8),
+                "filledRatio": rounded(filled_ratio, 4),
                 "buyPrice": rounded(float(step1["avg_price"]), 8),
                 "sellPrice": rounded(step3.avg_price, 8),
+                "legPartials": [bool(step1["partial"]), bool(step2["partial"]), bool(step3.partial)],
                 "legs": [
-                    {"action": "buy", "symbol": btc_quote_symbol, "from": cycle_path[0], "to": "BTC", "avgPrice": rounded(float(step1["avg_price"]), 8), "levels": step1["level_count"]},
-                    {"action": "buy", "symbol": eth_btc_symbol, "from": "BTC", "to": "ETH", "avgPrice": rounded(float(step2["avg_price"]), 8), "levels": step2["level_count"]},
-                    {"action": "sell", "symbol": eth_quote_symbol, "from": "ETH", "to": cycle_path[3], "avgPrice": rounded(step3.avg_price, 8), "levels": step3.level_count},
+                    {"action": "buy", "symbol": btc_quote_symbol, "from": cycle_path[0], "to": "BTC", "avgPrice": rounded(float(step1["avg_price"]), 8), "levels": step1["level_count"], "partial": bool(step1["partial"]), "filledRatio": rounded(step1_ratio, 4)},
+                    {"action": "buy", "symbol": eth_btc_symbol, "from": "BTC", "to": "ETH", "avgPrice": rounded(float(step2["avg_price"]), 8), "levels": step2["level_count"], "partial": bool(step2["partial"]), "filledRatio": rounded(step2_ratio, 4)},
+                    {"action": "sell", "symbol": eth_quote_symbol, "from": "ETH", "to": cycle_path[3], "avgPrice": rounded(step3.avg_price, 8), "levels": step3.level_count, "partial": bool(step3.partial), "filledRatio": rounded(step3_ratio, 4)},
                 ],
                 "latencies": {"totalMs": latency_ms},
             },
