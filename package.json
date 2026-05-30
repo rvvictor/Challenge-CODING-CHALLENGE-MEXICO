@@ -1,31 +1,32 @@
 {
-  "name": "bitcoin-arbitrage-sentinel",
-  "version": "1.0.0",
-  "description": "WebSocket-first Bitcoin arbitrage simulator with CCXT Pro streams, Redis Pub/Sub, triangular routing, risk controls, and a live dashboard.",
-  "type": "module",
-  "main": "src/server.js",
+  "name": "aurelion-arbitrage-bot",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Aurelion: Python + React Bitcoin arbitrage bot with WebSocket-first market data, triangular routing, Redis Pub/Sub, circuit breakers, and a competition-grade dashboard.",
   "scripts": {
-    "dev": "node src/server.js",
-    "start": "node src/server.js",
-    "check": "node --check src/server.js && node --check src/engine/arbitrageEngine.js && node --check src/engine/marketDataEngine.js && node --check src/engine/triangularArbitrageEngine.js && node --check src/engine/opportunityQueue.js && node --check src/exchanges/ccxtStreamProvider.js && node --check src/integrations/redisBus.js && node --check public/app.js && node --check tests/server.test.js && node --check tests/opportunityQueue.test.js && node --check tests/riskManager.test.js && node --check tests/triangular.test.js",
-    "test": "node --test tests/*.test.js"
-  },
-  "dependencies": {
-    "ccxt": "^4.5.0",
-    "ioredis": "^5.4.2"
-  },
-  "engines": {
-    "node": ">=20"
+    "dev": "python -m backend.app.main",
+    "dev:api": "python -m backend.app.main",
+    "dev:web": "npm --prefix frontend run dev",
+    "start": "python -m backend.app.main",
+    "build": "npm --prefix frontend run build",
+    "check": "python -m compileall backend && npm --prefix frontend run build",
+    "test": "python -m unittest discover -s backend/tests",
+    "test:legacy": "node --test tests/*.test.js"
   },
   "keywords": [
+    "aurelion",
     "bitcoin",
     "arbitrage",
-    "trading",
+    "python",
+    "react",
     "websocket",
-    "ccxt-pro",
+    "ccxt",
     "redis",
-    "orderbook",
-    "sse"
+    "trading"
   ],
+  "engines": {
+    "node": ">=20",
+    "python": ">=3.11"
+  },
   "license": "MIT"
 }

@@ -1,10 +1,10 @@
 services:
   - type: web
     name: bitcoin-arbitrage-sentinel
-    env: node
+    env: python
     plan: free
-    buildCommand: npm ci
-    startCommand: npm start
+    buildCommand: pip install -r requirements.txt && npm --prefix frontend ci && npm --prefix frontend run build
+    startCommand: python -m backend.app.main
     envVars:
       - key: MARKET_MODE
         value: auto
