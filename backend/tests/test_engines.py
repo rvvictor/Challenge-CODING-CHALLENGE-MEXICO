@@ -9,6 +9,7 @@ from backend.app.engines.fills import estimate_fill
 from backend.app.engines.ledger import WalletLedger
 from backend.app.engines.queue import OpportunityQueue
 from backend.app.engines.risk import RiskManager
+from backend.app.engines.simulator import SimulatedMarket
 from backend.app.engines.triangular import TriangularArbitrageEngine
 
 
@@ -72,6 +73,37 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(len(opportunities), 1)
         self.assertEqual(opportunities[0]["strategy"], "triangular")
         self.assertEqual(opportunities[0]["status"], "profitable")
+
+    def test_partial_fill_is_detected_when_book_depth_is_small(self):
+        from backend.app.engines.arbitrage import CrossExchangeArbitrageEngine
+
+        settings = Settings(max_trade_btc=0.09, min_trade_btc=0.004, min_net_bps=0.1, min_net_profit_usd=0.1)
+        ledger = WalletLedger(settings)
+        engine = CrossExchangeArbitrageEngine(settings, ledger)
+        buy = settings.exchanges[0]
+        sell = settings.exchanges[1]
+        opportunity = engine.evaluate_pair(
+            book(buy, "BTC/USDT", [(70000, 0.01), (70001, 0.006)], [(69990, 0.02)]),
+            book(sell, "BTC/USDT", [(70200, 0.02)], [(70480, 0.008), (70470, 0.006)]),
+            int(time.time() * 1000),
+        )
+        self.assertIsNotNone(opportunity)
+        payload = opportunity.to_dict()
+        self.assertTrue(payload["partial"])
+        self.assertGreater(payload["qtyBtc"], 0.004)
+        self.assertLess(payload["qtyBtc"], settings.max_trade_btc)
+
+    def test_demo_market_can_create_liquidity_crunch(self):
+        settings = Settings()
+        simulator = SimulatedMarket(settings.exchanges)
+        seen_low_depth = False
+        for _ in range(120):
+            orderbook = simulator.generate(settings.exchanges[0], settings.exchanges, "BTC/USDT")
+            total_ask = sum(level.qty for level in orderbook.asks)
+            if 0 < total_ask < settings.max_trade_btc:
+                seen_low_depth = True
+                break
+        self.assertTrue(seen_low_depth)
 
 
 if __name__ == "__main__":

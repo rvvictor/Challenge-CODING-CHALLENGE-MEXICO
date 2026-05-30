@@ -1,6 +1,6 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
-import { Activity, ArrowRightLeft, ChartNoAxesCombined, CirclePause, DatabaseZap, Gauge, Network, Power, Radar, RefreshCw, ShieldAlert, Sparkles, Triangle } from "lucide-react";
+import { Activity, ArrowRightLeft, ChartNoAxesCombined, CirclePause, DatabaseZap, Gauge, Globe2, Network, Power, Radar, RefreshCw, ShieldAlert, Sparkles, Split, Triangle } from "lucide-react";
 import "./styles/app.css";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "";
@@ -132,8 +132,8 @@ function Overview({ snapshot }) {
       <Metric icon={Radar} label="Best Edge" value={`${formatNumber(metrics.bestNetBps, 2)} bps`} note={`${snapshot.queue.executable} executable`} />
       <Metric icon={ArrowRightLeft} label="Detected" value={compact.format(metrics.detectedCount)} note={`${compact.format(metrics.triangularCount)} triangular`} />
       <Metric icon={Network} label="Books" value={`${metrics.liveBooks} WS / ${metrics.restBooks} REST`} note={`${metrics.simulatedBooks} demo`} />
+      <Metric icon={Split} label="Partial Fills" value={compact.format(metrics.partialCount || 0)} note={`${metrics.blockedCount || 0} blocked`} />
       <Metric icon={Gauge} label="Latency" value={`${Math.round(metrics.avgLatencyMs)} ms`} note="average book" />
-      <Metric icon={ShieldAlert} label="Risk" value={risk.paused ? "cooldown" : "healthy"} note={risk.reason} tone={risk.paused ? "bad" : "good"} />
     </section>
   );
 }
@@ -192,7 +192,10 @@ function OpportunityTable({ opportunities }) {
             <span>{opportunity.strategy === "triangular" ? formatMoney(opportunity.quoteIn) : formatBtc(opportunity.qtyBtc)}</span>
             <span className={opportunity.netProfit >= 0 ? "green" : "red"}>{formatMoney(opportunity.netProfit)}<small>{formatNumber(opportunity.netBps, 2)} bps</small></span>
             <span>{formatNumber(opportunity.score, 3)}</span>
-            <span><em className={`badge ${opportunity.status}`}>{opportunity.status}</em></span>
+            <span>
+              <em className={`badge ${opportunity.status}`}>{opportunity.status}</em>
+              <small>{opportunity.status === "blocked" ? "size/depth gate" : opportunity.reason}</small>
+            </span>
           </div>
         ))}
       </div>
@@ -202,9 +205,10 @@ function OpportunityTable({ opportunities }) {
 
 function Streams({ streams, redis }) {
   const rows = streams.streams || [];
+  const redisLabel = redis.enabled ? redis.status : "optional off";
   return (
     <section className="surface streams">
-      <PanelTitle icon={DatabaseZap} title="Infrastructure" pill={redis.status} />
+      <PanelTitle icon={DatabaseZap} title="Infrastructure" pill={redisLabel} />
       <div className="streamList">
         {rows.slice(0, 12).map((stream) => (
           <article className="stream" key={stream.key}>
@@ -215,6 +219,31 @@ function Streams({ streams, redis }) {
           </article>
         ))}
         {!rows.length && <div className="empty">{streams.unavailableReason || "No stream telemetry"}</div>}
+      </div>
+    </section>
+  );
+}
+
+function GlobalMarket({ globalMarket }) {
+  return (
+    <section className="surface">
+      <PanelTitle icon={Globe2} title="Global Market" pill={globalMarket.status || "warming"} />
+      <div className="globalGrid">
+        <article>
+          <span>BTC reference</span>
+          <b>{formatMoney(globalMarket.btcUsd)}</b>
+          <small className={globalMarket.btcChange24h >= 0 ? "green" : "red"}>{formatNumber(globalMarket.btcChange24h, 2)}% 24h</small>
+        </article>
+        <article>
+          <span>ETH reference</span>
+          <b>{formatMoney(globalMarket.ethUsd)}</b>
+          <small className={globalMarket.ethChange24h >= 0 ? "green" : "red"}>{formatNumber(globalMarket.ethChange24h, 2)}% 24h</small>
+        </article>
+        <article>
+          <span>BTC market cap</span>
+          <b>{compact.format(globalMarket.btcMarketCap || 0)}</b>
+          <small>{globalMarket.source || "CoinGecko"}</small>
+        </article>
       </div>
     </section>
   );
@@ -278,6 +307,7 @@ function SideRail({ snapshot }) {
         <PanelTitle icon={ChartNoAxesCombined} title="P&L" pill={formatMoney(snapshot.metrics.cumulativePnl)} />
         <PnlChart series={snapshot.pnlSeries} />
       </section>
+      <GlobalMarket globalMarket={snapshot.globalMarket || {}} />
       <section className="surface">
         <PanelTitle icon={DatabaseZap} title="Inventory" pill={formatMoney(snapshot.totals.markToMarket)} />
         <div className="wallets">
@@ -304,6 +334,7 @@ function Trades({ trades }) {
             <b>{trade.strategy === "triangular" ? `${trade.exchange} ${trade.cyclePath?.join(" -> ")}` : `${trade.buyExchange} -> ${trade.sellExchange}`}</b>
             <span>{trade.strategy === "triangular" ? formatMoney(trade.quoteIn) : formatBtc(trade.qtyBtc)}</span>
             <em className={trade.netProfit >= 0 ? "green" : "red"}>{formatMoney(trade.netProfit)}</em>
+            <small>{trade.status} / {formatNumber(trade.executionQuality?.edgeCaptureBps || trade.netBps, 2)} bps captured</small>
           </article>
         ))}
         {!trades.length && <div className="empty">No fills yet</div>}

@@ -17,6 +17,7 @@ from backend.app.engines.risk import RiskManager
 from backend.app.engines.simulator import SimulatedMarket
 from backend.app.engines.triangular import TriangularArbitrageEngine
 from backend.app.integrations.ccxt_provider import CcxtStreamProvider
+from backend.app.integrations.global_market import GlobalMarketIntel
 from backend.app.integrations.redis_bus import RedisBus
 
 
@@ -44,6 +45,7 @@ class MarketService:
         self.queue = OpportunityQueue()
         self.executor = ExecutionSimulator(cfg, self.ledger, self.store, self.risk)
         self.redis = RedisBus(cfg)
+        self.global_market = GlobalMarketIntel(cfg)
         self.stream_provider: CcxtStreamProvider | None = None
         self.started_at = now_ms()
         self.task: asyncio.Task | None = None
@@ -54,6 +56,7 @@ class MarketService:
 
     async def start(self) -> None:
         await self.redis.start()
+        await self.global_market.start()
         if self.mode != "demo":
             await self.start_streams()
         if not self.task:
@@ -65,6 +68,7 @@ class MarketService:
             self.task = None
         if self.stream_provider:
             await self.stream_provider.stop()
+        await self.global_market.stop()
 
     async def start_streams(self) -> None:
         if self.stream_provider:
@@ -216,14 +220,25 @@ class MarketService:
             "risk": self.risk.snapshot(current),
             "riskEvents": self.store.latest_events(),
             "redis": self.redis.snapshot(),
+            "globalMarket": self.global_market.snapshot(),
             "streams": self.stream_provider.snapshot() if self.stream_provider else {"available": False, "unavailableReason": "Demo mode", "streams": []},
             "queue": self.queue.snapshot(),
+            "diagnostics": {
+                "blockedMeaning": "Spread exists, but Aurelion skipped it because size, balance, depth, or risk gates were not good enough.",
+                "redisMeaning": "Redis is optional Pub/Sub. Disabled means no REDIS_URL is configured; the dashboard still uses SSE.",
+                "restFallbackActive": any(book["source"] == "rest" for book in books),
+            },
             "metrics": {
                 "detectedCount": self.store.detected_count,
                 "rejectedCount": self.store.rejected_count,
                 "executedCount": self.store.executed_count,
                 "simpleCount": self.store.simple_count,
                 "triangularCount": self.store.triangular_count,
+                "profitableCount": self.store.profitable_count,
+                "blockedCount": self.store.blocked_count,
+                "partialCount": self.store.partial_count,
+                "executedSimpleCount": self.store.executed_simple_count,
+                "executedTriangularCount": self.store.executed_triangular_count,
                 "cumulativePnl": self.ledger.realized_pnl,
                 "winRate": wins / len(trades) if trades else 0,
                 "avgLatencyMs": avg_latency,

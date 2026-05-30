@@ -10,8 +10,11 @@ Aurelion es un bot de arbitraje de Bitcoin con arquitectura backend/frontend: ba
 - REST polling solo como fallback despues de 5 fallos WebSocket por stream.
 - Reconexion WebSocket cada 2 segundos.
 - Redis Pub/Sub opcional para snapshots, trades, risk events y market events.
+- Contexto global de mercado via CoinGecko (`/simple/price`) para BTC/ETH.
 - Arbitraje cross-exchange BTC y triangular `USDT -> BTC -> ETH -> USDT`.
 - Cola de prioridad con score y dedupe de rutas equivalentes.
+- Exchanges ampliados: Binance, OKX, Kraken, Coinbase, Bitstamp, Bybit, KuCoin, Gate.io, Bitfinex y Gemini.
+- Metricas de fills parciales y calidad de ejecucion.
 - Circuit breaker por volatilidad, stale data y racha de perdidas.
 - Modo demo deterministico para presentaciones sin depender de APIs externas.
 
@@ -28,6 +31,7 @@ backend/
   app/engines/queue.py           Ranking y dedupe
   app/engines/risk.py            Circuit breaker
   app/integrations/ccxt_provider.py
+  app/integrations/global_market.py
   app/integrations/redis_bus.py
 frontend/
   src/main.jsx                   React cockpit
@@ -111,6 +115,8 @@ npm run start
 | `PAUSE_AFTER_LOSS_MS` | `60000` | Cooldown |
 | `TRIANGULAR_ENABLED` | `true` | Activa triangular |
 | `TRIANGULAR_QUOTE_SIZE` | `2500` | Tamano ciclo |
+| `GLOBAL_MARKET_ENABLED` | `true` | Contexto CoinGecko |
+| `GLOBAL_MARKET_INTERVAL_MS` | `60000` | Frecuencia contexto global |
 
 ## API
 
@@ -120,6 +126,19 @@ npm run start
 - `POST /api/control`
 - `POST /api/reset`
 - `GET /events`
+
+## Interpretacion Rapida de Estados
+
+- `blocked`: Aurelion vio una divergencia bruta, pero no la ejecuta porque no pasa tamano minimo, profundidad, balance o compuertas de riesgo. No es un error.
+- `rejected`: habia spread, pero fees, slippage, latencia o riesgo dejaron la oportunidad sin edge neto.
+- `profitable`: pasa filtros y puede entrar a ejecucion simulada si no hay cooldown.
+- `partial-fill` / `partial-cycle`: se ejecuto menos que el tamano objetivo porque la liquidez disponible no cubria todo el volumen.
+- `Infrastructure optional off`: Redis esta apagado porque no hay `REDIS_URL`. La UI funciona por SSE; Redis solo agrega Pub/Sub externo.
+- `REST`: un stream WebSocket fallo 5 veces y ese par entro en polling REST temporalmente. Aurelion intenta volver a WebSocket despues de `REST_RECOVERY_ATTEMPT_MS`.
+
+## Auto/Live vs Demo
+
+Es normal ver menos operaciones rentables en `auto` o `live`. En mercado real los arbitrajes netos duran poco, y al descontar comisiones, slippage y latencia muchas oportunidades quedan `rejected` o `blocked`. `demo` inyecta shocks controlados para probar la experiencia, incluyendo fills parciales.
 
 ## Deploy
 
@@ -141,4 +160,5 @@ docker run -p 8000:8000 -e MARKET_MODE=auto aurelion
 
 - No envia ordenes reales ni usa llaves privadas.
 - En `auto`, si `ccxt.pro` no esta disponible o no hay red, puede usar demo degradado para que la UI siga viva.
+- CoinGecko se usa solo como contexto global, no como fuente de ejecucion. CoinMarketCap suele requerir API key; TradingView es excelente para visualizacion externa pero no reemplaza los order books por exchange.
 - Redis es bus Pub/Sub, no almacenamiento durable. Para produccion se agregaria Postgres/Timescale o Redis Streams.

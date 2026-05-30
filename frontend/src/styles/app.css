@@ -188,7 +188,7 @@ small,
 
 .overview {
   display: grid;
-  grid-template-columns: repeat(6, minmax(140px, 1fr));
+  grid-template-columns: repeat(7, minmax(132px, 1fr));
   gap: 12px;
   margin-bottom: 14px;
 }
@@ -439,7 +439,39 @@ small,
 }
 
 .wallets small,
-.tradeList em {
+.tradeList em,
+.tradeList small {
+  grid-column: 1 / -1;
+}
+
+.globalGrid {
+  display: grid;
+  gap: 10px;
+  padding: 13px;
+}
+
+.globalGrid article {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 10px;
+  align-items: baseline;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fcfdf9;
+}
+
+.globalGrid span,
+.globalGrid small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.globalGrid b {
+  font-size: 18px;
+}
+
+.globalGrid small {
   grid-column: 1 / -1;
 }
 
@@ -476,7 +508,7 @@ small,
 
 @media (max-width: 1320px) {
   .overview {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(4, 1fr);
   }
 
   .mainGrid {

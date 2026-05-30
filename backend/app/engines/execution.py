@@ -59,6 +59,11 @@ class ExecutionSimulator:
             "partial": opportunity["partial"],
             "source": opportunity["source"],
             "totalCosts": opportunity.get("costs", {}).get("totalCosts", 0),
+            "executionQuality": {
+                "edgeCaptureBps": opportunity["netBps"],
+                "confidence": opportunity["confidence"],
+                "costRatio": (opportunity.get("costs", {}).get("totalCosts", 0) / max(abs(opportunity.get("grossProfit", 0)), 0.000001)),
+            },
             "status": "partial-cycle" if opportunity["strategy"] == "triangular" and opportunity["partial"] else "partial-fill" if opportunity["partial"] else "filled",
         }
         if opportunity["strategy"] == "triangular":

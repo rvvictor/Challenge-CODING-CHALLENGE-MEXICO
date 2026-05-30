@@ -19,6 +19,11 @@ class EventStore:
         self.executed_count = 0
         self.simple_count = 0
         self.triangular_count = 0
+        self.profitable_count = 0
+        self.blocked_count = 0
+        self.partial_count = 0
+        self.executed_simple_count = 0
+        self.executed_triangular_count = 0
 
     def add_opportunities(self, opportunities: list[dict]) -> None:
         for opportunity in opportunities:
@@ -27,6 +32,10 @@ class EventStore:
                 self.triangular_count += 1
             else:
                 self.simple_count += 1
+            if opportunity.get("status") == "profitable":
+                self.profitable_count += 1
+            if opportunity.get("status") == "blocked":
+                self.blocked_count += 1
             if opportunity.get("status") != "profitable":
                 self.rejected_count += 1
             self.opportunities.insert(0, opportunity)
@@ -34,6 +43,12 @@ class EventStore:
 
     def add_trade(self, trade: dict, cumulative_pnl: float) -> None:
         self.executed_count += 1
+        if trade.get("partial"):
+            self.partial_count += 1
+        if trade.get("strategy") == "triangular":
+            self.executed_triangular_count += 1
+        else:
+            self.executed_simple_count += 1
         self.trades.insert(0, trade)
         self.trades = self.trades[: self.trades_limit]
         self.pnl_series.append({"time": trade["time"], "pnl": cumulative_pnl})

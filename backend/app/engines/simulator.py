@@ -64,11 +64,19 @@ class SimulatedMarket:
         bids: list[Level] = []
         for i in range(20):
             gap = i * self.random.uniform(0.000004, 0.000018) if kind == "ETHBTC" else i * self.random.uniform(2, 8)
+            liquidity_crunch = (
+                kind == "BTC"
+                and self.shock
+                and exchange.id in {self.shock["cheap"], self.shock["rich"]}
+                and self.tick % 7 in {0, 1, 2}
+            )
             qty = (
                 self.random.uniform(0.4, 8) * (eth_btc_state["liq"] / 12) * (1 + i / 12)
                 if kind in {"ETHBTC", "ETHQUOTE"}
                 else self.random.uniform(0.012, 0.42) * state["liq"] * (1 + i / 12)
             )
+            if liquidity_crunch:
+                qty = self.random.uniform(0.00035, 0.0018)
             decimals = 8 if kind == "ETHBTC" else 2
             asks.append(Level(round(mid + half_spread + gap, decimals), round(qty, 6)))
             bids.append(Level(round(mid - half_spread - gap, decimals), round(qty * self.random.uniform(0.85, 1.18), 6)))
