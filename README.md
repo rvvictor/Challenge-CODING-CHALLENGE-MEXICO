@@ -304,7 +304,7 @@ Binance, OKX, Kraken, Coinbase, Bitstamp, Bybit, KuCoin, Gate.io, Bitfinex, Gemi
 | Variable | Valor por defecto | Descripción |
 | --- | --- | --- |
 | `PORT` | `8000` | Puerto del backend. |
-| `MARKET_MODE` | `auto` | Modo `demo`, `auto` o `live`. |
+| `MARKET_MODE` | `demo` | Modo `demo`, `auto` o `live`. |
 | `EXCHANGE_PROFILE` | `speed` | Perfil `speed`, `demo` o `coverage`. |
 | `ACTIVE_EXCHANGES` | vacío | Lista separada por comas. Usar `all` para activar el catálogo completo. |
 | `EVALUATION_INTERVAL_MS` | `450` | Intervalo de evaluación del motor. |
@@ -432,7 +432,7 @@ Comando de inicio: python -m backend.app.main
 Variables recomendadas:
 
 ```text
-MARKET_MODE=auto
+MARKET_MODE=demo
 AUTO_EXECUTION=true
 EXCHANGE_PROFILE=speed
 ```

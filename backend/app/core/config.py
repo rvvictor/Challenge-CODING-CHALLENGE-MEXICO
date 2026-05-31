@@ -99,7 +99,7 @@ class Settings:
     tagline: str = "Bitcoin Arbitrage Intelligence"
     host: str = os.getenv("HOST", "0.0.0.0")
     port: int = int_env("PORT", 8000)
-    market_mode: str = os.getenv("MARKET_MODE", "auto")
+    market_mode: str = os.getenv("MARKET_MODE", "demo")
     exchange_profile: str = os.getenv("EXCHANGE_PROFILE", "speed")
     evaluation_interval_ms: int = int_env("EVALUATION_INTERVAL_MS", 450)
     poll_interval_ms: int = int_env("POLL_INTERVAL_MS", 1200)

@@ -7,6 +7,6 @@ services:
     startCommand: python -m backend.app.main
     envVars:
       - key: MARKET_MODE
-        value: auto
+        value: demo
       - key: AUTO_EXECUTION
         value: "true"

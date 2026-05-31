@@ -14,7 +14,7 @@ COPY . .
 RUN npm --prefix frontend run build
 
 ENV NODE_ENV=production
-ENV MARKET_MODE=auto
+ENV MARKET_MODE=demo
 EXPOSE 8000
 
 CMD ["python", "-m", "backend.app.main"]
