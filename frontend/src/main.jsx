@@ -42,6 +42,11 @@ function signalAge(item, now) {
   return ago((now || Date.now()) - (item?.time || now || Date.now()));
 }
 
+function seenAge(item, now) {
+  const value = signalAge(item, now);
+  return value === "now" ? "now" : `${value} ago`;
+}
+
 function streamCounts(streams = {}) {
   const rows = streams.streams || [];
   return {
@@ -52,12 +57,13 @@ function streamCounts(streams = {}) {
   };
 }
 
-function dataFeedLabel(streams = {}, books = []) {
+function dataFeedLabel(streams = {}, books = [], coverage = {}) {
   const counts = streamCounts(streams);
-  if (!counts.total && books.some((book) => book.source === "simulated")) return "demo feed";
+  const venues = coverage.activeCount || books.length || 0;
+  if (!counts.total && books.some((book) => book.source === "simulated")) return `${venues} demo venues`;
   if (counts.disabled) return `${counts.disabled} disabled`;
-  if (counts.rest) return `${counts.ws} WS / ${counts.rest} REST`;
-  return `${counts.ws || books.length} WS`;
+  if (counts.rest) return `${venues} venues / ${counts.ws} WS / ${counts.rest} REST`;
+  return `${venues} venues / ${counts.ws || books.length} WS streams`;
 }
 
 function auditLabel(database = {}, redis = {}) {
@@ -156,33 +162,37 @@ function Header({ snapshot, connected, control, reset, exportSession }) {
   const dataTone = counts.disabled ? "bad" : counts.rest ? "watch" : "good";
   return (
     <header className="topbar">
-      <div className="identity">
-        <div className="sigil"><Sparkles size={22} /></div>
-        <div>
-          <h1>Aurelion</h1>
-          <p>Bitcoin Arbitrage Intelligence</p>
+      <div className="identityCluster">
+        <div className="identity">
+          <div className="sigil"><Sparkles size={22} /></div>
+          <div>
+            <h1>Aurelion</h1>
+            <p>Bitcoin Arbitrage Intelligence</p>
+          </div>
+        </div>
+        <span className={`conn ${connected ? "online" : "offline"}`}><i />{connected ? "live" : "syncing"}</span>
+      </div>
+      <div className="modeDock">
+        <div className="segmented">
+          {["auto", "live", "demo"].map((mode) => (
+            <button key={mode} className={snapshot?.mode === mode ? "active" : ""} onClick={() => control({ mode })}>{mode[0].toUpperCase() + mode.slice(1)}</button>
+          ))}
         </div>
       </div>
       <div className="topPulse">
         <span className="pulseItem good"><b>{formatMoney(metrics.cumulativePnl)}</b><small>P&L</small></span>
-        <span className={`pulseItem ${dataTone}`}><b>{dataFeedLabel(snapshot?.streams, snapshot?.books)}</b><small>data feed</small></span>
+        <span className={`pulseItem ${dataTone}`}><b>{dataFeedLabel(snapshot?.streams, snapshot?.books, snapshot?.exchangeCoverage)}</b><small>data feed</small></span>
         <span className="pulseItem"><b>{snapshot?.venueHealth?.demotedCount || metrics.demotedVenues || 0}</b><small>demoted</small></span>
         <span className="pulseItem"><b>{auditLabel(snapshot?.database, snapshot?.redis)}</b><small>audit</small></span>
       </div>
       <div className="controls">
-        <span className={`conn ${connected ? "online" : "offline"}`}><i />{connected ? "en vivo" : "sincronizando"}</span>
-        <div className="segmented">
-          {["auto", "live", "demo"].map((mode) => (
-            <button key={mode} className={snapshot?.mode === mode ? "active" : ""} onClick={() => control({ mode })}>{mode}</button>
-          ))}
-        </div>
         <button className={`toggle ${risk?.autoExecution ? "on" : ""}`} onClick={() => control({ autoExecution: !risk?.autoExecution })}>
           {risk?.autoExecution ? <Power size={16} /> : <CirclePause size={16} />}
-          {risk?.autoExecution ? "activo" : "pausado"}
+          {risk?.autoExecution ? "running" : "paused"}
         </button>
         <button className={`stressButton ${risk?.paused ? "active" : ""}`} title="Simulate volatility circuit breaker" onClick={() => control({ volatilityShock: true })}>
           <Zap size={16} />
-          {risk?.paused ? "riesgo activo" : "volatilidad"}
+          {risk?.paused ? "risk active" : "volatility"}
         </button>
         <button className="iconButton" title="Export audit session" onClick={exportSession}><FileDown size={17} /></button>
         <button className="iconButton" title="Reset session" onClick={reset}><RefreshCw size={17} /></button>
@@ -195,25 +205,26 @@ function Overview({ snapshot }) {
   const metrics = snapshot.metrics;
   const risk = snapshot.risk;
   const best = topDecision(snapshot.queuedOpportunities || []);
-  const stateLabel = risk.paused ? "Pausado por riesgo" : risk.autoExecution ? "Operando" : "Pausado manual";
+  const stateLabel = risk.paused ? "Risk Paused" : risk.autoExecution ? "Running" : "Manual Pause";
   const condition = risk.condition && risk.condition !== "healthy" ? risk.condition : "healthy";
   const stateNote = risk.paused
     ? `${condition} / ${risk.reason} / resumes in ${ago(risk.cooldownRemainingMs ?? risk.pausedUntil - snapshot.now)}`
     : `risk ${formatMoney(risk.riskBudgetUsedUsd || 0)} / ${formatMoney(risk.riskBudgetHourUsd || 0)}`;
   const freshness = Math.max(0, metrics.avgFreshnessMs ?? metrics.avgLatencyMs);
-  const bestEdge = metrics.bestNetBps > 0 ? `${formatNumber(metrics.bestNetBps, 2)} bps` : "Sin edge";
+  const bestEdge = metrics.bestNetBps > 0 ? `${formatNumber(metrics.bestNetBps, 2)} bps` : "No edge";
   const observed = metrics.bestNetBps > 0
     ? `EV ${formatMoney(best?.expectedValue || best?.netProfit || 0)} / capture ${formatPercent(best?.latencyCaptureProbability || best?.edgeBreakdown?.latencyCaptureProbability || 0)}`
     : metrics.bestObservedNetBps < 0
-      ? `faltan ${formatNumber(Math.abs(metrics.bestObservedNetBps), 2)} bps`
-      : "esperando libros completos";
+      ? `${formatNumber(Math.abs(metrics.bestObservedNetBps), 2)} bps short`
+      : "waiting for complete books";
   return (
     <section className="overview">
-      <Metric icon={ChartNoAxesCombined} label="P&L realizado" value={formatMoney(metrics.cumulativePnl)} note={`${metrics.executedCount} trades ejecutados`} tone={metrics.cumulativePnl >= 0 ? "good" : "bad"} />
-      <Metric icon={ShieldAlert} label="Estado del bot" value={stateLabel} note={stateNote} tone={risk.paused || !risk.autoExecution ? "bad" : "good"} />
-      <Metric icon={Radar} label="Mejor oportunidad" value={bestEdge} note={observed} />
-      <Metric icon={ArrowRightLeft} label="Señales detectadas" value={compact.format(metrics.detectedCount)} note={`${metrics.liveSignalCount || 0} ocurriendo ahora`} />
-      <Metric icon={Gauge} label="Data health" value={dataFeedLabel(snapshot.streams, snapshot.books)} note={`p95 ${Math.max(0, Math.round(metrics.p95FreshnessMs || freshness))} ms / ${metrics.demotedVenues || 0} demoted`} tone={(metrics.staleBooks || 0) > 0 || (metrics.demotedVenues || 0) > 0 ? "bad" : "neutral"} />
+      <Metric icon={ChartNoAxesCombined} label="Realized P&L" value={formatMoney(metrics.cumulativePnl)} note={`${metrics.executedCount} executed trades`} tone={metrics.cumulativePnl >= 0 ? "good" : "bad"} />
+      <Metric icon={ShieldAlert} label="Bot Status" value={stateLabel} note={stateNote} tone={risk.paused || !risk.autoExecution ? "bad" : "good"} />
+      <Metric icon={Radar} label="Best Opportunity" value={bestEdge} note={observed} />
+      <Metric icon={ArrowRightLeft} label="Detected Signals" value={compact.format(metrics.detectedCount)} note={`${metrics.liveSignalCount || 0} happening now`} />
+      <Metric icon={Gauge} label="Speed" value={`${Math.round(freshness)} ms`} note={`freshness p95 ${Math.max(0, Math.round(metrics.p95FreshnessMs || freshness))} ms`} tone={(metrics.staleBooks || 0) > 0 ? "bad" : "neutral"} />
+      <Metric icon={DatabaseZap} label="Data Health" value={dataFeedLabel(snapshot.streams, snapshot.books, snapshot.exchangeCoverage)} note={`${metrics.demotedVenues || 0} venues demoted`} tone={(metrics.staleBooks || 0) > 0 || (metrics.demotedVenues || 0) > 0 ? "bad" : "neutral"} />
     </section>
   );
 }
@@ -221,7 +232,7 @@ function Overview({ snapshot }) {
 function Books({ books }) {
   return (
     <section className="surface books">
-      <PanelTitle icon={Activity} title="Mercado en Vivo" pill={`${books.length} exchanges`} />
+      <PanelTitle icon={Activity} title="Live Market" pill={`${books.length} venues`} />
       <div className="bookGrid">
         {books.map((book) => (
           <article className={`book ${book.source}`} key={book.exchangeId}>
@@ -270,7 +281,7 @@ function RouteLabel({ item }) {
   return (
     <span className="routeStack">
       <b>{item.buyExchange} {"->"} {item.sellExchange}</b>
-      <small>{formatMoney(item.buyPrice)} compra / {formatMoney(item.sellPrice)} venta</small>
+      <small>{formatMoney(item.buyPrice)} buy / {formatMoney(item.sellPrice)} sell</small>
     </span>
   );
 }
@@ -292,37 +303,37 @@ function statusClass(item) {
 }
 
 function statusLabel(item) {
-  if (item.status === "profitable" && item.partial) return "rentable parcial";
-  if (item.status === "profitable") return "rentable";
-  if (item.status === "blocked" && `${item.reason}`.toLowerCase().includes("wallet")) return "inventario";
-  if (item.status === "blocked") return "liquidez";
-  if (item.status === "rejected") return "descartada";
+  if (item.status === "profitable" && item.partial) return "profitable partial";
+  if (item.status === "profitable") return "profitable";
+  if (item.status === "blocked" && `${item.reason}`.toLowerCase().includes("wallet")) return "inventory";
+  if (item.status === "blocked") return "liquidity";
+  if (item.status === "rejected") return "rejected";
   return item.status;
 }
 
 function statusHelp(item) {
-  if (item.status === "profitable" && item.partial) return `${formatPercent(clampRatio(item.filledRatio))} de liquidez`;
-  if (item.status === "profitable") return "lista para ejecutar";
-  if (item.status === "blocked") return item.reason || "inventario o profundidad insuficiente";
+  if (item.status === "profitable" && item.partial) return `${formatPercent(clampRatio(item.filledRatio))} liquidity`;
+  if (item.status === "profitable") return "ready to execute";
+  if (item.status === "blocked") return item.reason || "insufficient inventory or depth";
   return item.reason;
 }
 
 function decisionActionLabel(item) {
   const action = item?.decision?.action;
-  if (action === "execute-partial") return "Ejecutar parcial";
-  if (action === "execute-full") return "Ejecutar completa";
-  if (action === "inventory-gate") return "Esperar inventario";
-  if (action === "liquidity-gate") return "Esperar liquidez";
-  if (action === "skip-costs") return "Descartar";
+  if (action === "execute-partial") return "Execute partial";
+  if (action === "execute-full") return "Execute full";
+  if (action === "inventory-gate") return "Wait inventory";
+  if (action === "liquidity-gate") return "Wait liquidity";
+  if (action === "skip-costs") return "Skip";
   return statusLabel(item || {});
 }
 
 function decisionCaption(item) {
   if (!item) return "";
-  if (item.status === "profitable" && item.partial) return "Rentable, pero con liquidez limitada.";
-  if (item.status === "profitable") return "Rentable después de fees, slippage y latencia.";
-  if (item.status === "blocked") return "No pasa una compuerta dura de inventario o profundidad.";
-  return "El costo total consume el spread observado.";
+  if (item.status === "profitable" && item.partial) return "Profitable, with limited executable liquidity.";
+  if (item.status === "profitable") return "Profitable after fees, slippage and latency.";
+  if (item.status === "blocked") return "A hard inventory or depth gate blocked execution.";
+  return "Total cost consumes the observed spread.";
 }
 
 function OpportunityTable({ opportunities, queue = {}, now }) {
@@ -331,20 +342,20 @@ function OpportunityTable({ opportunities, queue = {}, now }) {
   const rows = fallback.slice(0, 7);
   return (
     <section className="surface queue">
-      <PanelTitle icon={Triangle} title="Oportunidades Priorizadas" pill={queue.paused ? "pausado por riesgo" : `${queue.executable || 0} ejecutables`} />
+      <PanelTitle icon={Triangle} title="Priority Queue" pill={queue.paused ? "risk paused" : `${queue.executable || 0} executable`} />
       <div className="queueStats">
-        <span><b>{queue.received || 0}</b> analizadas</span>
-        <span><b>{queue.deduped || 0}</b> duplicadas fuera</span>
-        <span><b>{queue.executable || 0}</b> listas</span>
-        <span><b>{queue.queued || 0}</b> en ranking</span>
+        <span><b>{queue.received || 0}</b> analyzed</span>
+        <span><b>{queue.deduped || 0}</b> deduped</span>
+        <span><b>{queue.executable || 0}</b> ready</span>
+        <span><b>{queue.queued || 0}</b> ranked</span>
       </div>
       <div className="table">
-        <div className="thead"><span>Ruta</span><span>Tamaño</span><span>Ganancia neta</span><span>EV</span><span>Estado</span></div>
+        <div className="thead"><span>Route</span><span>Size</span><span>Net Profit</span><span>EV</span><span>Status</span></div>
         {rows.map((opportunity) => (
           <div className="tr" key={opportunity.id}>
             <span className="routeStack">
               <RouteLabel item={opportunity} />
-              <small className={now - opportunity.time <= 1500 ? "liveStamp on" : "liveStamp"}><Clock3 size={12} /> hace {signalAge(opportunity, now)}</small>
+              <small className={now - opportunity.time <= 1500 ? "liveStamp on" : "liveStamp"}><Clock3 size={12} /> seen {seenAge(opportunity, now)}</small>
             </span>
             <span>
               <b>{opportunitySize(opportunity)}</b>
@@ -364,7 +375,7 @@ function OpportunityTable({ opportunities, queue = {}, now }) {
             </span>
           </div>
         ))}
-        {!rows.length && <div className="tableEmpty">{queue.paused ? "Operacion pausada: Aurelion sigue leyendo mercado, pero no genera nuevas senales hasta que pase el riesgo." : "Sin oportunidades rankeadas por ahora."}</div>}
+        {!rows.length && <div className="tableEmpty">{queue.paused ? "Execution paused: Aurelion keeps reading the market, but does not generate new signals until risk clears." : "No ranked opportunities yet."}</div>}
       </div>
     </section>
   );
@@ -385,8 +396,8 @@ function EdgeExplainability({ opportunities = [] }) {
   if (!item) {
     return (
       <section className="surface edgePanel">
-        <PanelTitle icon={Radar} title="Decisión Actual" pill="esperando" />
-        <div className="empty">Aún no hay rutas rankeadas</div>
+        <PanelTitle icon={Radar} title="Current Decision" pill="waiting" />
+        <div className="empty">No ranked routes yet</div>
       </section>
     );
   }
@@ -394,7 +405,7 @@ function EdgeExplainability({ opportunities = [] }) {
   const breakdown = item.edgeBreakdown || {};
   return (
     <section className="surface edgePanel">
-      <PanelTitle icon={Radar} title="Decisión Actual" pill={`calidad ${decision.scoreGrade || "D"}`} />
+      <PanelTitle icon={Radar} title="Current Decision" pill={`grade ${decision.scoreGrade || "D"}`} />
       <div className="edgeBody">
         <div className={`decisionStamp ${statusClass(item)}`}>
           <b>{decisionActionLabel(item)}</b>
@@ -429,25 +440,25 @@ function RealityCheck({ opportunities = [] }) {
   if (!item || !reality) {
     return (
       <section className="surface realityPanel">
-        <PanelTitle icon={ArrowRightLeft} title="Costos Reales" pill="sin ruta" />
-        <div className="empty">No hay ruta para revisar</div>
+        <PanelTitle icon={ArrowRightLeft} title="Real Costs" pill="no route" />
+        <div className="empty">No route to review</div>
       </section>
     );
   }
   return (
     <section className="surface realityPanel">
-      <PanelTitle icon={ArrowRightLeft} title="Costos Reales" pill={reality.verdict} />
+      <PanelTitle icon={ArrowRightLeft} title="Real Costs" pill={reality.verdict} />
       <div className="realityGrid">
         <article>
-          <span>Sin rebalanceo</span>
+          <span>Prefunded</span>
           <b className={reality.prefundedNetProfit >= 0 ? "green" : "red"}>{formatMoney(reality.prefundedNetProfit)}</b>
         </article>
         <article>
-          <span>Neto realista</span>
+          <span>Settlement Net</span>
           <b className={reality.settlementNetProfit >= 0 ? "green" : "red"}>{formatMoney(reality.settlementNetProfit)}</b>
         </article>
         <article>
-          <span>Costo extra</span>
+          <span>Extra Cost</span>
           <b>{formatMoney(reality.settlementDrag)}</b>
           <small>{formatNumber(reality.settlementDragBps, 2)} bps</small>
         </article>
@@ -459,11 +470,11 @@ function RealityCheck({ opportunities = [] }) {
 function OpportunityHistory({ opportunities = [], metrics = {}, now }) {
   const [filter, setFilter] = React.useState("all");
   const filters = [
-    ["all", "Todas"],
-    ["live", "Ahora"],
-    ["profitable", "Rentables"],
-    ["rejected", "Descartadas"],
-    ["partial", "Parciales"],
+    ["all", "All"],
+    ["live", "Now"],
+    ["profitable", "Profitable"],
+    ["rejected", "Rejected"],
+    ["partial", "Partials"],
     ["triangular", "Triangular"],
   ];
   const filtered = opportunities.filter((item) => {
@@ -475,7 +486,7 @@ function OpportunityHistory({ opportunities = [], metrics = {}, now }) {
   const rows = filtered.slice(0, 18);
   return (
     <section className="surface history">
-      <PanelTitle icon={ListChecks} title="Historial de Señales" pill={`${rows.length} recientes`} />
+      <PanelTitle icon={ListChecks} title="Signal History" pill={`${rows.length} recent`} />
       <div className="historyToolbar">
         {filters.map(([id, label]) => (
           <button className={filter === id ? "active" : ""} key={id} onClick={() => setFilter(id)} type="button">{label}</button>
@@ -487,15 +498,15 @@ function OpportunityHistory({ opportunities = [], metrics = {}, now }) {
             <RouteLabel item={item} />
             <span className="historyEdge">
               <b className={item.netProfit >= 0 ? "green" : "red"}>{formatNumber(item.netBps, 2)} bps</b>
-              <small>{formatMoney(item.netProfit)} neto / score {formatNumber(item.score, 2)}</small>
+              <small>{formatMoney(item.netProfit)} net / EV {formatMoney(item.expectedValue ?? item.netProfit)}</small>
             </span>
             <span className="historyMeta">
               <em className={`badge ${statusClass(item)}`}>{statusLabel(item)}</em>
-              <small className={now - item.time <= 1500 ? "liveStamp on" : "liveStamp"}><Clock3 size={12} /> hace {signalAge(item, now)}</small>
+              <small className={now - item.time <= 1500 ? "liveStamp on" : "liveStamp"}><Clock3 size={12} /> seen {seenAge(item, now)}</small>
             </span>
           </article>
         ))}
-        {!rows.length && <div className="empty">No hay señales con este filtro</div>}
+        {!rows.length && <div className="empty">No signals match this filter</div>}
       </div>
     </section>
   );
@@ -507,7 +518,7 @@ function Streams({ streams, redis }) {
   const streamTone = (stream) => stream.disabled ? "disabled" : stream.restFallback ? "rest" : "ws";
   return (
     <section className="surface streams">
-      <PanelTitle icon={DatabaseZap} title="Infraestructura" pill={redisLabel} />
+      <PanelTitle icon={DatabaseZap} title="Infrastructure" pill={redisLabel} />
       <div className="streamList">
         {rows.slice(0, 12).map((stream) => (
           <article className="stream" key={stream.key}>
@@ -526,7 +537,7 @@ function Streams({ streams, redis }) {
 function GlobalMarket({ globalMarket }) {
   return (
     <section className="surface">
-      <PanelTitle icon={Globe2} title="Contexto Global" pill={globalMarket.status || "cargando"} />
+      <PanelTitle icon={Globe2} title="Global Context" pill={globalMarket.status || "loading"} />
       <div className="globalGrid">
         <article>
           <span>BTC reference</span>
@@ -553,7 +564,7 @@ function LatencySloPanel({ slo = {} }) {
   const update = slo.updateLatencyMs || {};
   return (
     <section className={`surface sloPanel ${slo.status || "green"}`}>
-      <PanelTitle icon={Gauge} title="Velocidad" pill={slo.summary || "cargando"} />
+      <PanelTitle icon={Gauge} title="Speed" pill={slo.summary || "loading"} />
       <div className="sloGrid">
         <article>
           <span>Libros p95</span>
@@ -579,10 +590,10 @@ function DemoQualityPanel({ quality = {}, mode }) {
   const tone = scoreTone(Number(quality.score || 0));
   return (
     <section className={`surface qualityPanel ${tone}`}>
-      <PanelTitle icon={Sparkles} title="Calidad Demo" pill={mode === "demo" ? quality.label || "cargando" : "observando"} />
+      <PanelTitle icon={Sparkles} title="Demo Quality" pill={mode === "demo" ? quality.label || "loading" : "observing"} />
       <div className="qualityDial">
         <b>{Math.round(quality.score || 0)}</b>
-        <span>calidad</span>
+        <span>quality</span>
       </div>
       <div className="qualityStats">
         <span>{formatMoney(quality.pnlPerMinute || 0)} / min</span>
@@ -607,7 +618,7 @@ function ExchangeCoverage({ coverage = {}, quality = [], health = {}, control })
   };
   return (
     <section className="surface">
-      <PanelTitle icon={Network} title="Exchanges" pill={`${coverage.activeCount || active.size} activos / ${health.demotedCount || 0} demoted`} />
+      <PanelTitle icon={Network} title="Exchanges" pill={`${coverage.activeCount || active.size} active / ${health.demotedCount || 0} demoted`} />
       <div className="coverageGrid">
         {universe.map((exchange) => {
           const venue = qualityById.get(exchange.id);
@@ -737,7 +748,7 @@ function SystemStatus({ snapshot }) {
       <div className="systemGrid">
         <article>
           <span>Market data</span>
-          <b>{dataFeedLabel(snapshot.streams, snapshot.books)}</b>
+          <b>{dataFeedLabel(snapshot.streams, snapshot.books, snapshot.exchangeCoverage)}</b>
           <small>{counts.total || snapshot.books.length} streams watched</small>
         </article>
         <article>
@@ -802,10 +813,10 @@ function fillTitle(item) {
 }
 
 function executionKind(item) {
-  if (item.strategy === "triangular" && item.partial) return "triangular parcial";
+  if (item.strategy === "triangular" && item.partial) return "triangular partial";
   if (item.strategy === "triangular") return "triangular";
-  if (item.partial) return "parcial";
-  return "completa";
+  if (item.partial) return "partial";
+  return "complete";
 }
 
 function executionKindClass(item) {
@@ -818,10 +829,10 @@ function executionKindClass(item) {
 function Trades({ trades, metrics = {} }) {
   const [filter, setFilter] = React.useState("all");
   const filters = [
-    ["all", "Todas"],
-    ["partial", "Parciales"],
-    ["complete", "Completas"],
-    ["triangular", "Triangulares"],
+    ["all", "All"],
+    ["partial", "Partials"],
+    ["complete", "Complete"],
+    ["triangular", "Triangular"],
   ];
   const visibleTrades = trades.filter((trade) => {
     if (filter === "partial") return trade.partial;
@@ -831,7 +842,7 @@ function Trades({ trades, metrics = {} }) {
   });
   return (
     <section className="surface trades">
-      <PanelTitle icon={ArrowRightLeft} title="Trades Ejecutados" pill={`${visibleTrades.length}/${trades.length} visibles`} />
+      <PanelTitle icon={ArrowRightLeft} title="Executed Trades" pill={`${visibleTrades.length}/${trades.length} visible`} />
       <div className="tradeToolbar">
         {filters.map(([id, label]) => (
           <button className={filter === id ? "active" : ""} key={id} onClick={() => setFilter(id)} type="button">{label}</button>
@@ -848,16 +859,16 @@ function Trades({ trades, metrics = {} }) {
             <em className={trade.netProfit >= 0 ? "green" : "red"}>{formatMoney(trade.netProfit)}</em>
             <div className="tradeDetails">
               <small>{new Date(trade.time).toLocaleTimeString()}</small>
-              <small>{formatNumber(trade.executionQuality?.edgeCaptureBps || trade.netBps, 2)} bps capturados</small>
+              <small>{formatNumber(trade.executionQuality?.edgeCaptureBps || trade.netBps, 2)} bps captured</small>
               <small>EV {formatMoney(trade.expectedValue ?? trade.netProfit)}</small>
               {trade.executionQuality?.adverseMoveBps > 0 && <small>latency move {formatNumber(trade.executionQuality.adverseMoveBps, 2)} bps</small>}
               {trade.strategy === "triangular" && <small>{trade.legs?.map((leg) => `${leg.from}->${leg.to}`).join(" / ")}</small>}
-              {trade.partial && <small>{formatPercent(clampRatio(trade.filledRatio))} del objetivo</small>}
-              {!trade.partial && <small>100% del objetivo</small>}
+              {trade.partial && <small>{formatPercent(clampRatio(trade.filledRatio))} of target</small>}
+              {!trade.partial && <small>100% of target</small>}
             </div>
           </article>
         ))}
-        {!visibleTrades.length && <div className="empty">{trades.length ? "No hay trades con este filtro" : "Aun no hay trades ejecutados"}</div>}
+        {!visibleTrades.length && <div className="empty">{trades.length ? "No trades match this filter" : "No executed trades yet"}</div>}
       </div>
     </section>
   );
@@ -880,7 +891,7 @@ function InfrastructurePanel({ snapshot }) {
         </div>
       </section>
       <section className="surface">
-        <PanelTitle icon={ShieldAlert} title="Risk Timeline" pill={`${snapshot.riskEvents.length} eventos`} />
+        <PanelTitle icon={ShieldAlert} title="Risk Timeline" pill={`${snapshot.riskEvents.length} events`} />
         <div className="events compactEvents">
           {snapshot.riskEvents.slice(0, 10).map((event) => (
             <article className="event" key={event.id || `${event.type}-${event.time}`}>
@@ -889,7 +900,7 @@ function InfrastructurePanel({ snapshot }) {
               <small>{new Date(event.time).toLocaleTimeString()}</small>
             </article>
           ))}
-          {!snapshot.riskEvents.length && <div className="empty">Sin eventos de riesgo</div>}
+          {!snapshot.riskEvents.length && <div className="empty">No risk events</div>}
         </div>
       </section>
     </div>
@@ -899,9 +910,9 @@ function InfrastructurePanel({ snapshot }) {
 function ResultsWorkbench({ snapshot }) {
   const [tab, setTab] = React.useState("opportunities");
   const tabs = [
-    ["opportunities", "Oportunidades", snapshot.queue?.queued || 0],
+    ["opportunities", "Opportunities", snapshot.queue?.queued || 0],
     ["trades", "Trades", snapshot.trades?.length || 0],
-    ["signals", "Senales", snapshot.opportunityHistory?.length || snapshot.opportunities?.length || 0],
+    ["signals", "Signals", snapshot.opportunityHistory?.length || snapshot.opportunities?.length || 0],
     ["infra", "Infra", snapshot.streams?.streams?.length || snapshot.books?.length || 0],
   ];
   return (
