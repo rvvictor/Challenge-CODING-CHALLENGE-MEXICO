@@ -474,6 +474,8 @@ function OpportunityHistory({ opportunities = [], metrics = {}, now }) {
     ["live", "Now"],
     ["profitable", "Profitable"],
     ["rejected", "Rejected"],
+    ["cross", "Cross"],
+    ["partial-cross", "Partial Cross"],
     ["partial", "Partials"],
     ["triangular", "Triangular"],
     ["dynamic", "Dynamic 4-leg"],
@@ -481,6 +483,8 @@ function OpportunityHistory({ opportunities = [], metrics = {}, now }) {
   const filtered = opportunities.filter((item) => {
     if (filter === "all") return true;
     if (filter === "live") return now - item.time <= 2500;
+    if (filter === "cross") return item.strategy === "simple";
+    if (filter === "partial-cross") return item.strategy === "simple" && item.partial;
     if (filter === "partial") return item.partial;
     if (filter === "dynamic") return item.dynamicCycle || (item.cyclePath?.length || 0) > 4;
     return item.status === filter || item.strategy === filter;
@@ -854,12 +858,16 @@ function Trades({ trades, metrics = {} }) {
   const [filter, setFilter] = React.useState("all");
   const filters = [
     ["all", "All"],
+    ["cross", "Cross"],
+    ["partial-cross", "Partial Cross"],
     ["partial", "Partials"],
     ["complete", "Complete"],
     ["triangular", "Triangular"],
     ["dynamic", "Dynamic 4-leg"],
   ];
   const visibleTrades = trades.filter((trade) => {
+    if (filter === "cross") return trade.strategy === "simple";
+    if (filter === "partial-cross") return trade.strategy === "simple" && trade.partial;
     if (filter === "partial") return trade.partial;
     if (filter === "complete") return !trade.partial;
     if (filter === "triangular") return trade.strategy === "triangular";

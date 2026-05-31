@@ -64,6 +64,9 @@ class TriangularArbitrageEngine:
                 next_asset = edge["to"]
                 next_path = [*path, edge]
                 if next_asset == start and len(next_path) >= 3:
+                    cycle_assets = {start, *[item["to"] for item in next_path]}
+                    if len(next_path) == 3 and not cycle_assets.issubset({"USDT", "USD", "BTC", "ETH"}):
+                        continue
                     cycle_id = "->".join([start, *[item["to"] for item in next_path]])
                     if cycle_id not in seen:
                         seen.add(cycle_id)

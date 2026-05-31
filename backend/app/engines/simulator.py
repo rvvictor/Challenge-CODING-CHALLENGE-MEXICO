@@ -43,7 +43,7 @@ class SimulatedMarket:
 
     def maybe_shock(self, exchanges: tuple[ExchangeConfig, ...]) -> None:
         cross_active = self.shock and self.shock["until"] > self.tick
-        if not cross_active and self.tick % 47 == 0:
+        if not cross_active and self.tick % 37 == 8:
             cheap = self.random.choice(exchanges).id
             rich = self.random.choice(exchanges).id
             if rich == cheap:
@@ -57,7 +57,7 @@ class SimulatedMarket:
                 "until": self.tick + 7,
             }
         triangular_active = self.triangular_shock and self.triangular_shock["until"] > self.tick
-        if not triangular_active and self.tick % 59 == 23:
+        if not triangular_active and self.tick % 67 == 31:
             candidates = [exchange for exchange in exchanges if exchange.taker_fee_bps <= 12] or list(exchanges)
             exchange = self.random.choice(candidates)
             self.triangular_shock = {
@@ -69,16 +69,16 @@ class SimulatedMarket:
                 "until": self.tick + 6,
             }
         dynamic_active = self.dynamic_shock and self.dynamic_shock["until"] > self.tick
-        if not dynamic_active and self.tick % 89 == 5:
+        if not dynamic_active and self.tick % 101 == 58:
             candidates = [exchange for exchange in exchanges if exchange.taker_fee_bps <= 12] or list(exchanges)
             exchange = self.random.choice(candidates)
             self.dynamic_shock = {
                 "started": self.tick,
                 "exchange": exchange.id,
-                "btc_bps": self.random.uniform(-9, -5),
-                "eth_btc_bps": self.random.uniform(-9, -5),
-                "sol_eth_bps": self.random.uniform(-3, -1),
-                "sol_quote_bps": self.random.uniform(36, 48),
+                "btc_bps": self.random.uniform(-8, -5),
+                "eth_btc_bps": self.random.uniform(-8, -5),
+                "sol_eth_bps": self.random.uniform(-7, -3),
+                "sol_quote_bps": self.random.uniform(92, 108),
                 "until": self.tick + 6,
             }
 
@@ -112,11 +112,11 @@ class SimulatedMarket:
         else:
             mid = self.global_btc * (1 + (state["basis_bps"] + self.random.uniform(-0.45, 0.45)) / 10000)
 
-        if self.shock and self.shock["cheap"] == exchange.id:
+        if kind == "BTC" and self.shock and self.shock["cheap"] == exchange.id:
             mid *= 1 + self.shock["cheap_bps"] / 10000
-        if self.shock and self.shock["rich"] == exchange.id:
+        if kind == "BTC" and self.shock and self.shock["rich"] == exchange.id:
             mid *= 1 + self.shock["rich_bps"] / 10000
-        if self.shock and self.shock["until"] > self.tick and self.tick - self.shock["started"] in {2, 5}:
+        if kind == "BTC" and self.shock and self.shock["until"] > self.tick and self.tick - self.shock["started"] in {2, 5}:
             if self.shock["cheap"] == exchange.id:
                 mid *= 1 - 28 / 10000
             if self.shock["rich"] == exchange.id:

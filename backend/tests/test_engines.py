@@ -162,6 +162,40 @@ class EngineTests(unittest.TestCase):
         service.persistence.close()
         self.assertTrue(seen_dynamic)
 
+    def test_demo_showcase_balances_cross_partial_and_cycle_signals(self):
+        settings = Settings(market_mode="demo")
+        from backend.app.engines.market_service import MarketService
+
+        service = MarketService(settings)
+        seen_simple = False
+        seen_partial_simple = False
+        seen_triangular = False
+        seen_dynamic = False
+        for _ in range(170):
+            service.generate_demo_books()
+            primary = service.primary_books()
+            primary_map = {book.exchange_id: book for book in service.health_adjusted_books(primary)}
+            ranked = service.queue.rank(
+                service.cross_engine.scan(primary_map)
+                + service.triangular_engine.scan(service.health_adjusted_book_map())
+            )
+            for opportunity in ranked:
+                if opportunity.get("status") != "profitable":
+                    continue
+                seen_simple = seen_simple or opportunity.get("strategy") == "simple"
+                seen_partial_simple = seen_partial_simple or (
+                    opportunity.get("strategy") == "simple" and opportunity.get("partial")
+                )
+                seen_triangular = seen_triangular or (
+                    opportunity.get("strategy") == "triangular" and not opportunity.get("dynamicCycle")
+                )
+                seen_dynamic = seen_dynamic or bool(opportunity.get("dynamicCycle"))
+        service.persistence.close()
+        self.assertTrue(seen_simple)
+        self.assertTrue(seen_partial_simple)
+        self.assertTrue(seen_triangular)
+        self.assertTrue(seen_dynamic)
+
     def test_ccxt_provider_uses_exchange_safe_order_book_limits(self):
         from backend.app.integrations.ccxt_provider import CcxtStreamProvider
 
