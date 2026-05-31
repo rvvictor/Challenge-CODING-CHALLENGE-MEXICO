@@ -790,6 +790,23 @@ function PnlBreakdown({ totals = {} }) {
   );
 }
 
+function WalletsPanel({ snapshot }) {
+  return (
+    <section className="surface">
+      <PanelTitle icon={DatabaseZap} title="Wallets" pill={formatMoney(snapshot.totals.markToMarket)} />
+      <div className="wallets">
+        {snapshot.wallets.map((wallet) => (
+          <article key={wallet.exchangeId}>
+            <b>{wallet.exchangeName}</b>
+            <span>{formatMoney(wallet.USDT)}</span>
+            <small>{formatBtc(wallet.BTC)} / {formatNumber(wallet.ETH, 3)} ETH</small>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function SideRail({ snapshot, control }) {
   return (
     <aside className="sideRail">
@@ -799,10 +816,11 @@ function SideRail({ snapshot, control }) {
         <PnlBreakdown totals={snapshot.totals} />
       </section>
       <ExchangeCoverage coverage={snapshot.exchangeCoverage} quality={snapshot.venueQuality} health={snapshot.venueHealth} control={control} />
+      <WalletsPanel snapshot={snapshot} />
+      <GlobalMarket globalMarket={snapshot.globalMarket || {}} />
       <SystemStatus snapshot={snapshot} />
       <LatencySloPanel slo={snapshot.latencySlo} />
       <DemoQualityPanel quality={snapshot.demoQuality} mode={snapshot.mode} />
-      <GlobalMarket globalMarket={snapshot.globalMarket || {}} />
     </aside>
   );
 }
@@ -878,18 +896,6 @@ function InfrastructurePanel({ snapshot }) {
   return (
     <div className="infraDeck">
       <Streams streams={snapshot.streams} redis={snapshot.redis} />
-      <section className="surface">
-        <PanelTitle icon={DatabaseZap} title="Wallets" pill={formatMoney(snapshot.totals.markToMarket)} />
-        <div className="wallets">
-          {snapshot.wallets.map((wallet) => (
-            <article key={wallet.exchangeId}>
-              <b>{wallet.exchangeName}</b>
-              <span>{formatMoney(wallet.USDT)}</span>
-              <small>{formatBtc(wallet.BTC)} / {formatNumber(wallet.ETH, 3)} ETH</small>
-            </article>
-          ))}
-        </div>
-      </section>
       <section className="surface">
         <PanelTitle icon={ShieldAlert} title="Risk Timeline" pill={`${snapshot.riskEvents.length} events`} />
         <div className="events compactEvents">
