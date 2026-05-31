@@ -79,9 +79,20 @@ class EngineTests(unittest.TestCase):
         }
         engine = TriangularArbitrageEngine(settings, WalletLedger(settings))
         opportunities = engine.scan(books)
-        self.assertEqual(len(opportunities), 1)
-        self.assertEqual(opportunities[0]["strategy"], "triangular")
-        self.assertEqual(opportunities[0]["status"], "profitable")
+        self.assertTrue(any(item["strategy"] == "triangular" and item["status"] == "profitable" for item in opportunities))
+
+    def test_triangular_engine_supports_dynamic_four_leg_cycles(self):
+        settings = Settings(active_exchanges="okx,bybit", triangular_quote_size=650, triangular_min_net_bps=0.5, triangular_min_net_profit_usd=0.1)
+        exchange = settings.exchanges[0]
+        books = {
+            f"{exchange.id}:BTC/USDT": book(exchange, "BTC/USDT", [(70000, 2)], [(69980, 2)]),
+            f"{exchange.id}:ETH/BTC": book(exchange, "ETH/BTC", [(0.05, 100)], [(0.0499, 100)]),
+            f"{exchange.id}:SOL/ETH": book(exchange, "SOL/ETH", [(0.10, 500)], [(0.099, 500)]),
+            f"{exchange.id}:SOL/USDT": book(exchange, "SOL/USDT", [(370, 500)], [(390, 500)]),
+        }
+        engine = TriangularArbitrageEngine(settings, WalletLedger(settings))
+        opportunities = engine.scan(books)
+        self.assertTrue(any(item["strategy"] == "triangular" and item["dynamicCycle"] for item in opportunities))
 
     def test_partial_fill_is_detected_when_book_depth_is_small(self):
         from backend.app.engines.arbitrage import CrossExchangeArbitrageEngine
@@ -148,6 +159,27 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(provider.order_book_limit(settings.exchange_by_id("bybit")), 50)
         self.assertEqual(provider.order_book_limit(settings.exchange_by_id("kraken")), 25)
         self.assertEqual(provider.order_book_limit(settings.exchange_by_id("bitfinex")), 25)
+
+    def test_ccxt_provider_snapshot_exposes_health_scoring(self):
+        from backend.app.integrations.ccxt_provider import CcxtStreamProvider
+
+        async def noop_event(_event):
+            return None
+
+        settings = Settings(active_exchanges="okx,bybit")
+        provider = CcxtStreamProvider(settings, lambda _book: None, noop_event)
+        state = provider.state(settings.exchange_by_id("okx"), "BTC/USDT")
+        provider.mark_error(state)
+        snapshot = provider.snapshot()
+        stream = snapshot["streams"][0]
+        self.assertIn("healthScore", stream)
+        self.assertEqual(stream["healthStatus"], "degraded")
+
+    def test_settings_supports_named_exchange_profiles(self):
+        speed = Settings(exchange_profile="speed")
+        coverage = Settings(exchange_profile="coverage")
+        self.assertEqual(len(speed.exchanges), 5)
+        self.assertEqual(len(coverage.exchanges), 10)
 
     def test_settings_can_filter_active_exchanges_for_speed_profile(self):
         settings = Settings(active_exchanges="binance,okx,bybit")
@@ -249,6 +281,46 @@ class EngineTests(unittest.TestCase):
         trades = executor.try_execute(opportunities, [])
         self.assertEqual(len(trades), 1)
         self.assertGreaterEqual(float(ledger.get("bybit")["BTC"]), 0)
+
+    def test_risk_budget_pauses_after_hourly_losses(self):
+        settings = Settings(risk_budget_hour_usd=5, pause_after_loss_ms=1000)
+        risk = RiskManager(settings)
+        risk.record_trade({"netProfit": -6}, 1000)
+        snapshot = risk.snapshot(1000)
+        self.assertTrue(snapshot["paused"])
+        self.assertEqual(snapshot["condition"], "risk-budget")
+
+    def test_queue_prefers_higher_expected_value(self):
+        queue = OpportunityQueue()
+        ranked = queue.rank([
+            {"strategy": "simple", "product": "BTC/USDT", "buyExchangeId": "okx", "sellExchangeId": "kraken", "score": 50, "expectedValue": 1, "status": "profitable"},
+            {"strategy": "simple", "product": "BTC/USDT", "buyExchangeId": "kraken", "sellExchangeId": "okx", "score": 2, "expectedValue": 4, "status": "profitable"},
+        ])
+        self.assertEqual(ranked[0]["buyExchangeId"], "kraken")
+
+    def test_market_service_metrics_snapshot_has_operational_sections(self):
+        from backend.app.engines.market_service import MarketService
+
+        service = MarketService(Settings(market_mode="demo"))
+        service.tick()
+        metrics = service.metrics_snapshot()
+        self.assertIn("venueHealth", metrics)
+        self.assertIn("database", metrics)
+        self.assertIn("risk", metrics)
+
+    def test_api_metrics_endpoint_when_fastapi_available(self):
+        try:
+            import fastapi  # noqa: F401
+            from fastapi.testclient import TestClient
+        except Exception:
+            self.skipTest("FastAPI test client is not installed in this local Python environment")
+        from backend.app.main import app
+
+        client = TestClient(app)
+        self.assertEqual(client.get("/api/health").status_code, 200)
+        metrics = client.get("/api/metrics")
+        self.assertEqual(metrics.status_code, 200)
+        self.assertIn("venueHealth", metrics.json())
 
     def test_inventory_rebalance_prevents_local_wallet_gate(self):
         from backend.app.engines.event_store import EventStore

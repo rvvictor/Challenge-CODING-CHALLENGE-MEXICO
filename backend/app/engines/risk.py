@@ -23,6 +23,7 @@ class RiskManager:
         self.last_reason = "Ready"
         self.price_window: list[dict[str, float]] = []
         self.pending_events: list[dict] = []
+        self.hourly_losses: list[dict[str, float]] = []
         self.last_volatility_trigger = 0
         self.last_volatility_review = 0
         self.current_volatility_pct = 0.0
@@ -92,6 +93,14 @@ class RiskManager:
             return {"allowed": False, "reason": "Auto execution disabled"}
         if current_ms < self.paused_until:
             return {"allowed": False, "reason": self.last_reason}
+        if self.hourly_loss_total(current_ms) >= self.settings.risk_budget_hour_usd > 0:
+            self.activate(
+                "risk-budget",
+                f"Hourly risk budget used ${self.hourly_loss_total(current_ms):.2f}",
+                current_ms,
+                {"budgetUsd": self.settings.risk_budget_hour_usd, "usedUsd": self.hourly_loss_total(current_ms)},
+            )
+            return {"allowed": False, "reason": "Hourly risk budget exhausted"}
         stale = [book for book in books if current_ms - book["timestamp"] > self.settings.max_book_age_ms]
         if stale:
             self.activate("stale-data", "Stale order book", current_ms, {"books": [book["exchangeName"] for book in stale]})
@@ -102,6 +111,16 @@ class RiskManager:
         current_ms = current_ms or now_ms()
         if trade["netProfit"] < 0:
             self.loss_streak += 1
+            self.hourly_losses.append({"time": current_ms, "loss": abs(float(trade["netProfit"]))})
+            self.hourly_loss_total(current_ms)
+            if self.hourly_loss_total(current_ms) >= self.settings.risk_budget_hour_usd > 0:
+                self.activate(
+                    "risk-budget",
+                    f"Hourly risk budget used ${self.hourly_loss_total(current_ms):.2f}",
+                    current_ms,
+                    {"budgetUsd": self.settings.risk_budget_hour_usd, "usedUsd": self.hourly_loss_total(current_ms)},
+                )
+                return
             if self.loss_streak >= self.settings.max_loss_streak:
                 self.activate(
                     "loss-streak",
@@ -113,6 +132,12 @@ class RiskManager:
         self.loss_streak = 0
         if current_ms >= self.paused_until:
             self.last_reason = "Healthy"
+
+    def hourly_loss_total(self, current_ms: int | None = None) -> float:
+        current_ms = current_ms or now_ms()
+        cutoff = current_ms - 3600000
+        self.hourly_losses = [item for item in self.hourly_losses if item["time"] >= cutoff]
+        return sum(float(item["loss"]) for item in self.hourly_losses)
 
     def activate(self, condition: str, reason: str, current_ms: int, metadata: dict) -> None:
         if current_ms < self.paused_until and self.last_reason == reason:
@@ -156,4 +181,7 @@ class RiskManager:
             "currentVolatilityPct": self.current_volatility_pct,
             "operationalHalt": current_ms < self.paused_until,
             "monitoringOnly": current_ms < self.paused_until,
+            "riskBudgetHourUsd": self.settings.risk_budget_hour_usd,
+            "riskBudgetUsedUsd": self.hourly_loss_total(current_ms),
+            "riskBudgetRemainingUsd": max(0, self.settings.risk_budget_hour_usd - self.hourly_loss_total(current_ms)),
         }

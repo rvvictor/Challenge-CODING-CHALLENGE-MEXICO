@@ -7,6 +7,7 @@ from backend.app.core.config import Settings
 from backend.app.core.models import Opportunity, OrderBook
 from backend.app.engines.fills import best, depth_qty, estimate_fill
 from backend.app.engines.ledger import WalletLedger
+from backend.app.engines.scoring import expected_value_score
 
 
 def now_ms() -> int:
@@ -81,6 +82,8 @@ class CrossExchangeArbitrageEngine:
                     "sellDepthBtc": rounded(sell_depth, 8),
                     "walletQtyBtc": rounded(wallet_qty, 8),
                     "inventoryMode": capacity["mode"],
+                    "expectedValue": 0,
+                    "evBps": 0,
                 },
             )
 
@@ -107,10 +110,21 @@ class CrossExchangeArbitrageEngine:
         gross_bps = gross_profit / buy_fill.quote * 10000 if buy_fill.quote else 0
         age_confidence = max(0.2, 1 - max(current - buy_book.timestamp, current - sell_book.timestamp) / self.settings.max_book_age_ms)
         confidence = min(buy_book.confidence, sell_book.confidence, age_confidence)
+        inventory_penalty = rebalance_cost if capacity["mode"] == "rebalanced" else 0
+        ev = expected_value_score(
+            net_profit=net_profit,
+            notional=buy_fill.quote,
+            confidence=confidence,
+            latency_ms=buy_book.latency_ms + sell_book.latency_ms,
+            latency_risk_cost=latency_risk_cost,
+            inventory_penalty=inventory_penalty,
+            settings=self.settings,
+        )
         profitable = net_profit >= self.settings.min_net_profit_usd and net_bps >= self.settings.min_net_bps and confidence >= self.settings.min_confidence
         partial = qty < self.settings.max_trade_btc or buy_fill.partial or sell_fill.partial
         latency_penalty = 1 + (buy_book.latency_ms + sell_book.latency_ms) / 800
-        score = (net_bps * confidence * math.sqrt(max(qty, 0.000001))) / latency_penalty if profitable else net_bps * confidence
+        ev_score = ev["evBps"] * math.sqrt(max(qty, 0.000001)) / latency_penalty
+        score = ev_score if profitable else ev["evBps"] * confidence
         source = buy_book.source if buy_book.source == sell_book.source else "mixed"
 
         return Opportunity(
@@ -135,6 +149,9 @@ class CrossExchangeArbitrageEngine:
                 "slippageCostSell": rounded(slippage_sell, 4),
                 "latencyRiskCost": rounded(latency_risk_cost, 4),
                 "latencyRiskBps": rounded(latency_risk_bps, 3),
+                "volatilityRiskCost": ev["volatilityRiskCost"],
+                "inventoryPenalty": ev["inventoryPenalty"],
+                "latencyPenaltyCost": ev["latencyPenaltyCost"],
                 "rebalanceCost": rounded(rebalance_cost, 4),
                 "totalCosts": rounded(total_costs, 4),
             },
@@ -157,5 +174,6 @@ class CrossExchangeArbitrageEngine:
                 "walletQtyBtc": rounded(wallet_qty, 8),
                 "inventoryMode": capacity["mode"],
                 "latencies": {"buyMs": buy_book.latency_ms, "sellMs": sell_book.latency_ms},
+                **ev,
             },
         )

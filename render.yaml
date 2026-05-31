@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: bitcoin-arbitrage-sentinel
+    name: aurelion
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt && npm --prefix frontend ci && npm --prefix frontend run build

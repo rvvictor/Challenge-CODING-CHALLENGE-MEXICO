@@ -99,6 +99,9 @@ def explain_opportunity(item: dict[str, Any]) -> dict[str, Any]:
     }
     payload["edgeBreakdown"] = {
         "netBps": rounded(net_bps, 3),
+        "expectedValue": rounded(payload.get("expectedValue"), 4),
+        "evBps": rounded(payload.get("evBps"), 3),
+        "latencyCaptureProbability": rounded(payload.get("latencyCaptureProbability"), 4),
         "grossBps": rounded(payload.get("grossBps"), 3),
         "grossProfit": rounded(gross_profit, 4),
         "totalCosts": rounded(total_costs, 4),
@@ -174,6 +177,9 @@ def venue_quality(books: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "score": score,
             "grade": "A" if score >= 85 else "B" if score >= 72 else "C" if score >= 58 else "D",
             "status": "leader" if score >= 85 else "healthy" if score >= 72 else "watch" if score >= 58 else "lagging",
+            "healthScore": rounded(book.get("healthScore", score), 1),
+            "healthStatus": book.get("healthStatus", "healthy"),
+            "priorityFactor": rounded(book.get("priorityFactor", 1), 3),
             "ageMs": rounded(book.get("ageMs"), 0),
             "latencyMs": rounded(book.get("latencyMs"), 0),
             "spreadBps": rounded(spread_bps, 3),

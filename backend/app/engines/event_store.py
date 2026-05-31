@@ -2,11 +2,12 @@ from __future__ import annotations
 
 
 class EventStore:
-    def __init__(self, opportunities_limit: int = 5000, trades_limit: int = 1000, pnl_limit: int = 1500, event_limit: int = 500):
+    def __init__(self, opportunities_limit: int = 5000, trades_limit: int = 1000, pnl_limit: int = 1500, event_limit: int = 500, persistence=None):
         self.opportunities_limit = opportunities_limit
         self.trades_limit = trades_limit
         self.pnl_limit = pnl_limit
         self.event_limit = event_limit
+        self.persistence = persistence
         self.reset()
 
     def reset(self) -> None:
@@ -24,6 +25,8 @@ class EventStore:
         self.partial_count = 0
         self.executed_simple_count = 0
         self.executed_triangular_count = 0
+        if self.persistence:
+            self.persistence.append("session-reset", {"reason": "runtime reset"})
 
     def add_opportunities(self, opportunities: list[dict]) -> None:
         for opportunity in opportunities:
@@ -40,6 +43,8 @@ class EventStore:
                 self.rejected_count += 1
             self.opportunities.insert(0, opportunity)
         self.opportunities = self.opportunities[: self.opportunities_limit]
+        if self.persistence:
+            self.persistence.append_many("opportunity", opportunities)
 
     def add_trade(self, trade: dict, cumulative_pnl: float) -> None:
         self.executed_count += 1
@@ -53,10 +58,14 @@ class EventStore:
         self.trades = self.trades[: self.trades_limit]
         self.pnl_series.append({"time": trade["time"], "pnl": cumulative_pnl})
         self.pnl_series = self.pnl_series[-self.pnl_limit :]
+        if self.persistence:
+            self.persistence.append("trade", {"trade": trade, "cumulativePnl": cumulative_pnl})
 
     def add_event(self, event: dict) -> None:
         self.events.insert(0, event)
         self.events = self.events[: self.event_limit]
+        if self.persistence:
+            self.persistence.append("event", event)
 
     def latest_opportunities(self, limit: int = 90) -> list[dict]:
         return self.opportunities[:limit]

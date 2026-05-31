@@ -90,6 +90,9 @@ class CcxtStreamProvider:
                 "restStartedAt": 0,
                 "restFailures": 0,
                 "disabledReason": "",
+                "healthScore": 100,
+                "healthStatus": "warming",
+                "lastLatencyMs": 0,
             }
         return self.states[key]
 
@@ -130,11 +133,13 @@ class CcxtStreamProvider:
                 state["updates"] += 1
                 state["lastUpdate"] = int(time.time() * 1000)
                 state["lastError"] = ""
+                self.mark_success(state, latency_ms, "healthy")
                 self.on_book(self.normalize(exchange, symbol, orderbook, "websocket", latency_ms))
             except Exception as exc:
                 state["failures"] += 1
                 state["reconnects"] += 1
                 state["lastError"] = str(exc)
+                self.mark_error(state)
                 await self.emit("websocket-error", {"exchange": exchange.name, "symbol": symbol, "failures": state["failures"], "reason": str(exc)})
                 if state["failures"] >= self.settings.ws_failure_threshold:
                     state["mode"] = "rest"
@@ -156,14 +161,18 @@ class CcxtStreamProvider:
                 state["updates"] += 1
                 state["restFailures"] = 0
                 state["lastUpdate"] = int(time.time() * 1000)
+                self.mark_success(state, latency_ms, "rest-watch")
                 self.on_book(self.normalize(exchange, symbol, orderbook, "rest", latency_ms))
             except Exception as exc:
                 state["restFailures"] += 1
                 state["lastError"] = str(exc)
+                self.mark_error(state, penalty=16)
                 await self.emit("rest-error", {"exchange": exchange.name, "symbol": symbol, "reason": str(exc)})
                 if state["restFailures"] >= 3:
                     state["mode"] = "disabled"
                     state["disabledReason"] = f"REST fallback failed {state['restFailures']} times"
+                    state["healthScore"] = 0
+                    state["healthStatus"] = "disabled"
                     await self.emit("stream-disabled", {"exchange": exchange.name, "symbol": symbol, "reason": state["disabledReason"], "lastError": str(exc)})
                     return
             if int(time.time() * 1000) - state["restStartedAt"] >= self.settings.rest_recovery_attempt_ms:
@@ -195,6 +204,20 @@ class CcxtStreamProvider:
             timestamp=int(timestamp),
         )
 
+    def mark_success(self, state: dict, latency_ms: float, status: str) -> None:
+        state["lastLatencyMs"] = latency_ms
+        recovery = 3 if status == "healthy" else 1
+        state["healthScore"] = min(100, state.get("healthScore", 100) + recovery)
+        if latency_ms > self.settings.health_slow_latency_ms:
+            state["healthScore"] = max(0, state["healthScore"] - 5)
+            state["healthStatus"] = "latency-watch"
+        else:
+            state["healthStatus"] = status
+
+    def mark_error(self, state: dict, penalty: int = 12) -> None:
+        state["healthScore"] = max(0, state.get("healthScore", 100) - penalty)
+        state["healthStatus"] = "degraded" if state["healthScore"] >= 35 else "critical"
+
     async def emit(self, event_type: str, payload: dict) -> None:
         await self.on_event({"type": event_type, "time": int(time.time() * 1000), **payload})
 
@@ -218,6 +241,9 @@ class CcxtStreamProvider:
                     "disabledReason": state["disabledReason"],
                     "restFallback": state["mode"] == "rest",
                     "disabled": state["mode"] == "disabled",
+                    "healthScore": state["healthScore"],
+                    "healthStatus": state["healthStatus"],
+                    "lastLatencyMs": state["lastLatencyMs"],
                 }
                 for state in self.states.values()
             ],

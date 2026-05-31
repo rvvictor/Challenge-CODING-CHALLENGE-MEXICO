@@ -25,8 +25,10 @@ from backend.app.engines.queue import OpportunityQueue
 from backend.app.engines.risk import RiskManager
 from backend.app.engines.simulator import SimulatedMarket
 from backend.app.engines.triangular import TriangularArbitrageEngine
+from backend.app.engines.venue_health import VenueHealthTracker
 from backend.app.integrations.ccxt_provider import CcxtStreamProvider
 from backend.app.integrations.global_market import GlobalMarketIntel
+from backend.app.integrations.persistence import DurableEventSink
 from backend.app.integrations.redis_bus import RedisBus
 
 
@@ -46,7 +48,8 @@ class MarketService:
         self.mode = cfg.market_mode
         self.books: dict[str, OrderBook] = {}
         self.simulator = SimulatedMarket(cfg.exchanges)
-        self.store = EventStore()
+        self.persistence = DurableEventSink(cfg)
+        self.store = EventStore(persistence=self.persistence)
         self.ledger = WalletLedger(cfg)
         self.risk = RiskManager(cfg)
         self.cross_engine = CrossExchangeArbitrageEngine(cfg, self.ledger)
@@ -56,6 +59,7 @@ class MarketService:
         self.executor = ExecutionSimulator(cfg, self.ledger, self.store, self.risk)
         self.redis = RedisBus(cfg)
         self.global_market = GlobalMarketIntel(cfg)
+        self.venue_health = VenueHealthTracker(cfg)
         self.stream_provider: CcxtStreamProvider | None = None
         self.started_at = now_ms()
         self.task: asyncio.Task | None = None
@@ -81,6 +85,7 @@ class MarketService:
         if self.stream_provider:
             await self.stream_provider.stop()
         await self.global_market.stop()
+        self.persistence.close()
 
     async def start_streams(self) -> None:
         if self.stream_provider:
@@ -169,6 +174,7 @@ class MarketService:
         self.ledger.reset()
         self.risk.reset()
         self.executor.reset()
+        self.venue_health.reset()
         self.started_at = now_ms()
         self.scan_tick = 0
         self.recorded_signal_times.clear()
@@ -183,11 +189,13 @@ class MarketService:
         self.simulator = SimulatedMarket(self.settings.exchanges)
         if preserve_performance:
             self.ledger.sync_exchanges(self.settings.exchanges)
+            self.venue_health.sync(self.settings.exchanges)
             self.risk.reset_market_window()
         else:
             self.store.reset()
             self.ledger = WalletLedger(self.settings)
             self.risk.reset()
+            self.venue_health.reset()
             self.started_at = now_ms()
         self.cross_engine = CrossExchangeArbitrageEngine(self.settings, self.ledger)
         self.triangular_engine = TriangularArbitrageEngine(self.settings, self.ledger)
@@ -206,6 +214,10 @@ class MarketService:
 
         primary = self.primary_books()
         summaries = self.book_summaries(primary)
+        stream_snapshot = self.stream_provider.snapshot() if self.stream_provider else {"streams": []}
+        self.venue_health.sync(self.settings.exchanges)
+        self.venue_health.record_books(summaries, stream_snapshot)
+        summaries = self.venue_health.enrich_summaries(summaries)
         self.risk.evaluate_market(summaries)
         self.flush_risk_events()
         risk_snapshot = self.risk.snapshot(now_ms())
@@ -214,12 +226,14 @@ class MarketService:
             self.last_executions = []
             self.queue.pause(risk_snapshot["reason"])
             snapshot = self.snapshot()
-            asyncio.create_task(self.redis.publish("snapshots", snapshot))
+            self.schedule(self.redis.publish("snapshots", snapshot))
             self.broadcast(snapshot)
             return
 
-        primary_map = {book.exchange_id: book for book in primary}
-        opportunities = self.cross_engine.scan(primary_map) + self.triangular_engine.scan(self.books)
+        adjusted_primary = self.health_adjusted_books(primary)
+        adjusted_books = self.health_adjusted_book_map()
+        primary_map = {book.exchange_id: book for book in adjusted_primary}
+        opportunities = self.cross_engine.scan(primary_map) + self.triangular_engine.scan(adjusted_books)
         ranked = [explain_opportunity(item) for item in self.queue.rank(opportunities)]
         self.last_scan = ranked
         if ranked:
@@ -230,11 +244,11 @@ class MarketService:
         self.last_executions = self.executor.try_execute(ranked, summaries)
         for trade in self.last_executions:
             self.edge_ledger.append("trade", self.compact_trade_record(trade))
-            asyncio.create_task(self.redis.publish("trades", trade))
+            self.schedule(self.redis.publish("trades", trade))
         self.flush_risk_events()
 
         snapshot = self.snapshot()
-        asyncio.create_task(self.redis.publish("snapshots", snapshot))
+        self.schedule(self.redis.publish("snapshots", snapshot))
         self.broadcast(snapshot)
 
     def curated_opportunities(self, ranked: list[dict]) -> list[dict]:
@@ -298,7 +312,15 @@ class MarketService:
                 "reason": event.get("reason"),
                 "metadata": event.get("metadata", {}),
             })
-            asyncio.create_task(self.redis.publish("risk", event))
+            self.schedule(self.redis.publish("risk", event))
+
+    def schedule(self, coro) -> None:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            coro.close()
+            return
+        loop.create_task(coro)
 
     def generate_demo_books(self) -> None:
         self.simulator.advance(self.settings.exchanges)
@@ -311,6 +333,20 @@ class MarketService:
 
     def primary_books(self) -> list[OrderBook]:
         return [book for book in self.books.values() if book.primary and book.asks and book.bids]
+
+    def health_adjusted_books(self, books: list[OrderBook]) -> list[OrderBook]:
+        adjusted = []
+        for book in books:
+            factor = self.venue_health.confidence_factor(book.exchange_id)
+            status = self.venue_health.status(book.exchange_id)
+            adjusted.append(book.clone_with(
+                confidence=max(0.05, book.confidence * factor),
+                status=status if status != "healthy" else book.status,
+            ))
+        return adjusted
+
+    def health_adjusted_book_map(self) -> dict[str, OrderBook]:
+        return {key: self.health_adjusted_books([book])[0] for key, book in self.books.items()}
 
     def book_summaries(self, books: list[OrderBook]) -> list[dict]:
         current = now_ms()
@@ -344,7 +380,8 @@ class MarketService:
 
     def snapshot(self) -> dict:
         current = now_ms()
-        books = self.book_summaries(self.primary_books())
+        stream_snapshot = self.stream_provider.snapshot() if self.stream_provider else {"available": False, "unavailableReason": "Demo mode", "streams": []}
+        books = self.venue_health.enrich_summaries(self.book_summaries(self.primary_books()))
         triangular_books = [
             {
                 "exchangeId": book.exchange_id,
@@ -359,6 +396,7 @@ class MarketService:
             if not book.primary
         ]
         mark_price = sum((book["bestAsk"] + book["bestBid"]) / 2 for book in books) / len(books) if books else 0
+        eth_mark_price = self.eth_mark_price(mark_price)
         trades = self.store.latest_trades(self.store.trades_limit)
         wins = sum(1 for trade in trades if trade["netProfit"] >= 0)
         avg_latency = sum(book["latencyMs"] for book in books) / len(books) if books else 0
@@ -405,6 +443,9 @@ class MarketService:
             "liveSignalCount": sum(1 for item in current_scan if current - item.get("time", 0) <= 1500),
             "maxTradeBtc": self.settings.max_trade_btc,
             "triangularQuoteSize": self.settings.triangular_quote_size,
+            "riskBudgetUsedUsd": risk_snapshot["riskBudgetUsedUsd"],
+            "riskBudgetRemainingUsd": risk_snapshot["riskBudgetRemainingUsd"],
+            "demotedVenues": self.venue_health.snapshot()["demotedCount"],
         }
         return {
             "now": current,
@@ -420,14 +461,16 @@ class MarketService:
             "queuedOpportunities": self.last_scan[:40],
             "trades": trades,
             "wallets": self.ledger.active(self.settings.exchanges),
-            "totals": self.ledger.totals(mark_price, self.settings.exchanges),
+            "totals": self.ledger.totals(mark_price, self.settings.exchanges, eth_mark_price),
             "pnlSeries": self.store.pnl_series,
             "risk": risk_snapshot,
             "riskEvents": self.store.latest_events(),
             "redis": self.redis.snapshot(),
+            "database": self.persistence.snapshot(),
             "globalMarket": self.global_market.snapshot(),
-            "streams": self.stream_provider.snapshot() if self.stream_provider else {"available": False, "unavailableReason": "Demo mode", "streams": []},
+            "streams": stream_snapshot,
             "queue": self.queue.snapshot(),
+            "venueHealth": self.venue_health.snapshot(),
             "exchangeCoverage": {
                 "active": [exchange.__dict__ for exchange in self.settings.exchanges],
                 "universe": [exchange.__dict__ for exchange in self.settings.exchange_universe],
@@ -451,6 +494,36 @@ class MarketService:
                 "latencyMeaning": "Book age is the freshness of the latest order book. Update latency is how long the provider waited for the last exchange update.",
             },
             "metrics": metrics,
+        }
+
+    def eth_mark_price(self, fallback_btc_price: float) -> float:
+        prices = []
+        for book in self.books.values():
+            if book.symbol in {"ETH/USDT", "ETH/USD"} and book.asks and book.bids:
+                mid = book_mid(book)
+                if mid:
+                    prices.append(mid)
+        if prices:
+            return sum(prices) / len(prices)
+        return fallback_btc_price * 0.052 if fallback_btc_price else 0
+
+    def metrics_snapshot(self) -> dict:
+        snapshot = self.snapshot()
+        streams = snapshot["streams"].get("streams", [])
+        return {
+            "botName": snapshot["botName"],
+            "mode": snapshot["mode"],
+            "uptimeMs": snapshot["uptimeMs"],
+            "metrics": snapshot["metrics"],
+            "risk": snapshot["risk"],
+            "latencySlo": snapshot["latencySlo"],
+            "venueHealth": snapshot["venueHealth"],
+            "database": snapshot["database"],
+            "streams": {
+                "available": snapshot["streams"].get("available"),
+                "restFallbackCount": sum(1 for stream in streams if stream.get("restFallback")),
+                "disabledCount": sum(1 for stream in streams if stream.get("disabled")),
+            },
         }
 
     def export_session(self) -> dict:

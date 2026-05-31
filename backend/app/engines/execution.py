@@ -62,14 +62,17 @@ class ExecutionSimulator:
         return float(buy["USDT"]) >= buy_debit and float(sell["BTC"]) >= trade["qtyBtc"]
 
     def build_trade(self, opportunity: dict) -> dict:
+        adverse = self.adverse_price_movement(opportunity)
         base = {
             "id": f"T-{uuid.uuid4().hex[:10]}",
             "time": now_ms(),
             "strategy": opportunity["strategy"],
             "opportunityId": opportunity["id"],
             "grossProfit": opportunity["grossProfit"],
-            "netProfit": opportunity["netProfit"],
+            "netProfit": round(opportunity["netProfit"] - adverse["cost"], 4),
             "netBps": opportunity["netBps"],
+            "expectedValue": opportunity.get("expectedValue", opportunity["netProfit"]),
+            "evBps": opportunity.get("evBps", opportunity["netBps"]),
             "confidence": opportunity["confidence"],
             "partial": opportunity["partial"],
             "filledRatio": opportunity.get("filledRatio", 1),
@@ -80,10 +83,14 @@ class ExecutionSimulator:
             "source": opportunity["source"],
             "totalCosts": opportunity.get("costs", {}).get("totalCosts", 0),
             "executionQuality": {
-                "edgeCaptureBps": opportunity["netBps"],
+                "edgeCaptureBps": round(opportunity["netBps"] - adverse["bps"], 4),
                 "confidence": opportunity["confidence"],
                 "costRatio": (opportunity.get("costs", {}).get("totalCosts", 0) / max(abs(opportunity.get("grossProfit", 0)), 0.000001)),
+                "adverseMoveBps": adverse["bps"],
+                "adverseMoveCost": adverse["cost"],
+                "latencyCaptureProbability": opportunity.get("latencyCaptureProbability", 1),
             },
+            "adversePriceMove": adverse,
             "status": "partial-cycle" if opportunity["strategy"] == "triangular" and opportunity["partial"] else "partial-fill" if opportunity["partial"] else "filled",
         }
         if opportunity["strategy"] == "triangular":
@@ -118,4 +125,22 @@ class ExecutionSimulator:
             "slippageCostSell": opportunity["costs"]["slippageCostSell"],
             "latencyRiskCost": opportunity["costs"]["latencyRiskCost"],
             "rebalanceCost": opportunity["costs"]["rebalanceCost"],
+            "adverseMoveCost": adverse["cost"],
+        }
+
+    def adverse_price_movement(self, opportunity: dict) -> dict:
+        latencies = opportunity.get("latencies") or {}
+        latency_ms = float(latencies.get("totalMs") or (latencies.get("buyMs", 0) + latencies.get("sellMs", 0)) or 0)
+        notional = float(opportunity.get("quoteIn") or (opportunity.get("buyPrice", 0) * opportunity.get("qtyBtc", 0)) or 0)
+        confidence_gap = max(0.0, 1 - float(opportunity.get("confidence") or 0))
+        adverse_bps = min(
+            self.settings.execution_adverse_max_bps,
+            (latency_ms / 1000) * self.settings.execution_adverse_bps_per_second + confidence_gap * 0.18,
+        )
+        cost = notional * adverse_bps / 10000
+        return {
+            "bps": round(adverse_bps, 4),
+            "cost": round(cost, 4),
+            "latencyMs": round(latency_ms, 1),
+            "model": "latency-adverse-move",
         }

@@ -8,11 +8,12 @@ def route_key(opportunity: dict) -> str:
     return f"simple:{opportunity.get('product')}:{pair[0]}<>{pair[1]}"
 
 
-def queue_value(opportunity: dict) -> tuple[int, float, float]:
+def queue_value(opportunity: dict) -> tuple[int, float, float, float]:
     status = opportunity.get("status")
     status_rank = {"profitable": 3, "rejected": 2, "blocked": 1}.get(status, 0)
     liquidity = opportunity.get("filledRatio", 0) or 0
-    return (status_rank, opportunity.get("score", 0), liquidity)
+    expected_value = opportunity.get("expectedValue", opportunity.get("netProfit", 0)) or 0
+    return (status_rank, expected_value, opportunity.get("score", 0), liquidity)
 
 
 class OpportunityQueue:

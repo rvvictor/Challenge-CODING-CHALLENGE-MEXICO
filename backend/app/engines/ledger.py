@@ -129,22 +129,39 @@ class WalletLedger:
         buy = self.get(trade["buyExchangeId"])
         sell = self.get(trade["sellExchangeId"])
         buy_debit = trade["buyQuote"] + trade["buyFee"] + trade["slippageCostBuy"] + trade["rebalanceCost"]
-        sell_credit = trade["sellQuote"] - trade["sellFee"] - trade["slippageCostSell"] - trade["latencyRiskCost"]
+        sell_credit = trade["sellQuote"] - trade["sellFee"] - trade["slippageCostSell"] - trade["latencyRiskCost"] - trade.get("adverseMoveCost", 0)
         buy["USDT"] = float(buy["USDT"]) - buy_debit
         buy["BTC"] = float(buy["BTC"]) + trade["qtyBtc"]
         sell["BTC"] = float(sell["BTC"]) - trade["qtyBtc"]
         sell["USDT"] = float(sell["USDT"]) + sell_credit
         self.realized_pnl += trade["netProfit"]
 
-    def totals(self, mark_price: float, exchanges=None) -> dict[str, float]:
+    def totals(self, mark_price: float, exchanges=None, eth_mark_price: float | None = None) -> dict:
         wallets = self.active(exchanges) if exchanges is not None else self.all()
         usdt = sum(float(wallet["USDT"]) for wallet in wallets)
         btc = sum(float(wallet["BTC"]) for wallet in wallets)
         eth = sum(float(wallet["ETH"]) for wallet in wallets)
+        eth_price = eth_mark_price if eth_mark_price is not None else mark_price * 0.052
+        starting_value = len(wallets) * (
+            self.settings.starting_usdt
+            + self.settings.starting_btc * mark_price
+            + self.settings.starting_eth * eth_price
+        )
+        mark_to_market = usdt + btc * mark_price + eth * eth_price
+        total_pnl = mark_to_market - starting_value
+        unrealized_pnl = total_pnl - self.realized_pnl
         return {
             "USDT": usdt,
             "BTC": btc,
             "ETH": eth,
-            "markToMarket": usdt + btc * mark_price,
+            "markToMarket": mark_to_market,
             "realizedPnl": self.realized_pnl,
+            "unrealizedPnl": unrealized_pnl,
+            "totalPnl": total_pnl,
+            "startingValue": starting_value,
+            "exposure": {
+                "USDT": {"qty": usdt, "usd": usdt},
+                "BTC": {"qty": btc, "usd": btc * mark_price},
+                "ETH": {"qty": eth, "usd": eth * eth_price},
+            },
         }
