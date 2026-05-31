@@ -79,7 +79,7 @@ https://github.com/rvvictor/Challenge-CODING-CHALLENGE-MEXICO
 | Mensajería | Redis Pub/Sub opcional |
 | Persistencia | Postgres mediante `DATABASE_URL`, SQLite local como respaldo |
 | Pruebas | `unittest` en Python, pruebas de motores y verificación de build del frontend |
-| Despliegue | Railway |
+| Despliegue | Servicio web Python capaz de ejecutar FastAPI y construir React |
 
 ---
 
@@ -417,11 +417,11 @@ La suite cubre:
 
 ---
 
-## Despliegue en Railway
+## Parámetros de despliegue
 
-El despliegue final está pensado para **Railway**. La aplicación ya está preparada para correr como servicio web Python que construye el frontend React y sirve la SPA desde FastAPI.
+La aplicación está preparada para correr como un servicio web Python que construye el frontend React y sirve la SPA desde FastAPI.
 
-Configuración recomendada para Railway:
+Configuración recomendada:
 
 ```text
 Repositorio: https://github.com/rvvictor/Challenge-CODING-CHALLENGE-MEXICO
@@ -440,7 +440,7 @@ EXCHANGE_PROFILE=speed
 Variables opcionales:
 
 ```text
-DATABASE_URL=<url-de-postgres-en-railway>
+DATABASE_URL=<url-de-postgres-si-se-configura>
 REDIS_URL=<url-de-redis-si-se-configura>
 ```
 
