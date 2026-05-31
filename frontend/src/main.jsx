@@ -42,6 +42,31 @@ function signalAge(item, now) {
   return ago((now || Date.now()) - (item?.time || now || Date.now()));
 }
 
+function streamCounts(streams = {}) {
+  const rows = streams.streams || [];
+  return {
+    ws: rows.filter((stream) => stream.mode === "websocket").length,
+    rest: rows.filter((stream) => stream.restFallback || stream.mode === "rest").length,
+    disabled: rows.filter((stream) => stream.disabled || stream.mode === "disabled").length,
+    total: rows.length,
+  };
+}
+
+function dataFeedLabel(streams = {}, books = []) {
+  const counts = streamCounts(streams);
+  if (!counts.total && books.some((book) => book.source === "simulated")) return "demo feed";
+  if (counts.disabled) return `${counts.disabled} disabled`;
+  if (counts.rest) return `${counts.ws} WS / ${counts.rest} REST`;
+  return `${counts.ws || books.length} WS`;
+}
+
+function auditLabel(database = {}, redis = {}) {
+  if (database?.postgresReady) return "Postgres audit";
+  if (database?.status === "connected") return `${database.driver || "local"} audit`;
+  if (redis?.enabled) return `Redis ${redis.status}`;
+  return "local audit";
+}
+
 function useAurelion() {
   const [snapshot, setSnapshot] = React.useState(null);
   const [connected, setConnected] = React.useState(false);
@@ -126,6 +151,9 @@ function Metric({ icon: Icon, label, value, note, tone = "neutral" }) {
 
 function Header({ snapshot, connected, control, reset, exportSession }) {
   const risk = snapshot?.risk;
+  const metrics = snapshot?.metrics || {};
+  const counts = streamCounts(snapshot?.streams);
+  const dataTone = counts.disabled ? "bad" : counts.rest ? "watch" : "good";
   return (
     <header className="topbar">
       <div className="identity">
@@ -134,6 +162,12 @@ function Header({ snapshot, connected, control, reset, exportSession }) {
           <h1>Aurelion</h1>
           <p>Bitcoin Arbitrage Intelligence</p>
         </div>
+      </div>
+      <div className="topPulse">
+        <span className="pulseItem good"><b>{formatMoney(metrics.cumulativePnl)}</b><small>P&L</small></span>
+        <span className={`pulseItem ${dataTone}`}><b>{dataFeedLabel(snapshot?.streams, snapshot?.books)}</b><small>data feed</small></span>
+        <span className="pulseItem"><b>{snapshot?.venueHealth?.demotedCount || metrics.demotedVenues || 0}</b><small>demoted</small></span>
+        <span className="pulseItem"><b>{auditLabel(snapshot?.database, snapshot?.redis)}</b><small>audit</small></span>
       </div>
       <div className="controls">
         <span className={`conn ${connected ? "online" : "offline"}`}><i />{connected ? "en vivo" : "sincronizando"}</span>
@@ -160,15 +194,16 @@ function Header({ snapshot, connected, control, reset, exportSession }) {
 function Overview({ snapshot }) {
   const metrics = snapshot.metrics;
   const risk = snapshot.risk;
+  const best = topDecision(snapshot.queuedOpportunities || []);
   const stateLabel = risk.paused ? "Pausado por riesgo" : risk.autoExecution ? "Operando" : "Pausado manual";
   const condition = risk.condition && risk.condition !== "healthy" ? risk.condition : "healthy";
   const stateNote = risk.paused
     ? `${condition} / ${risk.reason} / resumes in ${ago(risk.cooldownRemainingMs ?? risk.pausedUntil - snapshot.now)}`
-    : risk.reason;
+    : `risk ${formatMoney(risk.riskBudgetUsedUsd || 0)} / ${formatMoney(risk.riskBudgetHourUsd || 0)}`;
   const freshness = Math.max(0, metrics.avgFreshnessMs ?? metrics.avgLatencyMs);
   const bestEdge = metrics.bestNetBps > 0 ? `${formatNumber(metrics.bestNetBps, 2)} bps` : "Sin edge";
   const observed = metrics.bestNetBps > 0
-    ? `${snapshot.queue.executable} listas para ejecutar`
+    ? `EV ${formatMoney(best?.expectedValue || best?.netProfit || 0)} / capture ${formatPercent(best?.latencyCaptureProbability || best?.edgeBreakdown?.latencyCaptureProbability || 0)}`
     : metrics.bestObservedNetBps < 0
       ? `faltan ${formatNumber(Math.abs(metrics.bestObservedNetBps), 2)} bps`
       : "esperando libros completos";
@@ -178,7 +213,7 @@ function Overview({ snapshot }) {
       <Metric icon={ShieldAlert} label="Estado del bot" value={stateLabel} note={stateNote} tone={risk.paused || !risk.autoExecution ? "bad" : "good"} />
       <Metric icon={Radar} label="Mejor oportunidad" value={bestEdge} note={observed} />
       <Metric icon={ArrowRightLeft} label="Señales detectadas" value={compact.format(metrics.detectedCount)} note={`${metrics.liveSignalCount || 0} ocurriendo ahora`} />
-      <Metric icon={Gauge} label="Velocidad" value={`${Math.round(freshness)} ms`} note={`p95 ${Math.max(0, Math.round(metrics.p95FreshnessMs || freshness))} ms`} tone={(metrics.staleBooks || 0) > 0 ? "bad" : "neutral"} />
+      <Metric icon={Gauge} label="Data health" value={dataFeedLabel(snapshot.streams, snapshot.books)} note={`p95 ${Math.max(0, Math.round(metrics.p95FreshnessMs || freshness))} ms / ${metrics.demotedVenues || 0} demoted`} tone={(metrics.staleBooks || 0) > 0 || (metrics.demotedVenues || 0) > 0 ? "bad" : "neutral"} />
     </section>
   );
 }
@@ -228,7 +263,7 @@ function RouteLabel({ item }) {
       <span className="routeStack">
         <b>{item.exchange} triangular</b>
         <span className="cyclePath">{path.map((node, index) => <React.Fragment key={`${node}-${index}`}><i>{node}</i>{index < path.length - 1 && <ArrowRightLeft size={12} />}</React.Fragment>)}</span>
-        <small>{item.legs?.map((leg) => leg.symbol).join(" / ") || item.product}</small>
+        <small>{item.dynamicCycle || path.length > 4 ? `dynamic ${path.length - 1}-leg cycle / ` : ""}{item.legs?.map((leg) => leg.symbol).join(" / ") || item.product}</small>
       </span>
     );
   }
@@ -304,7 +339,7 @@ function OpportunityTable({ opportunities, queue = {}, now }) {
         <span><b>{queue.queued || 0}</b> en ranking</span>
       </div>
       <div className="table">
-        <div className="thead"><span>Ruta</span><span>Tamaño</span><span>Ganancia neta</span><span>Score</span><span>Estado</span></div>
+        <div className="thead"><span>Ruta</span><span>Tamaño</span><span>Ganancia neta</span><span>EV</span><span>Estado</span></div>
         {rows.map((opportunity) => (
           <div className="tr" key={opportunity.id}>
             <span className="routeStack">
@@ -320,8 +355,8 @@ function OpportunityTable({ opportunities, queue = {}, now }) {
               <small>{formatNumber(opportunity.netBps, 2)} bps / costs {formatMoney(opportunity.costs?.totalCosts)}</small>
             </span>
             <span>
-              <b>{formatNumber(opportunity.score, 3)}</b>
-              <small>conf {formatNumber(opportunity.confidence, 2)}</small>
+              <b>{formatMoney(opportunity.expectedValue ?? opportunity.netProfit)}</b>
+              <small>{formatNumber(opportunity.evBps ?? opportunity.netBps, 2)} bps / conf {formatNumber(opportunity.confidence, 2)}</small>
             </span>
             <span>
               <em className={`badge ${statusClass(opportunity)}`}>{statusLabel(opportunity)}</em>
@@ -368,6 +403,11 @@ function EdgeExplainability({ opportunities = [] }) {
         <div className="edgeRoute">
           <RouteLabel item={item} />
           <small>{formatNumber(breakdown.netBps, 2)} bps net / {formatNumber(breakdown.costDragPct, 1)}% cost drag / {formatNumber(breakdown.latencyMs, 0)} ms</small>
+          <div className="evStrip">
+            <span>EV <b>{formatMoney(item.expectedValue ?? breakdown.expectedValue ?? item.netProfit)}</b></span>
+            <span>capture <b>{formatPercent(item.latencyCaptureProbability ?? breakdown.latencyCaptureProbability ?? 0)}</b></span>
+            <span>{formatNumber(item.evBps ?? breakdown.evBps ?? item.netBps, 2)} EV bps</span>
+          </div>
         </div>
         <div className="scoreBars">
           {(breakdown.components || []).map((component) => (
@@ -553,10 +593,11 @@ function DemoQualityPanel({ quality = {}, mode }) {
   );
 }
 
-function ExchangeCoverage({ coverage = {}, quality = [], control }) {
+function ExchangeCoverage({ coverage = {}, quality = [], health = {}, control }) {
   const active = new Set((coverage.active || []).map((exchange) => exchange.id));
   const universe = coverage.universe || coverage.active || [];
   const qualityById = new Map((quality || []).map((venue) => [venue.exchangeId, venue]));
+  const healthById = new Map((health.venues || []).map((venue) => [venue.exchangeId, venue]));
   const toggle = (exchange) => {
     const next = active.has(exchange.id)
       ? [...active].filter((id) => id !== exchange.id)
@@ -566,14 +607,19 @@ function ExchangeCoverage({ coverage = {}, quality = [], control }) {
   };
   return (
     <section className="surface">
-      <PanelTitle icon={Network} title="Exchanges" pill={`${coverage.activeCount || active.size} activos`} />
+      <PanelTitle icon={Network} title="Exchanges" pill={`${coverage.activeCount || active.size} activos / ${health.demotedCount || 0} demoted`} />
       <div className="coverageGrid">
-        {universe.map((exchange) => (
-          <button className={active.has(exchange.id) ? "active" : ""} disabled={!active.has(exchange.id) && active.size >= 5} key={exchange.id} onClick={() => toggle(exchange)} type="button">
-            <b>{exchange.name}</b>
-            <span>{qualityById.has(exchange.id) ? `${qualityById.get(exchange.id).score} quality / ${qualityById.get(exchange.id).latencyMs} ms` : active.has(exchange.id) ? "speed profile" : "coverage catalog"}</span>
-          </button>
-        ))}
+        {universe.map((exchange) => {
+          const venue = qualityById.get(exchange.id);
+          const healthRow = healthById.get(exchange.id);
+          const healthStatus = healthRow?.status || venue?.healthStatus || (active.has(exchange.id) ? "healthy" : "catalog");
+          return (
+            <button className={`${active.has(exchange.id) ? "active" : ""} ${healthStatus}`} disabled={!active.has(exchange.id) && active.size >= 5} key={exchange.id} onClick={() => toggle(exchange)} type="button">
+              <b>{exchange.name}</b>
+              <span>{venue ? `${healthStatus} / ${venue.latencyMs} ms / q ${venue.score}` : active.has(exchange.id) ? "speed profile" : "coverage catalog"}</span>
+            </button>
+          );
+        })}
       </div>
     </section>
   );
@@ -678,42 +724,74 @@ function PnlChart({ series }) {
   return <canvas className="chart" ref={ref} />;
 }
 
+function SystemStatus({ snapshot }) {
+  const counts = streamCounts(snapshot.streams);
+  const risk = snapshot.risk || {};
+  const database = snapshot.database || {};
+  const used = Number(risk.riskBudgetUsedUsd || 0);
+  const limit = Number(risk.riskBudgetHourUsd || 0);
+  const ratio = limit > 0 ? Math.min(1, used / limit) : 0;
+  return (
+    <section className="surface systemStatus">
+      <PanelTitle icon={DatabaseZap} title="System" pill={risk.paused ? "halted" : "armed"} />
+      <div className="systemGrid">
+        <article>
+          <span>Market data</span>
+          <b>{dataFeedLabel(snapshot.streams, snapshot.books)}</b>
+          <small>{counts.total || snapshot.books.length} streams watched</small>
+        </article>
+        <article>
+          <span>Audit trail</span>
+          <b>{auditLabel(database, snapshot.redis)}</b>
+          <small>{database.status || "local"} / {snapshot.redis?.enabled ? snapshot.redis.status : "SSE"}</small>
+        </article>
+        <article className="riskBudget">
+          <span>Risk budget</span>
+          <b>{formatMoney(used)} / {formatMoney(limit)}</b>
+          <i style={{ "--fill": `${ratio * 100}%` }} />
+        </article>
+      </div>
+    </section>
+  );
+}
+
+function PnlBreakdown({ totals = {} }) {
+  const exposure = totals.exposure || {};
+  return (
+    <div className="pnlBreakdown">
+      <article>
+        <span>Realized</span>
+        <b className={(totals.realizedPnl || 0) >= 0 ? "green" : "red"}>{formatMoney(totals.realizedPnl)}</b>
+      </article>
+      <article>
+        <span>Unrealized</span>
+        <b className={(totals.unrealizedPnl || 0) >= 0 ? "green" : "red"}>{formatMoney(totals.unrealizedPnl)}</b>
+      </article>
+      <article>
+        <span>BTC exposure</span>
+        <b>{formatMoney(exposure.BTC?.usd || 0)}</b>
+      </article>
+      <article>
+        <span>ETH exposure</span>
+        <b>{formatMoney(exposure.ETH?.usd || 0)}</b>
+      </article>
+    </div>
+  );
+}
+
 function SideRail({ snapshot, control }) {
   return (
     <aside className="sideRail">
       <section className="surface pnlCard">
         <PanelTitle icon={ChartNoAxesCombined} title="P&L" pill={formatMoney(snapshot.metrics.cumulativePnl)} />
         <PnlChart series={snapshot.pnlSeries} />
+        <PnlBreakdown totals={snapshot.totals} />
       </section>
-      <ExchangeCoverage coverage={snapshot.exchangeCoverage} quality={snapshot.venueQuality} control={control} />
+      <ExchangeCoverage coverage={snapshot.exchangeCoverage} quality={snapshot.venueQuality} health={snapshot.venueHealth} control={control} />
+      <SystemStatus snapshot={snapshot} />
       <LatencySloPanel slo={snapshot.latencySlo} />
       <DemoQualityPanel quality={snapshot.demoQuality} mode={snapshot.mode} />
       <GlobalMarket globalMarket={snapshot.globalMarket || {}} />
-      <section className="surface">
-        <PanelTitle icon={DatabaseZap} title="Wallets" pill={formatMoney(snapshot.totals.markToMarket)} />
-        <div className="wallets">
-          {snapshot.wallets.map((wallet) => (
-            <article key={wallet.exchangeId}>
-              <b>{wallet.exchangeName}</b>
-              <span>{formatMoney(wallet.USDT)}</span>
-              <small>{formatBtc(wallet.BTC)} / {formatNumber(wallet.ETH, 3)} ETH</small>
-            </article>
-          ))}
-        </div>
-      </section>
-      <section className="surface">
-        <PanelTitle icon={ShieldAlert} title="Riesgo" pill={`${snapshot.riskEvents.length} eventos`} />
-        <div className="events">
-          {snapshot.riskEvents.slice(0, 8).map((event) => (
-            <article className="event" key={event.id || `${event.type}-${event.time}`}>
-              <b>{event.condition || event.type}</b>
-              <span>{event.reason || "market event"}</span>
-              <small>{new Date(event.time).toLocaleTimeString()}</small>
-            </article>
-          ))}
-          {!snapshot.riskEvents.length && <div className="empty">Sin eventos de riesgo</div>}
-        </div>
-      </section>
     </aside>
   );
 }
@@ -771,6 +849,8 @@ function Trades({ trades, metrics = {} }) {
             <div className="tradeDetails">
               <small>{new Date(trade.time).toLocaleTimeString()}</small>
               <small>{formatNumber(trade.executionQuality?.edgeCaptureBps || trade.netBps, 2)} bps capturados</small>
+              <small>EV {formatMoney(trade.expectedValue ?? trade.netProfit)}</small>
+              {trade.executionQuality?.adverseMoveBps > 0 && <small>latency move {formatNumber(trade.executionQuality.adverseMoveBps, 2)} bps</small>}
               {trade.strategy === "triangular" && <small>{trade.legs?.map((leg) => `${leg.from}->${leg.to}`).join(" / ")}</small>}
               {trade.partial && <small>{formatPercent(clampRatio(trade.filledRatio))} del objetivo</small>}
               {!trade.partial && <small>100% del objetivo</small>}
@@ -779,6 +859,64 @@ function Trades({ trades, metrics = {} }) {
         ))}
         {!visibleTrades.length && <div className="empty">{trades.length ? "No hay trades con este filtro" : "Aun no hay trades ejecutados"}</div>}
       </div>
+    </section>
+  );
+}
+
+function InfrastructurePanel({ snapshot }) {
+  return (
+    <div className="infraDeck">
+      <Streams streams={snapshot.streams} redis={snapshot.redis} />
+      <section className="surface">
+        <PanelTitle icon={DatabaseZap} title="Wallets" pill={formatMoney(snapshot.totals.markToMarket)} />
+        <div className="wallets">
+          {snapshot.wallets.map((wallet) => (
+            <article key={wallet.exchangeId}>
+              <b>{wallet.exchangeName}</b>
+              <span>{formatMoney(wallet.USDT)}</span>
+              <small>{formatBtc(wallet.BTC)} / {formatNumber(wallet.ETH, 3)} ETH</small>
+            </article>
+          ))}
+        </div>
+      </section>
+      <section className="surface">
+        <PanelTitle icon={ShieldAlert} title="Risk Timeline" pill={`${snapshot.riskEvents.length} eventos`} />
+        <div className="events compactEvents">
+          {snapshot.riskEvents.slice(0, 10).map((event) => (
+            <article className="event" key={event.id || `${event.type}-${event.time}`}>
+              <b>{event.condition || event.type}</b>
+              <span>{event.reason || "market event"}</span>
+              <small>{new Date(event.time).toLocaleTimeString()}</small>
+            </article>
+          ))}
+          {!snapshot.riskEvents.length && <div className="empty">Sin eventos de riesgo</div>}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ResultsWorkbench({ snapshot }) {
+  const [tab, setTab] = React.useState("opportunities");
+  const tabs = [
+    ["opportunities", "Oportunidades", snapshot.queue?.queued || 0],
+    ["trades", "Trades", snapshot.trades?.length || 0],
+    ["signals", "Senales", snapshot.opportunityHistory?.length || snapshot.opportunities?.length || 0],
+    ["infra", "Infra", snapshot.streams?.streams?.length || snapshot.books?.length || 0],
+  ];
+  return (
+    <section className="workbench">
+      <div className="workbenchTabs">
+        {tabs.map(([id, label, count]) => (
+          <button className={tab === id ? "active" : ""} key={id} onClick={() => setTab(id)} type="button">
+            {label}<span>{count}</span>
+          </button>
+        ))}
+      </div>
+      {tab === "opportunities" && <OpportunityTable opportunities={snapshot.queuedOpportunities} queue={snapshot.queue} now={snapshot.now} />}
+      {tab === "trades" && <Trades trades={snapshot.trades} metrics={snapshot.metrics} />}
+      {tab === "signals" && <OpportunityHistory opportunities={snapshot.opportunityHistory || snapshot.opportunities} metrics={snapshot.metrics} now={snapshot.now} />}
+      {tab === "infra" && <InfrastructurePanel snapshot={snapshot} />}
     </section>
   );
 }
@@ -800,13 +938,10 @@ function App() {
               <EdgeExplainability opportunities={snapshot.queuedOpportunities} />
               <RealityCheck opportunities={snapshot.queuedOpportunities} />
             </div>
-            <OpportunityTable opportunities={snapshot.queuedOpportunities} queue={snapshot.queue} now={snapshot.now} />
-            <Trades trades={snapshot.trades} metrics={snapshot.metrics} />
-            <OpportunityHistory opportunities={snapshot.opportunityHistory || snapshot.opportunities} metrics={snapshot.metrics} now={snapshot.now} />
+            <ResultsWorkbench snapshot={snapshot} />
           </div>
           <SideRail snapshot={snapshot} control={control} />
         </section>
-        <Streams streams={snapshot.streams} redis={snapshot.redis} />
       </main>
     </>
   );
