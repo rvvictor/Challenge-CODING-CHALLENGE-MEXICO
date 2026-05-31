@@ -803,6 +803,11 @@ small,
   background: var(--blue-soft);
 }
 
+.badge.dynamic-cycle {
+  color: var(--violet);
+  background: #ece9fb;
+}
+
 .badge.rejected,
 .stream em.rest {
   color: var(--amber);

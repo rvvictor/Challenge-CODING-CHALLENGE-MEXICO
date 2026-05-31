@@ -138,6 +138,7 @@ class Settings:
     triangular_min_net_bps: float = number_env("TRIANGULAR_MIN_NET_BPS", 0.65)
     triangular_max_legs: int = int_env("TRIANGULAR_MAX_LEGS", 4)
     triangular_max_cycles_per_exchange: int = int_env("TRIANGULAR_MAX_CYCLES_PER_EXCHANGE", 8)
+    demo_min_execution_gap_ms: int = int_env("DEMO_MIN_EXECUTION_GAP_MS", 22000)
     execution_adverse_bps_per_second: float = number_env("EXECUTION_ADVERSE_BPS_PER_SECOND", 0.9)
     execution_adverse_max_bps: float = number_env("EXECUTION_ADVERSE_MAX_BPS", 1.4)
     risk_budget_hour_usd: float = number_env("RISK_BUDGET_HOUR_USD", 75)

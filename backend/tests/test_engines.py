@@ -147,6 +147,21 @@ class EngineTests(unittest.TestCase):
                 break
         self.assertTrue(seen_triangular)
 
+    def test_demo_market_can_create_dynamic_four_leg_cycle(self):
+        settings = Settings(active_exchanges="okx,bybit,kucoin", triangular_quote_size=650)
+        from backend.app.engines.market_service import MarketService
+
+        service = MarketService(settings)
+        seen_dynamic = False
+        for _ in range(130):
+            service.generate_demo_books()
+            opportunities = service.triangular_engine.scan(service.books)
+            if any(item.get("dynamicCycle") and item["status"] == "profitable" for item in opportunities):
+                seen_dynamic = True
+                break
+        service.persistence.close()
+        self.assertTrue(seen_dynamic)
+
     def test_ccxt_provider_uses_exchange_safe_order_book_limits(self):
         from backend.app.integrations.ccxt_provider import CcxtStreamProvider
 
@@ -281,6 +296,46 @@ class EngineTests(unittest.TestCase):
         trades = executor.try_execute(opportunities, [])
         self.assertEqual(len(trades), 1)
         self.assertGreaterEqual(float(ledger.get("bybit")["BTC"]), 0)
+
+    def test_executor_throttles_simulated_demo_fills(self):
+        from backend.app.engines.event_store import EventStore
+        from backend.app.engines.execution import ExecutionSimulator
+
+        settings = Settings(demo_min_execution_gap_ms=60000, max_executions_per_tick=1)
+        ledger = WalletLedger(settings)
+        executor = ExecutionSimulator(settings, ledger, EventStore(), RiskManager(settings))
+        opportunity = {
+            "id": "demo-one",
+            "dedupeKey": "demo-one",
+            "strategy": "triangular",
+            "status": "profitable",
+            "grossProfit": 4,
+            "netProfit": 2,
+            "netBps": 3,
+            "expectedValue": 1.4,
+            "evBps": 2,
+            "confidence": 0.9,
+            "partial": False,
+            "filledRatio": 1,
+            "source": "simulated",
+            "product": "USDT -> BTC -> ETH -> USDT",
+            "exchangeId": settings.exchanges[0].id,
+            "exchange": settings.exchanges[0].name,
+            "cycleId": "USDT-BTC-ETH-USDT",
+            "cyclePath": ["USDT", "BTC", "ETH", "USDT"],
+            "quoteIn": 650,
+            "quoteOut": 652,
+            "qtyBtc": 0.009,
+            "qtyEth": 0.17,
+            "targetQuote": 650,
+            "legs": [],
+            "latencies": {"totalMs": 90},
+            "costs": {"totalCosts": 1},
+        }
+        first = executor.try_execute([opportunity], [])
+        second = executor.try_execute([{**opportunity, "id": "demo-two", "dedupeKey": "demo-two"}], [])
+        self.assertEqual(len(first), 1)
+        self.assertEqual(len(second), 0)
 
     def test_risk_budget_pauses_after_hourly_losses(self):
         settings = Settings(risk_budget_hour_usd=5, pause_after_loss_ms=1000)

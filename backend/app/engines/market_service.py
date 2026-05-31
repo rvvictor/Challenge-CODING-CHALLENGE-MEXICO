@@ -325,11 +325,16 @@ class MarketService:
     def generate_demo_books(self) -> None:
         self.simulator.advance(self.settings.exchanges)
         for exchange in self.settings.exchanges:
-            for symbol in dict.fromkeys((exchange.primary_symbol, *exchange.triangular_symbols)):
+            for symbol in self.demo_symbols(exchange):
                 previous = self.books.get(f"{exchange.id}:{symbol}")
                 anchor = book_mid(previous) if previous else None
                 book = self.simulator.generate(exchange, self.settings.exchanges, symbol, anchor)
                 self.books[book.key] = book
+
+    def demo_symbols(self, exchange) -> tuple[str, ...]:
+        quote = "USD" if exchange.primary_symbol.endswith("/USD") else "USDT"
+        dynamic_symbols = ("SOL/ETH", f"SOL/{quote}")
+        return tuple(dict.fromkeys((exchange.primary_symbol, *exchange.triangular_symbols, *dynamic_symbols)))
 
     def primary_books(self) -> list[OrderBook]:
         return [book for book in self.books.values() if book.primary and book.asks and book.bids]

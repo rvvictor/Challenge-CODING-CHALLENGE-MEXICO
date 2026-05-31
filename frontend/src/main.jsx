@@ -476,11 +476,13 @@ function OpportunityHistory({ opportunities = [], metrics = {}, now }) {
     ["rejected", "Rejected"],
     ["partial", "Partials"],
     ["triangular", "Triangular"],
+    ["dynamic", "Dynamic 4-leg"],
   ];
   const filtered = opportunities.filter((item) => {
     if (filter === "all") return true;
     if (filter === "live") return now - item.time <= 2500;
     if (filter === "partial") return item.partial;
+    if (filter === "dynamic") return item.dynamicCycle || (item.cyclePath?.length || 0) > 4;
     return item.status === filter || item.strategy === filter;
   });
   const rows = filtered.slice(0, 18);
@@ -826,11 +828,14 @@ function SideRail({ snapshot, control }) {
 }
 
 function fillTitle(item) {
+  if (item.strategy === "triangular" && item.dynamicCycle) return `${item.exchange} dynamic cycle`;
   if (item.strategy === "triangular") return `${item.exchange} triangular cycle`;
   return `${item.buyExchange} -> ${item.sellExchange}`;
 }
 
 function executionKind(item) {
+  if (item.strategy === "triangular" && item.dynamicCycle && item.partial) return "dynamic partial";
+  if (item.strategy === "triangular" && item.dynamicCycle) return "dynamic 4-leg";
   if (item.strategy === "triangular" && item.partial) return "triangular partial";
   if (item.strategy === "triangular") return "triangular";
   if (item.partial) return "partial";
@@ -838,6 +843,7 @@ function executionKind(item) {
 }
 
 function executionKindClass(item) {
+  if (item.strategy === "triangular" && item.dynamicCycle) return "dynamic-cycle";
   if (item.strategy === "triangular" && item.partial) return "triangular-partial";
   if (item.strategy === "triangular") return "triangular";
   if (item.partial) return "partial-fill";
@@ -851,11 +857,13 @@ function Trades({ trades, metrics = {} }) {
     ["partial", "Partials"],
     ["complete", "Complete"],
     ["triangular", "Triangular"],
+    ["dynamic", "Dynamic 4-leg"],
   ];
   const visibleTrades = trades.filter((trade) => {
     if (filter === "partial") return trade.partial;
     if (filter === "complete") return !trade.partial;
     if (filter === "triangular") return trade.strategy === "triangular";
+    if (filter === "dynamic") return trade.dynamicCycle || (trade.cyclePath?.length || 0) > 4;
     return true;
   });
   return (

@@ -20,9 +20,11 @@ class ExecutionSimulator:
         self.store = store
         self.risk = risk
         self.cooldowns: dict[str, int] = {}
+        self.last_demo_execution_at = 0
 
     def reset(self) -> None:
         self.cooldowns.clear()
+        self.last_demo_execution_at = 0
 
     def try_execute(self, opportunities: list[dict], books: list[dict]) -> list[dict]:
         current = now_ms()
@@ -34,6 +36,8 @@ class ExecutionSimulator:
             if len(executions) >= self.settings.max_executions_per_tick:
                 break
             if opportunity.get("status") != "profitable":
+                continue
+            if self.demo_throttled(opportunity, current):
                 continue
             key = opportunity.get("dedupeKey") or opportunity.get("id")
             if self.cooldowns.get(key, 0) > current:
@@ -48,8 +52,17 @@ class ExecutionSimulator:
             self.cooldowns[key] = current + self.settings.pair_cooldown_ms
             self.risk.record_trade(trade, current)
             self.store.add_trade(trade, self.ledger.realized_pnl)
+            if trade.get("source") == "simulated":
+                self.last_demo_execution_at = current
             executions.append(trade)
         return executions
+
+    def demo_throttled(self, opportunity: dict, current: int) -> bool:
+        return (
+            opportunity.get("source") == "simulated"
+            and self.settings.demo_min_execution_gap_ms > 0
+            and current - self.last_demo_execution_at < self.settings.demo_min_execution_gap_ms
+        )
 
     def has_inventory(self, trade: dict) -> bool:
         if trade["strategy"] == "triangular":
@@ -81,6 +94,7 @@ class ExecutionSimulator:
             "fills": opportunity.get("fills", {}),
             "legPartials": opportunity.get("legPartials", []),
             "source": opportunity["source"],
+            "dynamicCycle": bool(opportunity.get("dynamicCycle")),
             "totalCosts": opportunity.get("costs", {}).get("totalCosts", 0),
             "executionQuality": {
                 "edgeCaptureBps": round(opportunity["netBps"] - adverse["bps"], 4),

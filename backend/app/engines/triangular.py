@@ -164,7 +164,8 @@ class TriangularArbitrageEngine:
         partial = any(partials)
         filled_ratio = min(1, *filled_ratios) if filled_ratios else 0
         score = (ev["evBps"] * math.log10(max(quote_in, 10))) / (1 + latency_ms / 1200) if profitable else ev["evBps"] * confidence
-        source = "websocket" if all(book.source == "websocket" for book in cycle_books if book) else "mixed"
+        sources = {book.source for book in cycle_books if book}
+        source = "websocket" if sources == {"websocket"} else "simulated" if sources == {"simulated"} else "mixed"
         cycle_path = path
         cycle_id = "-".join(cycle_path)
 
