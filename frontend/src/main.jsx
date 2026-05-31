@@ -593,14 +593,6 @@ function PnlChart({ series }) {
     ctx.clearRect(0, 0, rect.width, rect.height);
     ctx.fillStyle = "#fbfcf8";
     ctx.fillRect(0, 0, rect.width, rect.height);
-    ctx.strokeStyle = "#dfe6da";
-    ctx.lineWidth = 1;
-    for (let y = 26; y < rect.height; y += 40) {
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(rect.width, y);
-      ctx.stroke();
-    }
     const source = series.length ? series : [{ pnl: 0 }];
     const points = source.length === 1 ? [{ pnl: 0 }, source[0]] : source;
     const rawMin = Math.min(0, ...points.map((point) => point.pnl));
@@ -609,25 +601,45 @@ function PnlChart({ series }) {
     const min = rawMin - padding;
     const max = rawMax + padding;
     const range = Math.max(0.5, max - min);
-    const mapY = (pnl) => rect.height - 22 - ((pnl - min) / range) * (rect.height - 44);
+    const chartLeft = 46;
+    const chartRight = rect.width - 12;
+    const chartTop = 16;
+    const chartBottom = rect.height - 24;
+    const chartWidth = Math.max(1, chartRight - chartLeft);
+    const chartHeight = Math.max(1, chartBottom - chartTop);
+    const mapY = (pnl) => chartBottom - ((pnl - min) / range) * chartHeight;
+    ctx.strokeStyle = "#dfe6da";
+    ctx.fillStyle = "#66736d";
+    ctx.font = "800 10px Aptos, Segoe UI, sans-serif";
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    for (let tick = 0; tick <= 4; tick += 1) {
+      const value = min + (range * tick) / 4;
+      const y = mapY(value);
+      ctx.beginPath();
+      ctx.moveTo(chartLeft, y);
+      ctx.lineTo(chartRight, y);
+      ctx.stroke();
+      ctx.fillText(formatMoney(value).replace(".00", ""), chartLeft - 8, y);
+    }
     const zeroY = mapY(0);
     ctx.strokeStyle = "#c8d4c5";
     ctx.setLineDash([4, 5]);
     ctx.beginPath();
-    ctx.moveTo(0, zeroY);
-    ctx.lineTo(rect.width, zeroY);
+    ctx.moveTo(chartLeft, zeroY);
+    ctx.lineTo(chartRight, zeroY);
     ctx.stroke();
     ctx.setLineDash([]);
     const coords = points.map((point, index) => {
-      const x = points.length === 1 ? rect.width : (index / (points.length - 1)) * rect.width;
+      const x = points.length === 1 ? chartRight : chartLeft + (index / (points.length - 1)) * chartWidth;
       return [x, mapY(point.pnl)];
     });
     ctx.beginPath();
     coords.forEach(([x, y], index) => {
       index === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
     });
-    ctx.lineTo(rect.width, zeroY);
-    ctx.lineTo(0, zeroY);
+    ctx.lineTo(chartRight, zeroY);
+    ctx.lineTo(chartLeft, zeroY);
     ctx.closePath();
     ctx.fillStyle = "rgba(13, 125, 103, 0.12)";
     ctx.fill();
@@ -639,14 +651,28 @@ function PnlChart({ series }) {
     });
     ctx.stroke();
     const [lastX, lastY] = coords[coords.length - 1];
+    ctx.fillStyle = "#fbfcf8";
+    ctx.strokeStyle = "#0d7d67";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(lastX, lastY, 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
     ctx.fillStyle = "#0d7d67";
     ctx.beginPath();
-    ctx.arc(lastX, lastY, 4.5, 0, Math.PI * 2);
+    ctx.arc(lastX, lastY, 3.5, 0, Math.PI * 2);
     ctx.fill();
+    const label = formatMoney(points[points.length - 1]?.pnl || 0);
+    ctx.font = "900 11px Aptos, Segoe UI, sans-serif";
+    ctx.textAlign = "left";
+    ctx.fillStyle = "#12332c";
+    const labelX = Math.min(lastX + 9, rect.width - 72);
+    ctx.fillText(label, labelX, Math.max(17, lastY - 12));
     if (series.length === 0) {
       ctx.fillStyle = "#66736d";
       ctx.font = "700 12px Aptos, Segoe UI, sans-serif";
-      ctx.fillText("Esperando el primer trade", 14, rect.height - 16);
+      ctx.textAlign = "left";
+      ctx.fillText("Esperando el primer trade", chartLeft, rect.height - 13);
     }
   }, [series]);
   return <canvas className="chart" ref={ref} />;
@@ -655,13 +681,13 @@ function PnlChart({ series }) {
 function SideRail({ snapshot, control }) {
   return (
     <aside className="sideRail">
-      <section className="surface">
+      <section className="surface pnlCard">
         <PanelTitle icon={ChartNoAxesCombined} title="P&L" pill={formatMoney(snapshot.metrics.cumulativePnl)} />
         <PnlChart series={snapshot.pnlSeries} />
       </section>
+      <ExchangeCoverage coverage={snapshot.exchangeCoverage} quality={snapshot.venueQuality} control={control} />
       <LatencySloPanel slo={snapshot.latencySlo} />
       <DemoQualityPanel quality={snapshot.demoQuality} mode={snapshot.mode} />
-      <ExchangeCoverage coverage={snapshot.exchangeCoverage} quality={snapshot.venueQuality} control={control} />
       <GlobalMarket globalMarket={snapshot.globalMarket || {}} />
       <section className="surface">
         <PanelTitle icon={DatabaseZap} title="Wallets" pill={formatMoney(snapshot.totals.markToMarket)} />
