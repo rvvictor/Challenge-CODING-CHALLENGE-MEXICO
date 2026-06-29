@@ -1,9 +1,19 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
-import { Activity, ArrowRightLeft, ChartNoAxesCombined, CirclePause, Clock3, DatabaseZap, FileDown, Gauge, Globe2, ListChecks, Network, Power, Radar, RefreshCw, ShieldAlert, Sparkles, Triangle, Zap } from "lucide-react";
+import { Activity, ArrowRightLeft, ChartNoAxesCombined, CirclePause, Clock3, DatabaseZap, FileDown, Gauge, Globe2, ListChecks, Network, Power, Radar, RefreshCw, RotateCcw, ShieldAlert, SlidersHorizontal, Sparkles, Triangle, Zap } from "lucide-react";
 import "./styles/app.css";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "";
+
+// Mutating endpoints accept an optional control token. When the deployment sets
+// CONTROL_TOKEN, store the matching value in localStorage("aurelion_token") and
+// it is attached automatically; the open demo needs nothing.
+function authHeaders() {
+  const headers = { "content-type": "application/json" };
+  const token = (typeof localStorage !== "undefined" && localStorage.getItem("aurelion_token")) || "";
+  if (token) headers["x-aurelion-token"] = token;
+  return headers;
+}
 
 const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
 const compact = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 2 });
@@ -116,15 +126,29 @@ function useAurelion() {
   const control = React.useCallback(async (payload) => {
     const response = await fetch(`${API_BASE}/api/control`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: authHeaders(),
       body: JSON.stringify(payload),
     });
     setSnapshot(await response.json());
   }, []);
 
   const reset = React.useCallback(async () => {
-    const response = await fetch(`${API_BASE}/api/reset`, { method: "POST" });
+    const response = await fetch(`${API_BASE}/api/reset`, { method: "POST", headers: authHeaders() });
     setSnapshot(await response.json());
+  }, []);
+
+  const loadParams = React.useCallback(async () => {
+    const response = await fetch(`${API_BASE}/api/params`);
+    return response.json();
+  }, []);
+
+  const applyParams = React.useCallback(async (payload) => {
+    const response = await fetch(`${API_BASE}/api/params`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify(payload),
+    });
+    return response.json();
   }, []);
 
   const exportSession = React.useCallback(async () => {
@@ -141,7 +165,7 @@ function useAurelion() {
     URL.revokeObjectURL(url);
   }, []);
 
-  return { snapshot, connected, control, reset, exportSession };
+  return { snapshot, connected, control, reset, exportSession, loadParams, applyParams };
 }
 
 function Metric({ icon: Icon, label, value, note, tone = "neutral" }) {
@@ -929,12 +953,157 @@ function InfrastructurePanel({ snapshot }) {
   );
 }
 
-function ResultsWorkbench({ snapshot }) {
+function stepDecimals(step) {
+  if (!step) return 2;
+  const text = String(step);
+  return text.includes(".") ? text.split(".")[1].length : 0;
+}
+
+function formatParamChange(value) {
+  if (typeof value === "boolean") return value ? "on" : "off";
+  if (typeof value === "number") return Number.isInteger(value) ? String(value) : value.toFixed(value < 1 ? 4 : 2);
+  return String(value ?? "—");
+}
+
+function ControlRow({ spec, value, highlight, onScalar, onBool }) {
+  const fieldId = `cr-${spec.key}`;
+  if (spec.kind === "bool") {
+    const on = Boolean(value);
+    return (
+      <div className={`crRow crBoolRow ${highlight ? "crHot" : ""}`}>
+        <label htmlFor={fieldId} title={spec.description}>{spec.label}</label>
+        <button id={fieldId} type="button" className={`crToggle ${on ? "on" : "off"}`} aria-pressed={on} onClick={() => onBool(spec.key, !on)}>
+          {on ? "on" : "off"}
+        </button>
+      </div>
+    );
+  }
+  const decimals = stepDecimals(spec.step);
+  return (
+    <div className={`crRow ${highlight ? "crHot" : ""}`}>
+      <div className="crRowHead">
+        <label htmlFor={fieldId} title={spec.description}>{spec.label}</label>
+        <span className="crValue">{formatNumber(Number(value) || 0, decimals)}{spec.unit ? ` ${spec.unit}` : ""}</span>
+      </div>
+      <input
+        id={fieldId}
+        type="range"
+        min={spec.min ?? 0}
+        max={spec.max ?? 1}
+        step={spec.step || 0.01}
+        value={Number(value) || 0}
+        onChange={(event) => onScalar(spec.key, event.target.value)}
+        aria-label={`${spec.label}${spec.unit ? ` (${spec.unit})` : ""}`}
+      />
+    </div>
+  );
+}
+
+// Live parametrization surface. Reads the parameter registry from /api/params and
+// applies edits (debounced) so judges can retune the bot's behavior in real time.
+function ControlRoom({ loadParams, applyParams }) {
+  const [data, setData] = React.useState(null);
+  const [values, setValues] = React.useState({});
+  const [changed, setChanged] = React.useState(null);
+  const [activePreset, setActivePreset] = React.useState(null);
+  const [busy, setBusy] = React.useState(false);
+  const timer = React.useRef(null);
+
+  React.useEffect(() => {
+    let active = true;
+    loadParams().then((payload) => {
+      if (!active) return;
+      setData(payload);
+      setValues(payload.values || {});
+    }).catch(() => {});
+    return () => {
+      active = false;
+      if (timer.current) clearTimeout(timer.current);
+    };
+  }, [loadParams]);
+
+  const commit = React.useCallback((payload) => {
+    setBusy(true);
+    return applyParams(payload)
+      .then((result) => {
+        if (result?.values) {
+          setValues(result.values);
+          setData((prev) => (prev ? { ...prev, values: result.values } : prev));
+        }
+        setChanged(result?.applied?.changed || null);
+        return result;
+      })
+      .finally(() => setBusy(false));
+  }, [applyParams]);
+
+  const onScalar = (key, raw) => {
+    const value = Number(raw);
+    setValues((prev) => ({ ...prev, [key]: value }));
+    setActivePreset(null);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => commit({ updates: { [key]: value } }), 220);
+  };
+
+  const onBool = (key, value) => {
+    setValues((prev) => ({ ...prev, [key]: value }));
+    setActivePreset(null);
+    commit({ updates: { [key]: value } });
+  };
+
+  if (!data) {
+    return (
+      <section className="surface controlRoom">
+        <PanelTitle icon={SlidersHorizontal} title="Control Room" pill="loading" />
+        <div className="empty">Loading parameters…</div>
+      </section>
+    );
+  }
+
+  const changedKeys = changed ? Object.keys(changed) : [];
+
+  return (
+    <section className="surface controlRoom">
+      <PanelTitle icon={SlidersHorizontal} title="Control Room" pill={`${data.specs.length} live params`} />
+      <div className="crPresets tradeToolbar">
+        <span className="crPresetLabel">Presets</span>
+        {data.presets.map((name) => (
+          <button key={name} type="button" className={activePreset === name ? "active" : ""} onClick={() => { setActivePreset(name); commit({ preset: name }); }}>{name}</button>
+        ))}
+        <button type="button" className="crReset" onClick={() => { setActivePreset(null); commit({ reset: true }); }}><RotateCcw size={13} /> reset</button>
+        {busy && <span className="crBusy">applying…</span>}
+      </div>
+      {changedKeys.length > 0 && (
+        <div className="crChanged">
+          {changedKeys.slice(0, 4).map((key) => (
+            <span key={key}><b>{key}</b> {formatParamChange(changed[key].from)} → {formatParamChange(changed[key].to)}</span>
+          ))}
+        </div>
+      )}
+      <div className="crGroups">
+        {data.groups.map((group) => {
+          const specs = data.specs.filter((spec) => spec.group === group.key);
+          if (!specs.length) return null;
+          return (
+            <div className="crGroup" key={group.key}>
+              <h4>{group.label}</h4>
+              {specs.map((spec) => (
+                <ControlRow key={spec.key} spec={spec} value={values[spec.key]} highlight={changedKeys.includes(spec.key)} onScalar={onScalar} onBool={onBool} />
+              ))}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function ResultsWorkbench({ snapshot, loadParams, applyParams }) {
   const [tab, setTab] = React.useState("opportunities");
   const tabs = [
     ["opportunities", "Opportunities", snapshot.queue?.queued || 0],
     ["trades", "Trades", snapshot.trades?.length || 0],
     ["signals", "Signals", snapshot.opportunityHistory?.length || snapshot.opportunities?.length || 0],
+    ["control", "Control Room", "live"],
     ["infra", "Infra", snapshot.streams?.streams?.length || snapshot.books?.length || 0],
   ];
   return (
@@ -949,13 +1118,14 @@ function ResultsWorkbench({ snapshot }) {
       {tab === "opportunities" && <OpportunityTable opportunities={snapshot.queuedOpportunities} queue={snapshot.queue} now={snapshot.now} />}
       {tab === "trades" && <Trades trades={snapshot.trades} metrics={snapshot.metrics} />}
       {tab === "signals" && <OpportunityHistory opportunities={snapshot.opportunityHistory || snapshot.opportunities} metrics={snapshot.metrics} now={snapshot.now} />}
+      {tab === "control" && <ControlRoom loadParams={loadParams} applyParams={applyParams} />}
       {tab === "infra" && <InfrastructurePanel snapshot={snapshot} />}
     </section>
   );
 }
 
 function App() {
-  const { snapshot, connected, control, reset, exportSession } = useAurelion();
+  const { snapshot, connected, control, reset, exportSession, loadParams, applyParams } = useAurelion();
   if (!snapshot) {
     return <main className="loading"><div className="sigil"><Sparkles size={24} /></div><span>Starting Aurelion</span></main>;
   }
@@ -971,7 +1141,7 @@ function App() {
               <EdgeExplainability opportunities={snapshot.queuedOpportunities} />
               <RealityCheck opportunities={snapshot.queuedOpportunities} />
             </div>
-            <ResultsWorkbench snapshot={snapshot} />
+            <ResultsWorkbench snapshot={snapshot} loadParams={loadParams} applyParams={applyParams} />
           </div>
           <SideRail snapshot={snapshot} control={control} />
         </section>

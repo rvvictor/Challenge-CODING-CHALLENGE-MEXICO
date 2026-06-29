@@ -565,6 +565,32 @@ class ParameterRegistryTests(unittest.TestCase):
         self.assertTrue(reset.get("reset"))
         self.assertEqual(service.settings.min_net_bps, params["values"]["min_net_bps"])
 
+    def test_api_params_endpoints(self):
+        try:
+            import fastapi  # noqa: F401
+            from fastapi.testclient import TestClient
+        except Exception:
+            self.skipTest("FastAPI test client is not installed in this local Python environment")
+        from backend.app.main import app
+
+        client = TestClient(app)
+        body = client.get("/api/params").json()
+        self.assertIn("specs", body)
+        self.assertIn("values", body)
+        self.assertTrue(body["presets"])
+
+        posted = client.post("/api/params", json={"updates": {"min_net_bps": 2.5, "bogus": 1}})
+        self.assertEqual(posted.status_code, 200)
+        result = posted.json()
+        self.assertEqual(result["values"]["min_net_bps"], 2.5)
+        self.assertTrue(any(item["key"] == "bogus" for item in result["applied"]["rejected"]))
+
+        preset = client.post("/api/params", json={"preset": "conservative"})
+        self.assertEqual(preset.json()["applied"].get("preset"), "conservative")
+
+        # restore baseline so the shared global service does not leak into other tests
+        client.post("/api/params", json={"reset": True})
+
 
 if __name__ == "__main__":
     unittest.main()
