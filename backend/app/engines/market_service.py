@@ -547,6 +547,14 @@ class MarketService:
                 "restFallbackActive": any(book["source"] == "rest" for book in books),
                 "latencyMeaning": "Book age is the freshness of the latest order book. Update latency is how long the provider waited for the last exchange update.",
             },
+            "models": {
+                "cycleAlgo": self.settings.cycle_algo,
+                "slippageModel": self.settings.slippage_model,
+                "marketImpactK": self.settings.market_impact_k,
+                "sizingMode": self.settings.sizing_mode,
+                "kellyFraction": self.settings.kelly_fraction,
+                "volatilityModel": self.settings.volatility_model,
+            },
             "metrics": metrics,
         }
 

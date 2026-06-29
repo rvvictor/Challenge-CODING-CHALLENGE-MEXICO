@@ -592,5 +592,79 @@ class ParameterRegistryTests(unittest.TestCase):
         client.post("/api/params", json={"reset": True})
 
 
+class QuantModelTests(unittest.TestCase):
+    def _triangular_books(self, eth_usdt_bid):
+        settings = Settings(cycle_algo="bellman_ford")
+        engine = TriangularArbitrageEngine(settings, WalletLedger(settings))
+        okx = settings.exchange_by_id("okx")
+
+        def mk(symbol, ask_price, bid_price):
+            return book(okx, symbol, [(ask_price, 50)], [(bid_price, 50)])
+
+        books = {
+            b.key: b
+            for b in [
+                mk("BTC/USDT", 100, 99.9),
+                mk("ETH/BTC", 0.05, 0.0499),
+                mk("ETH/USDT", eth_usdt_bid + 0.01, eth_usdt_bid),
+            ]
+        }
+        return engine, books
+
+    def test_bellman_ford_finds_negative_cycle(self):
+        # USDT->BTC->ETH->USDT product = (1/100) * (1/0.05) * 6 = 1.2 (profitable)
+        engine, books = self._triangular_books(eth_usdt_bid=6.0)
+        cycles = engine.find_cycles("okx", books)
+        self.assertTrue(cycles, "Bellman-Ford should detect the profitable cycle")
+        first = cycles[0]
+        self.assertTrue(all("to" in edge and "side" in edge for edge in first))
+        self.assertIn(first[0]["from"], {"USDT", "USD"})
+
+    def test_bellman_ford_rejects_non_arbitrage(self):
+        # ETH/USDT == fair value (ETH/BTC * BTC/USDT = 0.05 * 100 = 5): neither
+        # direction is profitable after fees, so there is no negative cycle.
+        engine, books = self._triangular_books(eth_usdt_bid=5.0)
+        self.assertEqual(engine.find_cycles("okx", books), [])
+
+    def test_market_impact_is_monotonic_and_modelled(self):
+        from backend.app.engines.market_impact import impact_bps
+
+        self.assertEqual(impact_bps("book_walk", 1.0, 10.0, 8.0), 0.0)
+        small = impact_bps("sqrt_impact", 0.1, 10.0, 8.0)
+        large = impact_bps("sqrt_impact", 1.0, 10.0, 8.0)
+        self.assertGreater(small, 0.0)
+        self.assertGreater(large, small)
+        self.assertGreaterEqual(impact_bps("almgren_lite", 1.0, 10.0, 8.0), large)
+
+    def test_kelly_multiplier_bounds(self):
+        from backend.app.engines.sizing import kelly_multiplier
+
+        self.assertEqual(kelly_multiplier(0.9, 5.0, 0.0), 0.0)
+        strong = kelly_multiplier(0.9, 5.0, 1.0)
+        weak = kelly_multiplier(0.5, 1.0, 1.0)
+        self.assertGreaterEqual(strong, weak)
+        self.assertGreaterEqual(strong, 0.0)
+        self.assertLessEqual(strong, 1.0)
+        self.assertEqual(kelly_multiplier(0.1, 0.001, 1.0), 0.0)
+
+    def test_volatility_models_differ_and_flatten(self):
+        window = [{"time": i, "price": p} for i, p in enumerate([100, 101, 102, 101.5, 103])]
+
+        range_risk = RiskManager(Settings(volatility_model="range"))
+        range_risk.price_window = window
+        range_pct = range_risk._window_volatility_pct(103, 100)
+
+        sd_risk = RiskManager(Settings(volatility_model="stddev"))
+        sd_risk.price_window = window
+        sd_pct = sd_risk._window_volatility_pct(103, 100)
+
+        self.assertAlmostEqual(range_pct, 3.0)
+        self.assertGreater(sd_pct, 0.0)
+        self.assertNotAlmostEqual(range_pct, sd_pct)
+
+        sd_risk.price_window = [{"time": i, "price": 100} for i in range(5)]
+        self.assertEqual(sd_risk._window_volatility_pct(100, 100), 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()

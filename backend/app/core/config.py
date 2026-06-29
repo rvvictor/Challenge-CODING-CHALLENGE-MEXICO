@@ -138,6 +138,13 @@ class Settings:
     volatility_ev_risk_bps: float = number_env("VOLATILITY_EV_RISK_BPS", 0.08)
     inventory_ev_penalty_weight: float = number_env("INVENTORY_EV_PENALTY_WEIGHT", 0.35)
     min_confidence: float = number_env("MIN_CONFIDENCE", 0.42)
+    # Strategy / model selection (defaults preserve the original behavior).
+    cycle_algo: str = os.getenv("CYCLE_ALGO", "dfs")
+    slippage_model: str = os.getenv("SLIPPAGE_MODEL", "book_walk")
+    market_impact_k: float = number_env("MARKET_IMPACT_K", 8.0)
+    sizing_mode: str = os.getenv("SIZING_MODE", "fixed")
+    kelly_fraction: float = number_env("KELLY_FRACTION", 0.5)
+    volatility_model: str = os.getenv("VOLATILITY_MODEL", "range")
     triangular_enabled: bool = bool_env("TRIANGULAR_ENABLED", True)
     triangular_quote_size: float = number_env("TRIANGULAR_QUOTE_SIZE", 650)
     triangular_min_net_profit_usd: float = number_env("TRIANGULAR_MIN_NET_PROFIT_USD", 0.18)
@@ -195,6 +202,7 @@ class Settings:
 # ---------------------------------------------------------------------------
 
 PARAMETER_GROUPS: tuple[tuple[str, str], ...] = (
+    ("models", "Strategy & model selection"),
     ("execution", "Execution & gates"),
     ("costs", "Costs & rebalance"),
     ("ev", "Expected-value & latency model"),
@@ -211,14 +219,22 @@ class ParameterSpec:
     group: str
     label: str
     description: str
-    kind: str  # "float" | "int" | "bool"
+    kind: str  # "float" | "int" | "bool" | "choice"
     minimum: float | None = None
     maximum: float | None = None
     step: float | None = None
     unit: str = ""
+    options: tuple[str, ...] = ()
 
 
 PARAMETER_REGISTRY: tuple[ParameterSpec, ...] = (
+    # Strategy / model selection
+    ParameterSpec("cycle_algo", "models", "Cycle detection", "DFS (fast, bounded) or Bellman-Ford negative-log-cycle detection (finds all profitable loops).", "choice", options=("dfs", "bellman_ford")),
+    ParameterSpec("slippage_model", "models", "Slippage model", "book_walk (level-by-level), sqrt_impact (square-root law) or almgren_lite (temporary+permanent impact).", "choice", options=("book_walk", "sqrt_impact", "almgren_lite")),
+    ParameterSpec("market_impact_k", "models", "Impact coefficient k", "Strength of the market-impact term for sqrt_impact / almgren_lite.", "float", 0.0, 50.0, 0.5, "bps"),
+    ParameterSpec("sizing_mode", "models", "Position sizing", "fixed (use max trade size) or kelly (fractional-Kelly sizing by edge quality).", "choice", options=("fixed", "kelly")),
+    ParameterSpec("kelly_fraction", "models", "Kelly fraction", "Fraction of full Kelly used when sizing is set to kelly.", "float", 0.0, 1.0, 0.05, ""),
+    ParameterSpec("volatility_model", "models", "Volatility model", "range (oldest->now %), ewma (exponentially weighted) or stddev (rolling sigma of returns).", "choice", options=("range", "ewma", "stddev")),
     # Execution & gates
     ParameterSpec("min_trade_btc", "execution", "Min trade size", "Smallest executable size; below this an opportunity is blocked.", "float", 0.0005, 0.05, 0.0005, "BTC"),
     ParameterSpec("max_trade_btc", "execution", "Max trade size", "Largest size simulated per trade (position cap).", "float", 0.001, 0.1, 0.001, "BTC"),
@@ -308,6 +324,11 @@ def coerce_parameter(spec: ParameterSpec, value) -> float | int | bool:
         if isinstance(value, str):
             return value.strip().lower() in {"1", "true", "yes", "on"}
         return bool(value)
+    if spec.kind == "choice":
+        text = str(value)
+        if spec.options and text not in spec.options:
+            raise ValueError("invalid choice")
+        return text
     number = float(value)
     if spec.kind == "int":
         number = int(round(number))
@@ -357,6 +378,7 @@ def parameter_specs_payload() -> list[dict]:
             "max": spec.maximum,
             "step": spec.step,
             "unit": spec.unit,
+            "options": list(spec.options),
         }
         for spec in PARAMETER_REGISTRY
     ]

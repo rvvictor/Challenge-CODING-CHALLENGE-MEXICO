@@ -7,7 +7,9 @@ from backend.app.core.config import Settings
 from backend.app.core.models import Opportunity, OrderBook
 from backend.app.engines.fills import best, depth_qty, estimate_fill
 from backend.app.engines.ledger import WalletLedger
+from backend.app.engines.market_impact import impact_bps
 from backend.app.engines.scoring import expected_value_score
+from backend.app.engines.sizing import kelly_multiplier
 
 
 def now_ms() -> int:
@@ -36,6 +38,26 @@ class CrossExchangeArbitrageEngine:
                     opportunities.append(opportunity.to_dict())
         return sorted(opportunities, key=lambda item: item["score"], reverse=True)
 
+    def target_size_btc(self, ask, bid, buy_book: OrderBook, sell_book: OrderBook, buy_exchange, sell_exchange) -> float:
+        """Nominal trade size. `fixed` uses MAX_TRADE_BTC; `kelly` scales it by a
+        fractional-Kelly multiplier derived from a quick top-of-book edge estimate,
+        the venue confidences (win probability) and the adverse-move ceiling
+        (downside). Sizing toward edge quality, capped at MAX_TRADE_BTC."""
+        max_size = self.settings.max_trade_btc
+        if self.settings.sizing_mode != "kelly":
+            return max_size
+        gross_bps = (bid.price - ask.price) / ask.price * 10000 if ask.price else 0
+        cost_bps = (
+            buy_exchange.taker_fee_bps + sell_exchange.taker_fee_bps
+            + buy_exchange.slippage_bps + sell_exchange.slippage_bps
+            + self.settings.latency_risk_floor_bps
+        )
+        edge_bps = gross_bps - cost_bps
+        win_prob = min(buy_book.confidence, sell_book.confidence)
+        payoff = edge_bps / max(self.settings.execution_adverse_max_bps, 0.1) if edge_bps > 0 else 0.0
+        multiplier = kelly_multiplier(win_prob, payoff, self.settings.kelly_fraction)
+        return max(self.settings.min_trade_btc, max_size * multiplier)
+
     def evaluate_pair(self, buy_book: OrderBook, sell_book: OrderBook, current: int) -> Opportunity | None:
         ask = best(buy_book.asks, "ask")
         bid = best(sell_book.bids, "bid")
@@ -48,7 +70,8 @@ class CrossExchangeArbitrageEngine:
         wallet_qty = float(capacity["qty"])
         buy_depth = depth_qty(buy_book.asks)
         sell_depth = depth_qty(sell_book.bids)
-        target_qty = min(self.settings.max_trade_btc, buy_depth, sell_depth, wallet_qty)
+        target_size = self.target_size_btc(ask, bid, buy_book, sell_book, buy_exchange, sell_exchange)
+        target_qty = min(target_size, buy_depth, sell_depth, wallet_qty)
 
         if target_qty < self.settings.min_trade_btc:
             gross_bps = ((bid.price - ask.price) / ask.price) * 10000
@@ -74,8 +97,8 @@ class CrossExchangeArbitrageEngine:
                     "buyExchange": buy_book.exchange_name,
                     "sellExchange": sell_book.exchange_name,
                     "qtyBtc": target_qty,
-                    "targetQtyBtc": self.settings.max_trade_btc,
-                    "filledRatio": rounded(target_qty / self.settings.max_trade_btc, 4) if self.settings.max_trade_btc else 0,
+                    "targetQtyBtc": rounded(target_size, 8),
+                    "filledRatio": rounded(target_qty / target_size, 4) if target_size else 0,
                     "buyPrice": ask.price,
                     "sellPrice": bid.price,
                     "buyDepthBtc": rounded(buy_depth, 8),
@@ -99,6 +122,10 @@ class CrossExchangeArbitrageEngine:
         sell_fee = sell_fill.quote * sell_exchange.taker_fee_bps / 10000
         slippage_buy = buy_fill.quote * buy_exchange.slippage_bps / 10000
         slippage_sell = sell_fill.quote * sell_exchange.slippage_bps / 10000
+        impact_model = self.settings.slippage_model
+        impact_bps_buy = impact_bps(impact_model, qty, buy_depth, self.settings.market_impact_k)
+        impact_bps_sell = impact_bps(impact_model, qty, sell_depth, self.settings.market_impact_k)
+        market_impact_cost = (buy_fill.quote * impact_bps_buy + sell_fill.quote * impact_bps_sell) / 10000
         # Average per-leg latency in seconds. Kept numerically identical to the
         # previous `/ 2000` form ((a+b)/2/1000 == (a+b)/2000) but written
         # explicitly so the averaging is obvious and the unnamed constant is gone.
@@ -107,7 +134,7 @@ class CrossExchangeArbitrageEngine:
         latency_risk_cost = buy_fill.quote * latency_risk_bps / 10000
         rebalance_cost = (buy_exchange.withdrawal_fee_btc * sell_fill.avg_price + sell_exchange.withdrawal_fee_quote) * self.settings.withdrawal_fee_impact
         gross_profit = sell_fill.quote - buy_fill.quote
-        total_costs = buy_fee + sell_fee + slippage_buy + slippage_sell + latency_risk_cost + rebalance_cost
+        total_costs = buy_fee + sell_fee + slippage_buy + slippage_sell + market_impact_cost + latency_risk_cost + rebalance_cost
         net_profit = gross_profit - total_costs
         net_bps = net_profit / buy_fill.quote * 10000 if buy_fill.quote else 0
         gross_bps = gross_profit / buy_fill.quote * 10000 if buy_fill.quote else 0
@@ -124,7 +151,7 @@ class CrossExchangeArbitrageEngine:
             settings=self.settings,
         )
         profitable = net_profit >= self.settings.min_net_profit_usd and net_bps >= self.settings.min_net_bps and confidence >= self.settings.min_confidence
-        partial = qty < self.settings.max_trade_btc or buy_fill.partial or sell_fill.partial
+        partial = qty < target_size or buy_fill.partial or sell_fill.partial
         latency_penalty = 1 + (buy_book.latency_ms + sell_book.latency_ms) / 800
         ev_score = ev["evBps"] * math.sqrt(max(qty, 0.000001)) / latency_penalty
         score = ev_score if profitable else ev["evBps"] * confidence
@@ -150,6 +177,8 @@ class CrossExchangeArbitrageEngine:
                 "sellFee": rounded(sell_fee, 4),
                 "slippageCostBuy": rounded(slippage_buy, 4),
                 "slippageCostSell": rounded(slippage_sell, 4),
+                "marketImpactCost": rounded(market_impact_cost, 4),
+                "marketImpactBps": rounded(impact_bps_buy + impact_bps_sell, 3),
                 "latencyRiskCost": rounded(latency_risk_cost, 4),
                 "latencyRiskBps": rounded(latency_risk_bps, 3),
                 "volatilityRiskCost": ev["volatilityRiskCost"],
@@ -164,8 +193,10 @@ class CrossExchangeArbitrageEngine:
                 "buyExchange": buy_book.exchange_name,
                 "sellExchange": sell_book.exchange_name,
                 "qtyBtc": rounded(qty, 8),
-                "targetQtyBtc": self.settings.max_trade_btc,
-                "filledRatio": rounded(qty / self.settings.max_trade_btc, 4) if self.settings.max_trade_btc else 1,
+                "targetQtyBtc": rounded(target_size, 8),
+                "filledRatio": rounded(qty / target_size, 4) if target_size else 1,
+                "sizingMode": self.settings.sizing_mode,
+                "slippageModel": impact_model,
                 "buyPrice": rounded(buy_fill.avg_price, 2),
                 "sellPrice": rounded(sell_fill.avg_price, 2),
                 "bestAsk": ask.price,

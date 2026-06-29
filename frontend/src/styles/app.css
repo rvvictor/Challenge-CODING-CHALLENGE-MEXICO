@@ -1401,9 +1401,34 @@ small,
   outline-offset: 2px;
 }
 
-.crBoolRow {
+.crBoolRow,
+.crChoiceRow {
   grid-template-columns: 1fr auto;
   align-items: center;
+}
+
+.crChoices {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.crChoices button {
+  min-height: 26px;
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11.5px;
+  font-weight: 850;
+}
+
+.crChoices button.active {
+  border-color: rgba(96, 87, 186, 0.4);
+  background: rgba(96, 87, 186, 0.12);
+  color: var(--violet);
 }
 
 .crToggle {

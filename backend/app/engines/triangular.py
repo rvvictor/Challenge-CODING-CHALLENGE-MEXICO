@@ -5,7 +5,7 @@ import time
 
 from backend.app.core.config import Settings
 from backend.app.core.models import Opportunity, OrderBook
-from backend.app.engines.fills import estimate_buy_with_quote, estimate_fill
+from backend.app.engines.fills import best, estimate_buy_with_quote, estimate_fill
 from backend.app.engines.ledger import WalletLedger
 from backend.app.engines.scoring import expected_value_score
 
@@ -49,6 +49,108 @@ class TriangularArbitrageEngine:
         return edges
 
     def find_cycles(self, exchange_id: str, books: dict[str, OrderBook]) -> list[list[dict]]:
+        # Discovery strategy is selectable: bounded DFS (default) or Bellman-Ford
+        # negative-log-cycle detection. Both return cycles in the same edge format,
+        # so evaluate_cycle (full fill-based P&L) is unchanged either way.
+        if self.settings.cycle_algo == "bellman_ford":
+            return self.find_cycles_bellman_ford(exchange_id, books)
+        return self.find_cycles_dfs(exchange_id, books)
+
+    def _rate_graph(self, exchange_id: str, books: dict[str, OrderBook]):
+        """Directed graph of assets with edge weight = -log(effective rate after
+        fees), using best bid/ask. A negative-sum cycle is a profitable loop."""
+        exchange = self.settings.exchange_by_id(exchange_id)
+        cost_rate = (exchange.taker_fee_bps + exchange.slippage_bps) / 10000
+        nodes: set[str] = set()
+        edges: list[tuple[str, str, float, dict]] = []
+        for key, book in books.items():
+            if not key.startswith(f"{exchange_id}:") or "/" not in book.symbol:
+                continue
+            base, quote = book.symbol.split("/", 1)
+            ask = best(book.asks, "ask") if book.asks else None
+            bid = best(book.bids, "bid") if book.bids else None
+            if ask and ask.price > 0:
+                rate = (1.0 / ask.price) * (1 - cost_rate)
+                if rate > 0:
+                    edges.append((quote, base, -math.log(rate), {"from": quote, "to": base, "symbol": book.symbol, "side": "buy"}))
+                    nodes.update((quote, base))
+            if bid and bid.price > 0:
+                rate = bid.price * (1 - cost_rate)
+                if rate > 0:
+                    edges.append((base, quote, -math.log(rate), {"from": base, "to": quote, "symbol": book.symbol, "side": "sell"}))
+                    nodes.update((base, quote))
+        return nodes, edges
+
+    def _detect_negative_cycle(self, nodes: set[str], edges: list[tuple[str, str, float, dict]]) -> list[dict] | None:
+        if not nodes:
+            return None
+        dist = {node: 0.0 for node in nodes}
+        pred: dict[str, tuple[str, dict] | None] = {node: None for node in nodes}
+        updated = None
+        count = len(nodes)
+        for _ in range(count):
+            updated = None
+            for u, v, weight, obj in edges:
+                if dist[u] + weight < dist[v] - 1e-12:
+                    dist[v] = dist[u] + weight
+                    pred[v] = (u, obj)
+                    updated = v
+            if updated is None:
+                return None
+        node = updated
+        for _ in range(count):
+            if pred[node] is None:
+                return None
+            node = pred[node][0]
+        cycle: list[dict] = []
+        cursor = node
+        while True:
+            entry = pred[cursor]
+            if entry is None:
+                return None
+            prev, obj = entry
+            cycle.append(obj)
+            cursor = prev
+            if cursor == node:
+                break
+            if len(cycle) > count + 1:
+                return None
+        cycle.reverse()
+        return cycle
+
+    def _rotate_to_anchor(self, cycle: list[dict]) -> list[dict] | None:
+        froms = [edge["from"] for edge in cycle]
+        anchor = next((asset for asset in ("USDT", "USD") if asset in froms), None)
+        if anchor is None:
+            return None
+        index = froms.index(anchor)
+        return cycle[index:] + cycle[:index]
+
+    def find_cycles_bellman_ford(self, exchange_id: str, books: dict[str, OrderBook]) -> list[list[dict]]:
+        nodes, edges = self._rate_graph(exchange_id, books)
+        if not nodes:
+            return []
+        results: list[list[dict]] = []
+        seen: set[str] = set()
+        working = list(edges)
+        limit = self.settings.triangular_max_cycles_per_exchange
+        for _ in range(limit * 3):
+            if len(results) >= limit or not working:
+                break
+            cycle = self._detect_negative_cycle(nodes, working)
+            if not cycle:
+                break
+            rotated = self._rotate_to_anchor(cycle)
+            if rotated and 3 <= len(rotated) <= self.settings.triangular_max_legs:
+                cycle_id = "->".join([rotated[0]["from"], *[edge["to"] for edge in rotated]])
+                if cycle_id not in seen:
+                    seen.add(cycle_id)
+                    results.append(rotated)
+            drop = (cycle[0]["symbol"], cycle[0]["side"])
+            working = [item for item in working if (item[3]["symbol"], item[3]["side"]) != drop]
+        return results
+
+    def find_cycles_dfs(self, exchange_id: str, books: dict[str, OrderBook]) -> list[list[dict]]:
         edges = self.build_edges(exchange_id, books)
         start_assets = [asset for asset in ("USDT", "USD") if asset in edges]
         cycles: list[list[dict]] = []

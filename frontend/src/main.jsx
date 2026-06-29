@@ -965,8 +965,20 @@ function formatParamChange(value) {
   return String(value ?? "—");
 }
 
-function ControlRow({ spec, value, highlight, onScalar, onBool }) {
+function ControlRow({ spec, value, highlight, onScalar, onBool, onChoice }) {
   const fieldId = `cr-${spec.key}`;
+  if (spec.kind === "choice") {
+    return (
+      <div className={`crRow crChoiceRow ${highlight ? "crHot" : ""}`}>
+        <label title={spec.description}>{spec.label}</label>
+        <div className="crChoices" role="group" aria-label={spec.label}>
+          {(spec.options || []).map((opt) => (
+            <button key={opt} type="button" className={String(value) === opt ? "active" : ""} aria-pressed={String(value) === opt} onClick={() => onChoice(spec.key, opt)}>{opt}</button>
+          ))}
+        </div>
+      </div>
+    );
+  }
   if (spec.kind === "bool") {
     const on = Boolean(value);
     return (
@@ -1050,6 +1062,12 @@ function ControlRoom({ loadParams, applyParams }) {
     commit({ updates: { [key]: value } });
   };
 
+  const onChoice = (key, value) => {
+    setValues((prev) => ({ ...prev, [key]: value }));
+    setActivePreset(null);
+    commit({ updates: { [key]: value } });
+  };
+
   if (!data) {
     return (
       <section className="surface controlRoom">
@@ -1087,7 +1105,7 @@ function ControlRoom({ loadParams, applyParams }) {
             <div className="crGroup" key={group.key}>
               <h4>{group.label}</h4>
               {specs.map((spec) => (
-                <ControlRow key={spec.key} spec={spec} value={values[spec.key]} highlight={changedKeys.includes(spec.key)} onScalar={onScalar} onBool={onBool} />
+                <ControlRow key={spec.key} spec={spec} value={values[spec.key]} highlight={changedKeys.includes(spec.key)} onScalar={onScalar} onBool={onBool} onChoice={onChoice} />
               ))}
             </div>
           );
