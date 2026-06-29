@@ -99,7 +99,10 @@ class CrossExchangeArbitrageEngine:
         sell_fee = sell_fill.quote * sell_exchange.taker_fee_bps / 10000
         slippage_buy = buy_fill.quote * buy_exchange.slippage_bps / 10000
         slippage_sell = sell_fill.quote * sell_exchange.slippage_bps / 10000
-        latency_seconds = (buy_book.latency_ms + sell_book.latency_ms) / 2000
+        # Average per-leg latency in seconds. Kept numerically identical to the
+        # previous `/ 2000` form ((a+b)/2/1000 == (a+b)/2000) but written
+        # explicitly so the averaging is obvious and the unnamed constant is gone.
+        latency_seconds = (buy_book.latency_ms + sell_book.latency_ms) / 2 / 1000.0
         latency_risk_bps = max(self.settings.latency_risk_floor_bps, latency_seconds * self.settings.latency_bps_per_second)
         latency_risk_cost = buy_fill.quote * latency_risk_bps / 10000
         rebalance_cost = (buy_exchange.withdrawal_fee_btc * sell_fill.avg_price + sell_exchange.withdrawal_fee_quote) * self.settings.withdrawal_fee_impact

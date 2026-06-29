@@ -495,5 +495,76 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(export["edgeLedger"][0]["type"], "opportunity")
 
 
+class ParameterRegistryTests(unittest.TestCase):
+    def test_registry_values_match_settings_fields(self):
+        from backend.app.core.config import PARAMETER_REGISTRY, parameter_values
+
+        settings = Settings()
+        values = parameter_values(settings)
+        self.assertEqual(len(values), len(PARAMETER_REGISTRY))
+        for spec in PARAMETER_REGISTRY:
+            self.assertTrue(hasattr(settings, spec.key), spec.key)
+            self.assertIn(spec.key, values)
+
+    def test_apply_parameters_clamps_coerces_and_rejects(self):
+        from backend.app.core.config import apply_parameter_updates
+
+        settings = Settings()
+        result = apply_parameter_updates(settings, {
+            "min_net_bps": 3.5,
+            "max_trade_btc": 999,            # above max -> clamped to 0.1
+            "max_executions_per_tick": 2.9,  # rounds to int 3
+            "triangular_enabled": "false",   # bool coercion
+            "not_a_param": 1,                # rejected (unknown)
+        })
+        self.assertEqual(settings.min_net_bps, 3.5)
+        self.assertEqual(settings.max_trade_btc, 0.1)
+        self.assertEqual(settings.max_executions_per_tick, 3)
+        self.assertFalse(settings.triangular_enabled)
+        self.assertIn("min_net_bps", result["changed"])
+        self.assertEqual([item["key"] for item in result["rejected"]], ["not_a_param"])
+
+    def test_live_parameter_change_flips_execution_gate(self):
+        from backend.app.core.config import apply_parameter_updates
+        from backend.app.engines.arbitrage import CrossExchangeArbitrageEngine
+
+        settings = Settings(market_mode="demo")
+        ledger = WalletLedger(settings)
+        engine = CrossExchangeArbitrageEngine(settings, ledger)
+        okx = settings.exchange_by_id("okx")
+        kraken = settings.exchange_by_id("kraken")
+        books = {
+            "okx": book(okx, "BTC/USDT", [(70000, 1)], [(69990, 1)]),
+            "kraken": book(kraken, "BTC/USDT", [(71010, 1)], [(71000, 1)]),
+        }
+        profitable = [o for o in engine.scan(books) if o["status"] == "profitable"]
+        self.assertTrue(profitable, "expected a profitable opportunity at default gates")
+        # Same shared Settings object: raising the profit gate live must reject it
+        # on the next scan, with no engine rebuild.
+        apply_parameter_updates(settings, {"min_net_profit_usd": 20})
+        rescan = [o for o in engine.scan(books) if o["status"] == "profitable"]
+        self.assertFalse(rescan, "raising min_net_profit_usd live should reject the opportunity")
+
+    def test_market_service_parameters_preset_and_reset(self):
+        from backend.app.engines.market_service import MarketService
+
+        service = MarketService(Settings(market_mode="demo"))
+        params = service.parameters()
+        self.assertIn("specs", params)
+        self.assertIn("values", params)
+        self.assertTrue(any(spec["key"] == "min_net_bps" for spec in params["specs"]))
+
+        applied = service.apply_preset("aggressive")
+        self.assertEqual(applied.get("preset"), "aggressive")
+        self.assertEqual(service.settings.min_net_bps, 0.4)
+
+        unknown = service.apply_preset("does-not-exist")
+        self.assertTrue(unknown["rejected"])
+
+        reset = service.reset_parameters()
+        self.assertTrue(reset.get("reset"))
+        self.assertEqual(service.settings.min_net_bps, params["values"]["min_net_bps"])
+
+
 if __name__ == "__main__":
     unittest.main()

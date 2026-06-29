@@ -5,7 +5,16 @@ import json
 import time
 from collections.abc import AsyncIterator
 
-from backend.app.core.config import Settings, select_exchanges, settings
+from backend.app.core.config import (
+    PARAMETER_GROUPS,
+    PARAMETER_PRESETS,
+    Settings,
+    apply_parameter_updates,
+    parameter_specs_payload,
+    parameter_values,
+    select_exchanges,
+    settings,
+)
 from backend.app.core.models import OrderBook
 from backend.app.engines.arbitrage import CrossExchangeArbitrageEngine
 from backend.app.engines.edge_analysis import (
@@ -69,6 +78,9 @@ class MarketService:
         self.degraded_demo = False
         self.scan_tick = 0
         self.recorded_signal_times: dict[str, int] = {}
+        # Baseline snapshot of every tunable parameter, captured at startup so the
+        # Control Room "reset" returns to the configured (env-derived) defaults.
+        self.default_parameters = parameter_values(cfg)
 
     async def start(self) -> None:
         await self.redis.start()
@@ -167,6 +179,43 @@ class MarketService:
 
     def set_auto_execution(self, enabled: bool) -> None:
         self.risk.set_auto_execution(enabled)
+
+    # ---- Runtime parameter control (Control Room) ------------------------------
+    def parameters(self) -> dict:
+        return {
+            "groups": [{"key": key, "label": label} for key, label in PARAMETER_GROUPS],
+            "specs": parameter_specs_payload(),
+            "values": parameter_values(self.settings),
+            "defaults": self.default_parameters,
+            "presets": list(PARAMETER_PRESETS.keys()),
+        }
+
+    def apply_parameters(self, updates: dict) -> dict:
+        result = apply_parameter_updates(self.settings, updates)
+        self._on_parameters_changed(result)
+        return result
+
+    def apply_preset(self, name: str) -> dict:
+        key = (name or "").strip().lower()
+        preset = PARAMETER_PRESETS.get(key)
+        if not preset:
+            return {"applied": {}, "changed": {}, "rejected": [{"key": name, "reason": "unknown preset"}]}
+        result = apply_parameter_updates(self.settings, dict(preset))
+        result["preset"] = key
+        self._on_parameters_changed(result)
+        return result
+
+    def reset_parameters(self) -> dict:
+        result = apply_parameter_updates(self.settings, dict(self.default_parameters))
+        result["reset"] = True
+        self._on_parameters_changed(result)
+        return result
+
+    def _on_parameters_changed(self, result: dict) -> None:
+        # Engines read Settings live each (synchronous) tick, so live edits need no
+        # rebuild. Record meaningful changes to the edge ledger for auditability.
+        if result.get("changed"):
+            self.edge_ledger.append("parameter-change", {"changed": result["changed"]})
 
     def reset(self) -> None:
         self.store.reset()

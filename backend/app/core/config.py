@@ -93,7 +93,13 @@ def profile_exchanges(profile_name: str, active_exchanges: str) -> tuple[str, in
     return selected, PROFILE_LIMITS.get(profile_key, 5)
 
 
-@dataclass(frozen=True)
+# NOTE: Settings is intentionally a *mutable* dataclass. Every engine shares one
+# Settings instance and reads its scalar attributes live during each (synchronous)
+# tick, so a value changed between ticks via the parameter registry below takes
+# effect on the next tick with no engine rebuild. This replaces the previous
+# `frozen=True` + `object.__setattr__` hack, which violated its own immutability
+# contract. Exchange selection still flows through MarketService.set_active_exchanges.
+@dataclass
 class Settings:
     app_name: str = "Aurelion"
     tagline: str = "Bitcoin Arbitrage Intelligence"
@@ -150,6 +156,8 @@ class Settings:
     global_market_interval_ms: int = int_env("GLOBAL_MARKET_INTERVAL_MS", 60000)
     active_exchanges: str = os.getenv("ACTIVE_EXCHANGES", "")
     max_active_exchanges: int = int_env("MAX_ACTIVE_EXCHANGES", 0)
+    control_token: str = os.getenv("CONTROL_TOKEN", "")
+    allowed_origins: str = os.getenv("ALLOWED_ORIGINS", "*")
     redis_url: str = os.getenv("REDIS_URL", "")
     redis_enabled: bool = bool_env("REDIS_ENABLED", bool(os.getenv("REDIS_URL")))
     redis_namespace: str = os.getenv("REDIS_NAMESPACE", "aurelion")
@@ -174,6 +182,184 @@ class Settings:
             if exchange.id == exchange_id:
                 return exchange
         raise KeyError(exchange_id)
+
+
+# ---------------------------------------------------------------------------
+# Runtime parameter registry
+#
+# These describe the scalar Settings fields that are safe to tune live from the
+# dashboard "Control Room". Each spec carries UI metadata (label, range, step,
+# unit) plus the group it belongs to. Provider-construction-only fields
+# (order_book_limit, ws_*, starting_*, etc.) are deliberately excluded because
+# changing them needs a stream/ledger rebuild, not a live edit.
+# ---------------------------------------------------------------------------
+
+PARAMETER_GROUPS: tuple[tuple[str, str], ...] = (
+    ("execution", "Execution & gates"),
+    ("costs", "Costs & rebalance"),
+    ("ev", "Expected-value & latency model"),
+    ("risk", "Risk & circuit breaker"),
+    ("triangular", "Triangular / cycles"),
+    ("venue", "Venue health"),
+    ("cadence", "Engine & demo cadence"),
+)
+
+
+@dataclass(frozen=True)
+class ParameterSpec:
+    key: str
+    group: str
+    label: str
+    description: str
+    kind: str  # "float" | "int" | "bool"
+    minimum: float | None = None
+    maximum: float | None = None
+    step: float | None = None
+    unit: str = ""
+
+
+PARAMETER_REGISTRY: tuple[ParameterSpec, ...] = (
+    # Execution & gates
+    ParameterSpec("min_trade_btc", "execution", "Min trade size", "Smallest executable size; below this an opportunity is blocked.", "float", 0.0005, 0.05, 0.0005, "BTC"),
+    ParameterSpec("max_trade_btc", "execution", "Max trade size", "Largest size simulated per trade (position cap).", "float", 0.001, 0.1, 0.001, "BTC"),
+    ParameterSpec("min_net_profit_usd", "execution", "Min net profit", "Minimum absolute net profit (after all costs) to execute.", "float", 0.0, 20.0, 0.05, "USD"),
+    ParameterSpec("min_net_bps", "execution", "Min net edge", "Minimum net edge in basis points to execute a cross-exchange trade.", "float", 0.0, 25.0, 0.05, "bps"),
+    ParameterSpec("min_confidence", "execution", "Min confidence", "Confidence floor (venue + data freshness) required to execute.", "float", 0.0, 1.0, 0.01, ""),
+    ParameterSpec("max_executions_per_tick", "execution", "Max trades / tick", "How many trades the bot may fire in a single evaluation cycle.", "int", 1, 10, 1, ""),
+    ParameterSpec("pair_cooldown_ms", "execution", "Pair cooldown", "Quiet period on a pair after executing on it.", "int", 0, 120000, 500, "ms"),
+    # Costs & rebalance
+    ParameterSpec("withdrawal_fee_impact", "costs", "Rebalance cost weight", "Multiplier applied to withdrawal/settlement fees when pooling inventory.", "float", 0.0, 1.0, 0.01, ""),
+    ParameterSpec("inventory_rebalance_buffer", "costs", "Rebalance buffer", "Extra headroom pulled when rebalancing, to avoid repeated transfers.", "float", 0.0, 2.0, 0.05, ""),
+    # Expected-value & latency model
+    ParameterSpec("ev_latency_cost_weight", "ev", "EV latency weight", "How heavily latency risk is subtracted in the expected-value score.", "float", 0.0, 2.0, 0.05, ""),
+    ParameterSpec("volatility_ev_risk_bps", "ev", "EV volatility risk", "Flat volatility risk charged per notional in the EV score.", "float", 0.0, 5.0, 0.01, "bps"),
+    ParameterSpec("inventory_ev_penalty_weight", "ev", "EV inventory weight", "How heavily inventory-rebalance cost is penalised in the EV score.", "float", 0.0, 2.0, 0.05, ""),
+    ParameterSpec("latency_half_life_ms", "ev", "Capture half-life", "Latency at which the capture probability halves (exponential decay).", "float", 100.0, 5000.0, 50.0, "ms"),
+    ParameterSpec("latency_bps_per_second", "ev", "Latency cost rate", "Latency risk accrued per second of round-trip latency.", "float", 0.0, 10.0, 0.1, "bps/s"),
+    ParameterSpec("latency_risk_floor_bps", "ev", "Latency cost floor", "Minimum latency risk charged to any opportunity.", "float", 0.0, 5.0, 0.05, "bps"),
+    # Risk & circuit breaker
+    ParameterSpec("max_volatility_pct", "risk", "Volatility trip", "BTC move over the window that trips the circuit breaker.", "float", 0.1, 10.0, 0.1, "%"),
+    ParameterSpec("volatility_window_ms", "risk", "Volatility window", "Look-back window for volatility detection.", "int", 2000, 120000, 1000, "ms"),
+    ParameterSpec("volatility_min_samples", "risk", "Volatility samples", "Minimum price samples before volatility can trip.", "int", 2, 60, 1, ""),
+    ParameterSpec("volatility_rearm_ms", "risk", "Volatility re-arm", "Cooldown before volatility can trip again.", "int", 0, 180000, 1000, "ms"),
+    ParameterSpec("max_book_age_ms", "risk", "Stale-data limit", "Order-book age beyond which data is considered stale.", "int", 500, 30000, 250, "ms"),
+    ParameterSpec("max_loss_streak", "risk", "Loss streak limit", "Consecutive losing trades before the breaker pauses execution.", "int", 1, 20, 1, ""),
+    ParameterSpec("pause_after_loss_ms", "risk", "Pause cooldown", "How long the breaker stays paused after activating.", "int", 0, 600000, 1000, "ms"),
+    ParameterSpec("risk_budget_hour_usd", "risk", "Hourly loss budget", "Max loss per rolling hour before the breaker pauses.", "float", 1.0, 10000.0, 5.0, "USD"),
+    # Triangular / cycles
+    ParameterSpec("triangular_enabled", "triangular", "Triangular engine", "Enable triangular and dynamic-cycle detection.", "bool"),
+    ParameterSpec("triangular_quote_size", "triangular", "Cycle notional", "Starting quote notional used to evaluate each cycle.", "float", 50.0, 10000.0, 50.0, "USDT"),
+    ParameterSpec("triangular_min_net_profit_usd", "triangular", "Cycle min profit", "Minimum net profit to execute a cycle.", "float", 0.0, 20.0, 0.05, "USD"),
+    ParameterSpec("triangular_min_net_bps", "triangular", "Cycle min edge", "Minimum net edge to execute a cycle.", "float", 0.0, 25.0, 0.05, "bps"),
+    ParameterSpec("triangular_max_legs", "triangular", "Max cycle legs", "Maximum number of legs in a detected cycle.", "int", 3, 6, 1, ""),
+    ParameterSpec("triangular_max_cycles_per_exchange", "triangular", "Cycles / exchange", "Maximum cycles evaluated per exchange per tick.", "int", 1, 32, 1, ""),
+    # Venue health
+    ParameterSpec("exchange_demotion_ticks", "venue", "Demotion ticks", "Stale/error ticks before a venue is demoted.", "int", 1, 60, 1, ""),
+    ParameterSpec("exchange_recovery_ticks", "venue", "Recovery ticks", "Healthy ticks required for a venue to recover.", "int", 1, 120, 1, ""),
+    ParameterSpec("health_slow_latency_ms", "venue", "Slow latency", "Latency above which a venue is flagged slow.", "int", 100, 5000, 50, "ms"),
+    ParameterSpec("health_min_score", "venue", "Min health score", "Health score floor (0-100) below which a venue is demoted.", "float", 0.0, 100.0, 1.0, ""),
+    # Engine & demo cadence
+    ParameterSpec("evaluation_interval_ms", "cadence", "Tick interval", "How often the engine evaluates the market.", "int", 100, 5000, 50, "ms"),
+    ParameterSpec("execution_adverse_bps_per_second", "cadence", "Adverse move rate", "Adverse price drift charged per second of execution latency.", "float", 0.0, 10.0, 0.1, "bps/s"),
+    ParameterSpec("execution_adverse_max_bps", "cadence", "Adverse move cap", "Ceiling on the adverse-move execution cost.", "float", 0.0, 10.0, 0.1, "bps"),
+    ParameterSpec("demo_min_execution_gap_ms", "cadence", "Demo trade gap", "Minimum spacing between simulated demo fills (presentation realism).", "int", 0, 120000, 1000, "ms"),
+)
+
+PARAMETER_PRESETS: dict[str, dict[str, float | int | bool]] = {
+    "conservative": {
+        "min_net_bps": 1.6, "min_net_profit_usd": 0.5, "min_confidence": 0.6,
+        "max_trade_btc": 0.008, "max_executions_per_tick": 1, "pair_cooldown_ms": 20000,
+        "max_volatility_pct": 1.6, "max_loss_streak": 3, "risk_budget_hour_usd": 40,
+        "triangular_min_net_bps": 1.4, "triangular_quote_size": 400,
+        "ev_latency_cost_weight": 0.6, "inventory_ev_penalty_weight": 0.6,
+        "evaluation_interval_ms": 450,
+    },
+    "balanced": {
+        "min_net_bps": 0.75, "min_net_profit_usd": 0.2, "min_confidence": 0.42,
+        "max_trade_btc": 0.015, "max_executions_per_tick": 1, "pair_cooldown_ms": 14000,
+        "max_volatility_pct": 2.4, "max_loss_streak": 5, "risk_budget_hour_usd": 75,
+        "triangular_min_net_bps": 0.65, "triangular_quote_size": 650,
+        "ev_latency_cost_weight": 0.35, "inventory_ev_penalty_weight": 0.35,
+        "evaluation_interval_ms": 450,
+    },
+    "aggressive": {
+        "min_net_bps": 0.4, "min_net_profit_usd": 0.1, "min_confidence": 0.3,
+        "max_trade_btc": 0.03, "max_executions_per_tick": 3, "pair_cooldown_ms": 7000,
+        "max_volatility_pct": 3.5, "max_loss_streak": 8, "risk_budget_hour_usd": 150,
+        "triangular_min_net_bps": 0.4, "triangular_quote_size": 900,
+        "ev_latency_cost_weight": 0.2, "inventory_ev_penalty_weight": 0.2,
+        "evaluation_interval_ms": 350,
+    },
+    "hft": {
+        "min_net_bps": 0.25, "min_net_profit_usd": 0.05, "min_confidence": 0.28,
+        "max_trade_btc": 0.02, "max_executions_per_tick": 4, "pair_cooldown_ms": 4000,
+        "evaluation_interval_ms": 200, "latency_half_life_ms": 500, "latency_bps_per_second": 1.6,
+        "triangular_min_net_bps": 0.3, "triangular_quote_size": 800,
+        "max_volatility_pct": 3.0, "risk_budget_hour_usd": 120,
+    },
+}
+
+_REGISTRY_BY_KEY: dict[str, ParameterSpec] = {spec.key: spec for spec in PARAMETER_REGISTRY}
+
+
+def coerce_parameter(spec: ParameterSpec, value) -> float | int | bool:
+    """Coerce + clamp a raw value to the spec's kind and range. Raises ValueError on bad input."""
+    if spec.kind == "bool":
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "on"}
+        return bool(value)
+    number = float(value)
+    if spec.kind == "int":
+        number = int(round(number))
+    if spec.minimum is not None:
+        number = max(spec.minimum, number)
+    if spec.maximum is not None:
+        number = min(spec.maximum, number)
+    return int(number) if spec.kind == "int" else float(number)
+
+
+def apply_parameter_updates(target: Settings, updates: dict | None) -> dict:
+    """Validate + apply scalar parameter updates onto a Settings instance in place."""
+    applied: dict[str, float | int | bool] = {}
+    changed: dict[str, dict] = {}
+    rejected: list[dict] = []
+    for key, value in (updates or {}).items():
+        spec = _REGISTRY_BY_KEY.get(key)
+        if spec is None:
+            rejected.append({"key": key, "reason": "unknown parameter"})
+            continue
+        try:
+            coerced = coerce_parameter(spec, value)
+        except (TypeError, ValueError):
+            rejected.append({"key": key, "reason": "invalid value"})
+            continue
+        before = getattr(target, key, None)
+        setattr(target, key, coerced)
+        applied[key] = coerced
+        if before != coerced:
+            changed[key] = {"from": before, "to": coerced}
+    return {"applied": applied, "changed": changed, "rejected": rejected}
+
+
+def parameter_values(source: Settings) -> dict[str, float | int | bool]:
+    return {spec.key: getattr(source, spec.key) for spec in PARAMETER_REGISTRY}
+
+
+def parameter_specs_payload() -> list[dict]:
+    return [
+        {
+            "key": spec.key,
+            "group": spec.group,
+            "label": spec.label,
+            "description": spec.description,
+            "kind": spec.kind,
+            "min": spec.minimum,
+            "max": spec.maximum,
+            "step": spec.step,
+            "unit": spec.unit,
+        }
+        for spec in PARAMETER_REGISTRY
+    ]
 
 
 settings = Settings()

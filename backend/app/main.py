@@ -9,7 +9,7 @@ USER_SITE = site.getusersitepackages()
 if USER_SITE not in sys.path:
     sys.path.append(USER_SITE)
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -32,13 +32,33 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title=f"{settings.app_name} API", version="2.0.0", lifespan=lifespan)
+
+# CORS: the previous config (`allow_origins=["*"]` + `allow_credentials=True`) is an
+# invalid combination browsers reject. Aurelion uses no cookies/credentials, so we
+# disable credentials and read the allowlist from ALLOWED_ORIGINS (default "*").
+_origins = [origin.strip() for origin in settings.allowed_origins.split(",") if origin.strip()]
+_allow_all = "*" in _origins or not _origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=["*"] if _allow_all else _origins,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def require_control_auth(x_aurelion_token: str | None = Header(default=None)) -> None:
+    """Guard for state-mutating endpoints.
+
+    Off by default so the public demo dashboard can drive its own controls. When
+    CONTROL_TOKEN is set (recommended for any exposed/production deployment), every
+    mutating request must send a matching `X-Aurelion-Token` header.
+    """
+    token = settings.control_token
+    if not token:
+        return
+    if x_aurelion_token != token:
+        raise HTTPException(status_code=401, detail="Invalid or missing control token")
 
 
 class ControlPayload(BaseModel):
@@ -46,6 +66,12 @@ class ControlPayload(BaseModel):
     autoExecution: bool | None = Field(default=None)
     mode: str | None = Field(default=None)
     volatilityShock: bool = Field(default=False)
+
+
+class ParameterPayload(BaseModel):
+    updates: dict[str, float | int | bool | str] | None = Field(default=None)
+    preset: str | None = Field(default=None)
+    reset: bool = Field(default=False)
 
 
 @app.get("/api/health")
@@ -135,7 +161,7 @@ async def config() -> dict:
 
 
 @app.post("/api/control")
-async def control(body: ControlPayload) -> dict:
+async def control(body: ControlPayload, _: None = Depends(require_control_auth)) -> dict:
     if body.activeExchanges is not None:
         await market_service.set_active_exchanges(body.activeExchanges)
     if body.autoExecution is not None:
@@ -147,8 +173,26 @@ async def control(body: ControlPayload) -> dict:
     return market_service.snapshot()
 
 
+@app.get("/api/params")
+async def get_params() -> dict:
+    return market_service.parameters()
+
+
+@app.post("/api/params")
+async def update_params(body: ParameterPayload, _: None = Depends(require_control_auth)) -> dict:
+    if body.reset:
+        applied = market_service.reset_parameters()
+    elif body.preset:
+        applied = market_service.apply_preset(body.preset)
+    else:
+        applied = market_service.apply_parameters(body.updates or {})
+    result = market_service.parameters()
+    result["applied"] = applied
+    return result
+
+
 @app.post("/api/reset")
-async def reset() -> dict:
+async def reset(_: None = Depends(require_control_auth)) -> dict:
     market_service.reset()
     return market_service.snapshot()
 
@@ -165,10 +209,13 @@ if FRONTEND_DIST.exists():
 @app.get("/{full_path:path}", response_model=None)
 async def spa(full_path: str):
     if FRONTEND_DIST.exists():
-        requested = FRONTEND_DIST / full_path
-        if requested.is_file():
+        dist_root = FRONTEND_DIST.resolve()
+        requested = (dist_root / full_path).resolve()
+        # Containment check: only serve files that resolve *inside* the build dir,
+        # so crafted paths like `../../etc/passwd` fall back to the SPA shell.
+        if requested.is_file() and dist_root in requested.parents:
             return FileResponse(requested)
-        return FileResponse(FRONTEND_DIST / "index.html")
+        return FileResponse(dist_root / "index.html")
     return JSONResponse({"ok": True, "message": "Frontend build not found. Run npm --prefix frontend run build."})
 
 
