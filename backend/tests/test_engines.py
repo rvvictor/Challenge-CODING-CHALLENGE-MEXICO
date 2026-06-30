@@ -831,5 +831,31 @@ class CoPilotTests(unittest.TestCase):
         self.assertTrue(second["cached"])
 
 
+class SecurityTests(unittest.TestCase):
+    def test_control_endpoints_require_token_when_configured(self):
+        try:
+            import fastapi  # noqa: F401
+            from fastapi.testclient import TestClient
+        except Exception:
+            self.skipTest("FastAPI test client is not installed in this local Python environment")
+        from backend.app.core.config import settings as live_settings
+        from backend.app.main import app
+
+        client = TestClient(app)
+        original = live_settings.control_token
+        live_settings.control_token = "secret-token"
+        try:
+            denied = client.post("/api/control", json={"autoExecution": True})
+            self.assertEqual(denied.status_code, 401)
+            allowed = client.post("/api/control", json={"autoExecution": True}, headers={"x-aurelion-token": "secret-token"})
+            self.assertEqual(allowed.status_code, 200)
+            self.assertEqual(client.post("/api/params", json={"reset": True}).status_code, 401)
+            self.assertEqual(client.post("/api/scenario", json={"scenario": "flash_crash"}).status_code, 401)
+            # read-only endpoints stay open
+            self.assertEqual(client.get("/api/snapshot").status_code, 200)
+        finally:
+            live_settings.control_token = original
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1686,3 +1686,12 @@ small,
 .coPilotFoot small {
   color: var(--muted);
 }
+
+/* --- Accessibility: visible keyboard focus everywhere -------------------- */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}

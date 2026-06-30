@@ -65,6 +65,11 @@ https://github.com/rvvictor/Challenge-CODING-CHALLENGE-MEXICO
 | Auditoría | Mantiene historial en memoria y persistencia opcional con Postgres o SQLite local. |
 | Interfaz | Dashboard enfocado en P&L, velocidad, salud de exchanges, decisión actual, mercado vivo, señales y trades ejecutados. |
 | Demo realista | Simulador determinístico con shocks controlados para mostrar trades normales, parciales, triangulares y dinámicos sin ganancias absurdas. |
+| Parametrización en vivo | **Control Room** con 37 parámetros ajustables en tiempo real y presets (Conservative/Balanced/Aggressive/HFT). |
+| Modelos seleccionables | Bellman-Ford, impacto de mercado raíz cuadrada, sizing por Kelly y volatilidad EWMA, intercambiables en vivo. |
+| Backtesting y aprendizaje | Replay determinístico con métricas (hit rate, drawdown, Sharpe) y autocalibración bayesiana por venue. |
+| Robustez demostrable | **Stress Lab** de escenarios adversos y conciliación de órdenes parciales/fallidas con corrección de exposición. |
+| Co-piloto de IA | Explicación consultiva en lenguaje claro de cada decisión, con respaldo determinístico sin llave. |
 
 ---
 
@@ -162,6 +167,121 @@ El runtime conserva eventos importantes de la sesión:
 - exportación completa en JSON.
 
 Si se configura `DATABASE_URL`, Aurelion escribe registros durables en Postgres. Si no hay Postgres, usa SQLite local para que el proyecto siga siendo fácil de correr durante la evaluación.
+
+---
+
+## Novedades de la fase final
+
+Estas capacidades se agregaron para la fase final del challenge. Todas conservan el
+marco paper-only y, por defecto, no alteran el comportamiento del demo: solo se
+activan cuando el usuario las usa.
+
+### Control Room: parametrización en vivo
+
+El backend siempre tuvo decenas de parámetros, pero antes solo se ajustaban por
+variables de entorno. Ahora **37 parámetros** (en 7 grupos) son ajustables **en
+vivo** desde la pestaña *Control Room* del dashboard: tamaños de operación, edge
+mínimo, confianza mínima, pesos del valor esperado, modelo de latencia, umbrales de
+riesgo, parámetros triangulares, salud de venues y cadencia del motor. Hay presets
+**Conservative / Balanced / Aggressive / HFT**, un botón de reset y un indicador de
+qué cambió. Los motores leen la configuración en cada tick, así que un cambio se
+aplica al siguiente ciclo sin reiniciar.
+
+- Endpoints: `GET /api/params`, `POST /api/params` (updates, preset o reset).
+- Seguridad: si se define `CONTROL_TOKEN`, los endpoints que mutan estado exigen el
+  header `X-Aurelion-Token`.
+
+### Modelos cuánticos avanzados (seleccionables)
+
+Cada modelo es un **modo seleccionable** en el Control Room. Los valores por defecto
+reproducen el comportamiento original; el jurado puede cambiarlos en vivo.
+
+- **Detección de ciclos por Bellman-Ford** además del DFS acotado. Construye un grafo
+  con peso `-log(tasa·(1−fees))` y detecta ciclos de suma negativa (todas las rutas
+  rentables, no solo algunas). Ambos algoritmos alimentan la misma evaluación de
+  ciclo, así que el P&L se calcula igual.
+- **Modelo de impacto de mercado** (`book_walk` / `sqrt_impact` / `almgren_lite`):
+  agrega el impacto de consumir profundidad (ley de raíz cuadrada y término
+  temporal+permanente) como una línea de costo explícita sobre el recorrido del libro.
+- **Sizing por Kelly fraccional** además del tamaño fijo: dimensiona según la calidad
+  del edge (probabilidad de éxito × payoff), acotado a `MAX_TRADE_BTC`.
+- **Volatilidad EWMA / desviación estándar** además del rango simple, para el circuit
+  breaker.
+
+### Backtesting y autocalibración bayesiana
+
+- **Backtest / Replay** (`GET /api/backtest`): reproduce el mercado determinístico a
+  través de **los mismos motores** usando una copia de los parámetros actuales y
+  reporta hit rate, P&L total y promedio, **máximo drawdown**, un ratio tipo Sharpe y
+  una curva de equity. Corre fuera del loop en vivo. Pestaña *Backtest* en el
+  dashboard.
+- **Autocalibración** (`engines/calibration.py`): mantiene una posterior
+  Beta-Bernoulli de éxito de ejecución por venue, aprendida de los fills reales.
+  Cuando se activa, multiplica la confianza de cada oportunidad, de modo que el bot
+  confía menos en venues que fallan y los recupera cuando se normalizan. Panel
+  *Self-calibration*.
+- **Persistencia bidireccional**: el almacén durable ahora se puede leer; `/api/replay`
+  responde desde la base de datos (con respaldo en memoria), así un reinicio ya no
+  borra la sesión auditable.
+
+### Stress Lab y manejo de órdenes parciales/fallidas
+
+- **Stress Lab** (`POST /api/scenario`): escenarios adversos de un clic —
+  *flash crash, liquidity crunch, latency spike, venue outage, leg failure*— para ver
+  reaccionar al circuit breaker, a la salud de venues y a la conciliación de trades.
+- **Conciliación de órdenes**: cada trade cross reporta lo previsto vs lo llenado por
+  pierna, la **exposición abierta** y la **corrección** (cubrir el remanente a peor
+  precio, con su costo) cuando se inyecta `leg_failure`. En condiciones normales el
+  trade queda cubierto con exposición cero.
+- **Autonomía de inventario**: el panel de wallets muestra cuántas operaciones más
+  puede fondear cada venue (y el pool) antes de quedarse sin saldo útil.
+
+### Co-piloto de IA (solo explicación)
+
+Un panel *AI Co-pilot* explica en lenguaje claro **por qué** se toma o se descarta la
+oportunidad actual, el estado del circuit breaker, los escenarios activos y los
+modelos en uso. Es **estrictamente consultivo**: nunca decide ni ejecuta. Usa Claude
+cuando hay `ANTHROPIC_API_KEY`; si no, usa una explicación determinística construida
+con los mismos datos, de modo que funciona sin llave durante la evaluación. La llamada
+corre fuera del loop en vivo.
+
+---
+
+## Para el jurado
+
+Ruta recomendada de evaluación (modo demo, determinístico):
+
+1. Iniciar: `npm run dev` y abrir `http://localhost:8000`.
+2. **Control Room**: mover *Min net edge* o aplicar el preset *Aggressive* y ver cómo
+   cambian las oportunidades aceptadas/rechazadas en vivo.
+3. **Strategy & model selection**: cambiar *Cycle detection* a `bellman_ford`,
+   *Slippage model* a `sqrt_impact`, *Position sizing* a `kelly`.
+4. **Backtest**: correr un replay y leer hit rate, drawdown y ratio tipo Sharpe de la
+   estrategia recién ajustada.
+5. **Stress Lab**: inyectar *Venue outage* o *Liquidity crunch* y observar el circuit
+   breaker; inyectar *Leg failure* y revisar la conciliación en *Executed Trades*.
+6. **AI Co-pilot**: pedir la explicación de la decisión actual.
+
+---
+
+## Notas de decisiones de modelado
+
+Para transparencia ante un jurado cuantitativo:
+
+- **Impacto de mercado**: `book_walk` ya valora la profundidad visible nivel por
+  nivel; `sqrt_impact`/`almgren_lite` añaden el costo de empujar el precio más allá del
+  libro. Efecto: reduce el edge neto de órdenes grandes; más realista, más conservador.
+- **Sizing Kelly**: usa una estimación de edge de tope de libro como probabilidad de
+  éxito y el techo de movimiento adverso como pérdida esperada. Efecto: opera más
+  pequeño cuando el edge o la confianza son bajos.
+- **Calibración**: prior `Beta(9,1)` (≈0.9) y mínimo de muestras antes de aplicar, para
+  no penalizar en frío. Efecto: el comportamiento cambia tras fallas reales.
+- **Conciliación de leg failure**: simulación; la pierna de venta llena ~55% y se cubre
+  el remanente con una penalización en bps. Efecto: muestra la exposición y su costo de
+  corrección sin órdenes reales.
+- **Latencia**: el costo de riesgo usa la latencia promedio por pierna; la probabilidad
+  de captura usa decaimiento exponencial por half-life. Son simplificaciones
+  deliberadas y declaradas.
 
 ---
 
@@ -326,6 +446,15 @@ Binance, OKX, Kraken, Coinbase, Bitstamp, Bybit, KuCoin, Gate.io, Bitfinex, Gemi
 | `REDIS_URL` | vacío | Activa Redis Pub/Sub cuando se proporciona. |
 | `DATABASE_URL` | vacío | Activa persistencia durable en Postgres cuando se proporciona. |
 | `PERSISTENCE_ENABLED` | `true` | Activa Postgres o SQLite como almacén de eventos. |
+| `CONTROL_TOKEN` | vacío | Si se define, los endpoints que mutan estado exigen `X-Aurelion-Token`. |
+| `ALLOWED_ORIGINS` | `*` | Lista CORS separada por comas (sin credenciales). |
+| `ANTHROPIC_API_KEY` | vacío | Activa el co-piloto con Claude; sin llave usa explicación determinística. |
+| `NARRATOR_MODEL` | `claude-haiku-4-5-20251001` | Modelo del co-piloto cuando hay llave. |
+| `CYCLE_ALGO` | `dfs` | Detección de ciclos por defecto (`dfs` o `bellman_ford`). |
+| `SLIPPAGE_MODEL` | `book_walk` | Modelo de slippage (`book_walk`, `sqrt_impact`, `almgren_lite`). |
+| `SIZING_MODE` | `fixed` | Sizing (`fixed` o `kelly`). |
+| `VOLATILITY_MODEL` | `range` | Modelo de volatilidad (`range`, `ewma`, `stddev`). |
+| `CALIBRATION_ENABLED` | `false` | Aplica la autocalibración bayesiana a la confianza. |
 
 ---
 
@@ -338,8 +467,13 @@ Binance, OKX, Kraken, Coinbase, Bitstamp, Bybit, KuCoin, Gate.io, Bitfinex, Gemi
 | `GET /api/metrics` | Métricas operativas compactas. |
 | `GET /metrics` | Métricas estilo Prometheus en texto. |
 | `GET /api/config` | Configuración activa y catálogo de exchanges. |
+| `GET /api/params` | Registro de parámetros ajustables, valores actuales y presets. |
+| `POST /api/params` | Aplica updates, un preset o reset de parámetros (con auth opcional). |
 | `GET /api/export/session` | Exportación completa de sesión para revisión. |
-| `GET /api/replay` | Eventos del ledger reproducible. |
+| `GET /api/replay` | Eventos de replay desde el almacén durable (o memoria como respaldo). |
+| `GET /api/backtest` | Replay determinístico de la estrategia actual con métricas. |
+| `POST /api/scenario` | Inyecta un escenario adverso del Stress Lab (con auth opcional). |
+| `GET /api/narrate` | Explicación consultiva (Claude o determinística) de la decisión actual. |
 | `POST /api/control` | Cambia modo, ejecución, exchanges activos o activa stress de volatilidad. |
 | `POST /api/reset` | Reinicia la sesión runtime. |
 | `GET /events` | Stream SSE para actualizaciones en vivo del dashboard. |
@@ -413,7 +547,13 @@ La suite cubre:
 - rebalanceo de inventario;
 - ordenamiento por valor esperado;
 - endpoint de métricas cuando FastAPI TestClient está disponible;
-- exportación de sesión y replay ledger.
+- exportación de sesión y replay ledger;
+- registro de parámetros: validación, clamping, presets y cambio en vivo de una compuerta de ejecución;
+- modelos avanzados: ciclo negativo por Bellman-Ford, monotonía del impacto de mercado, límites de Kelly, modelos de volatilidad;
+- backtest determinístico, autocalibración bayesiana y lectura/conteo de persistencia durable;
+- escenarios del Stress Lab y conciliación de leg-failure con corrección de exposición;
+- co-piloto: respaldo determinístico sin llave y caché de resultados;
+- seguridad: enforcement del `CONTROL_TOKEN` en endpoints que mutan estado.
 
 ---
 

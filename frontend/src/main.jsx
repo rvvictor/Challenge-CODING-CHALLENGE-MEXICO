@@ -215,7 +215,7 @@ function Header({ snapshot, connected, control, reset, exportSession }) {
             <p>Bitcoin Arbitrage Intelligence</p>
           </div>
         </div>
-        <span className={`conn ${connected ? "online" : "offline"}`}><i />{connected ? "live" : "syncing"}</span>
+        <span className={`conn ${connected ? "online" : "offline"}`} role="status" aria-live="polite"><i aria-hidden="true" />{connected ? "live" : "syncing"}</span>
       </div>
       <div className="modeDock">
         <div className="segmented">
@@ -239,8 +239,8 @@ function Header({ snapshot, connected, control, reset, exportSession }) {
           <Zap size={16} />
           {risk?.paused ? "risk active" : "volatility"}
         </button>
-        <button className="iconButton" title="Export audit session" onClick={exportSession}><FileDown size={17} /></button>
-        <button className="iconButton" title="Reset session" onClick={reset}><RefreshCw size={17} /></button>
+        <button type="button" className="iconButton" title="Export audit session" aria-label="Export audit session" onClick={exportSession}><FileDown size={17} /></button>
+        <button type="button" className="iconButton" title="Reset session" aria-label="Reset session" onClick={reset}><RefreshCw size={17} /></button>
       </div>
     </header>
   );
@@ -780,7 +780,7 @@ function PnlChart({ series }) {
       ctx.fillStyle = "#66736d";
       ctx.font = "700 12px Aptos, Segoe UI, sans-serif";
       ctx.textAlign = "left";
-      ctx.fillText("Esperando el primer trade", chartLeft, rect.height - 13);
+      ctx.fillText("Waiting for the first trade", chartLeft, rect.height - 13);
     }
   }, [series]);
   return <canvas className="chart" ref={ref} />;
@@ -1342,4 +1342,36 @@ function App() {
   );
 }
 
-createRoot(document.getElementById("root")).render(<App />);
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+
+  componentDidCatch(error, info) {
+    console.error("Aurelion UI error", error, info);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <main className="loading">
+          <div className="sigil"><ShieldAlert size={24} /></div>
+          <span>Something went wrong rendering the cockpit.</span>
+          <button type="button" className="iconButton" style={{ marginTop: 14, padding: "8px 16px" }} onClick={() => window.location.reload()}>Reload</button>
+        </main>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+createRoot(document.getElementById("root")).render(
+  <ErrorBoundary>
+    <App />
+  </ErrorBoundary>,
+);
