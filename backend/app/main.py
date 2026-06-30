@@ -68,6 +68,8 @@ class ControlPayload(BaseModel):
     autoExecution: bool | None = Field(default=None)
     mode: str | None = Field(default=None)
     volatilityShock: bool = Field(default=False)
+    killSwitch: bool | None = Field(default=None)
+    executionGateway: str | None = Field(default=None)
 
 
 class ParameterPayload(BaseModel):
@@ -126,6 +128,11 @@ async def prometheus_metrics() -> StreamingResponse:
 @app.get("/api/export/session")
 async def export_session() -> dict:
     return market_service.export_session()
+
+
+@app.get("/api/execution")
+async def execution() -> dict:
+    return market_service.execution_status()
 
 
 @app.get("/api/replay")
@@ -197,6 +204,10 @@ async def control(body: ControlPayload, _: None = Depends(require_control_auth))
         market_service.set_auto_execution(bool(body.autoExecution))
     if body.mode is not None:
         await market_service.set_mode(str(body.mode))
+    if body.killSwitch is not None:
+        market_service.set_kill_switch(bool(body.killSwitch))
+    if body.executionGateway is not None:
+        market_service.set_execution_gateway(str(body.executionGateway))
     if body.volatilityShock:
         await market_service.trigger_volatility_stress()
     return market_service.snapshot()

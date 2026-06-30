@@ -37,6 +37,7 @@ from backend.app.engines.simulator import SimulatedMarket
 from backend.app.engines.triangular import TriangularArbitrageEngine
 from backend.app.engines.venue_health import VenueHealthTracker
 from backend.app.integrations.ccxt_provider import CcxtStreamProvider
+from backend.app.integrations.gateways import GATEWAY_MODES, PaperExecutionGateway, PreTradeGuard, build_gateway
 from backend.app.integrations.global_market import GlobalMarketIntel
 from backend.app.integrations.llm_narrator import DecisionNarrator
 from backend.app.integrations.persistence import DurableEventSink
@@ -73,6 +74,9 @@ class MarketService:
         self.global_market = GlobalMarketIntel(cfg)
         self.venue_health = VenueHealthTracker(cfg)
         self.narrator = DecisionNarrator(cfg)
+        self.pre_trade_guard = PreTradeGuard()
+        self.gateway_mode = "paper"
+        self.gateway = PaperExecutionGateway(self.pre_trade_guard)
         self.stream_provider: CcxtStreamProvider | None = None
         self.started_at = now_ms()
         self.task: asyncio.Task | None = None
@@ -220,6 +224,25 @@ class MarketService:
     def set_auto_execution(self, enabled: bool) -> None:
         self.risk.set_auto_execution(enabled)
 
+    # ---- Execution gateway seam ------------------------------------------------
+    def execution_status(self) -> dict:
+        return {
+            "mode": self.gateway_mode,
+            "capabilities": self.gateway.capabilities(),
+            "supportsWithdrawal": self.gateway.supports_withdrawal(),
+            "guard": self.pre_trade_guard.snapshot(),
+            "available": list(GATEWAY_MODES),
+            "liveEnabled": getattr(self.gateway, "enabled", False),
+        }
+
+    def set_execution_gateway(self, mode: str) -> None:
+        if mode in GATEWAY_MODES:
+            self.gateway_mode = mode
+            self.gateway = build_gateway(mode, self.pre_trade_guard)
+
+    def set_kill_switch(self, enabled: bool) -> None:
+        self.pre_trade_guard.kill_switch = bool(enabled)
+
     # ---- Runtime parameter control (Control Room) ------------------------------
     def parameters(self) -> dict:
         return {
@@ -268,6 +291,8 @@ class MarketService:
         self.simulator.scenarios.clear()
         self.simulator.outage_venue = None
         self.simulator.volatility_stress_until = 0
+        self.pre_trade_guard.kill_switch = False
+        self.set_execution_gateway("paper")
         self.started_at = now_ms()
         self.scan_tick = 0
         self.recorded_signal_times.clear()
@@ -334,7 +359,10 @@ class MarketService:
             self.store.add_opportunities(curated)
             self.record_edge_decisions(curated)
 
-        self.last_executions = self.executor.try_execute(ranked, summaries)
+        if self.pre_trade_guard.kill_switch:
+            self.last_executions = []
+        else:
+            self.last_executions = self.executor.try_execute(ranked, summaries)
         for trade in self.last_executions:
             self._record_calibration(trade)
             self.edge_ledger.append("trade", self.compact_trade_record(trade))
@@ -646,6 +674,7 @@ class MarketService:
                 "model": self.narrator.model if self.narrator.available() else None,
                 "models": list(self.narrator.allowed_models) if self.narrator.available() else [],
             },
+            "execution": self.execution_status(),
             "metrics": metrics,
         }
 

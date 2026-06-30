@@ -1002,9 +1002,42 @@ function Trades({ trades, metrics = {} }) {
   );
 }
 
-function InfrastructurePanel({ snapshot }) {
+function ExecutionPanel({ execution = {}, control }) {
+  const caps = execution.capabilities || {};
+  const guard = execution.guard || {};
+  const modes = execution.available || [];
+  return (
+    <section className="surface executionPanel">
+      <PanelTitle icon={Network} title="Execution gateway" pill={execution.mode || "paper"} />
+      <div className="execBody">
+        <div className="execCaps">
+          <span>Market data<b>{caps.marketData || "—"}</b></span>
+          <span>Execution<b>{caps.execution || "—"}</b></span>
+          <span>Live data<b>{caps.live ? "yes" : "no"}</b></span>
+          <span>Read-only<b>{caps.readOnly ? "yes" : "no"}</b></span>
+          <span>Withdrawal<b className="red">never</b></span>
+          <span>Live exec<b>{execution.liveEnabled ? "enabled" : "disabled (stub)"}</b></span>
+        </div>
+        <div className="execModes">
+          {modes.map((mode) => (
+            <button key={mode} type="button" className={execution.mode === mode ? "active" : ""} onClick={() => control({ executionGateway: mode })}>{mode}</button>
+          ))}
+        </div>
+        <div className="execGuard">
+          <button type="button" className={`crToggle ${guard.killSwitch ? "on" : "off"}`} aria-pressed={!!guard.killSwitch} onClick={() => control({ killSwitch: !guard.killSwitch })}>
+            kill switch {guard.killSwitch ? "on" : "off"}
+          </button>
+          <small>order cap ${formatNumber(guard.maxOrderNotionalUsd || 0, 0)} · fills remain paper until a live connector is added</small>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function InfrastructurePanel({ snapshot, control }) {
   return (
     <div className="infraDeck">
+      <ExecutionPanel execution={snapshot.execution} control={control} />
       <SystemStatus snapshot={snapshot} />
       <LatencySloPanel slo={snapshot.latencySlo} />
       <DemoQualityPanel quality={snapshot.demoQuality} mode={snapshot.mode} />
@@ -1261,7 +1294,7 @@ function CalibrationPanel({ calibration, enabled }) {
   );
 }
 
-function ResultsWorkbench({ snapshot, loadParams, applyParams, runBacktest }) {
+function ResultsWorkbench({ snapshot, loadParams, applyParams, runBacktest, control }) {
   const [tab, setTab] = React.useState("opportunities");
   const tabs = [
     ["opportunities", "Opportunities", snapshot.queue?.queued || 0],
@@ -1285,7 +1318,7 @@ function ResultsWorkbench({ snapshot, loadParams, applyParams, runBacktest }) {
       {tab === "signals" && <OpportunityHistory opportunities={snapshot.opportunityHistory || snapshot.opportunities} metrics={snapshot.metrics} now={snapshot.now} />}
       {tab === "control" && <ControlRoom loadParams={loadParams} applyParams={applyParams} />}
       {tab === "backtest" && <Backtest runBacktest={runBacktest} />}
-      {tab === "infra" && <InfrastructurePanel snapshot={snapshot} />}
+      {tab === "infra" && <InfrastructurePanel snapshot={snapshot} control={control} />}
     </section>
   );
 }
@@ -1428,7 +1461,7 @@ function App() {
               <RealityCheck opportunities={snapshot.queuedOpportunities} />
             </div>
             <CoPilot snapshot={snapshot} />
-            <ResultsWorkbench snapshot={snapshot} loadParams={loadParams} applyParams={applyParams} runBacktest={runBacktest} />
+            <ResultsWorkbench snapshot={snapshot} loadParams={loadParams} applyParams={applyParams} runBacktest={runBacktest} control={control} />
           </div>
           <SideRail snapshot={snapshot} control={control} triggerScenario={triggerScenario} />
         </section>

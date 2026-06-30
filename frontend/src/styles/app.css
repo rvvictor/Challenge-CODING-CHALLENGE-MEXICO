@@ -1780,6 +1780,72 @@ small,
   padding: 4px 6px;
 }
 
+/* --- Execution gateway -------------------------------------------------- */
+.execBody {
+  display: grid;
+  gap: 11px;
+  padding: 12px 14px;
+}
+
+.execCaps {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 16px;
+}
+
+.execCaps span {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.execCaps b {
+  color: var(--ink);
+  font-weight: 850;
+}
+
+.execCaps b.red {
+  color: var(--red);
+}
+
+.execModes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.execModes button {
+  min-height: 30px;
+  padding: 5px 11px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--paper);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.execModes button.active {
+  border-color: rgba(31, 111, 150, 0.4);
+  background: var(--blue-soft);
+  color: var(--blue);
+}
+
+.execGuard {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.execGuard small {
+  color: var(--muted);
+}
+
 /* --- Accessibility: visible keyboard focus everywhere -------------------- */
 button:focus-visible,
 a:focus-visible,

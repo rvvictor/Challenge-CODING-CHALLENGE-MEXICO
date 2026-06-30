@@ -899,5 +899,68 @@ class SecurityTests(unittest.TestCase):
             live_settings.control_token = original
 
 
+class ExecutionGatewayTests(unittest.TestCase):
+    def _book(self):
+        okx = Settings().exchange_by_id("okx")
+        return book(okx, "BTC/USDT", [(70000, 1)], [(69990, 1)])
+
+    def test_paper_gateway_fills_from_book(self):
+        from backend.app.integrations.gateways import ClientOrder, PaperExecutionGateway
+
+        gateway = PaperExecutionGateway()
+        fill = gateway.place_order(ClientOrder("c1", "okx", "BTC/USDT", "buy", 0.01), self._book())
+        self.assertEqual(fill.status, "filled")
+        self.assertAlmostEqual(fill.filled_qty, 0.01)
+        self.assertGreater(fill.avg_price, 0)
+        self.assertFalse(gateway.supports_withdrawal())
+
+    def test_guard_rejects_oversized_and_killswitch(self):
+        from backend.app.integrations.gateways import ClientOrder, PaperExecutionGateway, PreTradeGuard
+
+        guard = PreTradeGuard(max_order_notional_usd=100)
+        gateway = PaperExecutionGateway(guard)
+        order = ClientOrder("c2", "okx", "BTC/USDT", "buy", 0.01)  # ~700 notional > 100
+        self.assertEqual(gateway.place_order(order, self._book()).status, "rejected")
+        guard.max_order_notional_usd = 0  # disable cap
+        guard.kill_switch = True
+        self.assertEqual(gateway.place_order(order, self._book()).status, "rejected")
+
+    def test_live_gateway_is_a_disabled_stub(self):
+        from backend.app.integrations.gateways import ClientOrder, LiveExecutionGateway
+
+        gateway = LiveExecutionGateway()
+        self.assertFalse(gateway.capabilities()["enabled"])
+        self.assertFalse(gateway.supports_withdrawal())
+        with self.assertRaises(NotImplementedError):
+            gateway.place_order(ClientOrder("c3", "okx", "BTC/USDT", "buy", 0.01), self._book())
+
+    def test_readonly_live_capabilities(self):
+        from backend.app.integrations.gateways import ReadOnlyLiveGateway
+
+        caps = ReadOnlyLiveGateway().capabilities()
+        self.assertTrue(caps["live"])
+        self.assertTrue(caps["readOnly"])
+        self.assertEqual(caps["execution"], "paper")
+
+    def test_api_execution_status_and_killswitch(self):
+        try:
+            import fastapi  # noqa: F401
+            from fastapi.testclient import TestClient
+        except Exception:
+            self.skipTest("FastAPI test client is not installed in this local Python environment")
+        from backend.app.main import app
+
+        client = TestClient(app)
+        status = client.get("/api/execution").json()
+        self.assertEqual(status["mode"], "paper")
+        self.assertIn("capabilities", status)
+        self.assertFalse(status["supportsWithdrawal"])
+        try:
+            client.post("/api/control", json={"killSwitch": True})
+            self.assertTrue(client.get("/api/execution").json()["guard"]["killSwitch"])
+        finally:
+            client.post("/api/control", json={"killSwitch": False, "executionGateway": "paper"})
+
+
 if __name__ == "__main__":
     unittest.main()
