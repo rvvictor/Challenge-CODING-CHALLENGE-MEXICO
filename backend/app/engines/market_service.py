@@ -392,8 +392,11 @@ class MarketService:
 
         return BacktestRunner(self.settings).run(ticks)
 
-    def narrate(self) -> dict:
-        return self.narrator.narrate(self.snapshot())
+    def narrate(self, question: str | None = None, model: str | None = None) -> dict:
+        return self.narrator.narrate(self.snapshot(), question, model)
+
+    def narrate_stream(self, question: str | None = None, model: str | None = None):
+        return self.narrator.stream_async(self.snapshot(), question, model)
 
     def replay_feed(self, limit: int = 120) -> dict:
         durable = self.persistence.read(limit=limit)
@@ -638,7 +641,11 @@ class MarketService:
                 "volatilityModel": self.settings.volatility_model,
                 "calibrationEnabled": self.settings.calibration_enabled,
             },
-            "coPilot": {"available": self.narrator.available(), "model": self.narrator.model if self.narrator.available() else None},
+            "coPilot": {
+                "available": self.narrator.available(),
+                "model": self.narrator.model if self.narrator.available() else None,
+                "models": list(self.narrator.allowed_models) if self.narrator.available() else [],
+            },
             "metrics": metrics,
         }
 

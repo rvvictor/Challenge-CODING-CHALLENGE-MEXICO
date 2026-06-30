@@ -1283,32 +1283,120 @@ function ResultsWorkbench({ snapshot, loadParams, applyParams, runBacktest }) {
   );
 }
 
-function CoPilot({ narrate, coPilot = {} }) {
+function coPilotContextKey(snapshot) {
+  const top = snapshot?.queuedOpportunities?.[0] || snapshot?.opportunities?.[0];
+  const route = top
+    ? (top.strategy === "triangular" ? (top.cyclePath || []).join(">") : `${top.buyExchange}>${top.sellExchange}`)
+    : "none";
+  const scenarios = (snapshot?.scenarios?.active || []).join(",");
+  return `${snapshot?.risk?.paused}|${route}|${top?.status}|${Math.round((top?.netBps || 0) * 10) / 10}|${scenarios}`;
+}
+
+function modelLabel(id) {
+  if (id.includes("haiku")) return "Haiku";
+  if (id.includes("sonnet")) return "Sonnet";
+  if (id.includes("opus")) return "Opus";
+  return id;
+}
+
+// Live, streaming, conversational co-pilot. Re-explains automatically when the top
+// decision changes (debounced + rate-limited), streams tokens over SSE, and answers
+// free-text questions. Strictly advisory — it never decides or executes.
+function CoPilot({ snapshot }) {
+  const coPilot = snapshot?.coPilot || {};
+  const models = coPilot.models || [];
   const [text, setText] = React.useState("");
   const [source, setSource] = React.useState("");
-  const [busy, setBusy] = React.useState(false);
+  const [streaming, setStreaming] = React.useState(false);
+  const [model, setModel] = React.useState("");
+  const [question, setQuestion] = React.useState("");
+  const [auto, setAuto] = React.useState(true);
+  const esRef = React.useRef(null);
+  const lastKeyRef = React.useRef("");
+  const lastRunRef = React.useRef(0);
 
-  const run = React.useCallback(async () => {
-    setBusy(true);
-    try {
-      const result = await narrate();
-      setText(result.text || "");
-      setSource(result.source || "");
-    } finally {
-      setBusy(false);
-    }
-  }, [narrate]);
+  const startStream = React.useCallback((askText) => {
+    if (esRef.current) { esRef.current.close(); esRef.current = null; }
+    setText("");
+    setSource("");
+    setStreaming(true);
+    lastRunRef.current = Date.now();
+    const params = new URLSearchParams();
+    if (askText) params.set("q", askText);
+    if (model) params.set("model", model);
+    const events = new EventSource(`${API_BASE}/api/narrate/stream?${params.toString()}`);
+    esRef.current = events;
+    events.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === "delta") setText((prev) => prev + data.text);
+        else if (data.type === "done") {
+          setSource(data.source || "");
+          setStreaming(false);
+          events.close();
+          esRef.current = null;
+        }
+      } catch (_error) { /* ignore malformed chunk */ }
+    };
+    events.onerror = () => {
+      setStreaming(false);
+      events.close();
+      esRef.current = null;
+    };
+  }, [model]);
 
-  React.useEffect(() => { run(); }, [run]);
+  const contextKey = coPilotContextKey(snapshot);
+  React.useEffect(() => {
+    if (!auto) return undefined;
+    if (contextKey === lastKeyRef.current) return undefined;
+    const first = !lastKeyRef.current;
+    const elapsed = Date.now() - lastRunRef.current;
+    const delay = first ? 300 : Math.max(1200, 9000 - elapsed);
+    const timer = setTimeout(() => {
+      lastKeyRef.current = contextKey;
+      startStream("");
+    }, delay);
+    return () => clearTimeout(timer);
+  }, [contextKey, auto, startStream]);
+
+  React.useEffect(() => () => { if (esRef.current) esRef.current.close(); }, []);
+
+  const ask = (event) => {
+    event.preventDefault();
+    const trimmed = question.trim();
+    if (trimmed) startStream(trimmed);
+  };
 
   return (
     <section className="surface coPilot">
-      <PanelTitle icon={Sparkles} title="AI Co-pilot" pill={coPilot.available ? "Claude" : "deterministic"} />
+      <PanelTitle icon={Sparkles} title="AI Co-pilot" pill={coPilot.available ? (source ? modelLabel(model || coPilot.model || "") || "Claude" : "Claude") : "deterministic"} />
       <div className="coPilotBody">
-        <p className="coPilotText">{busy ? "Reading the current decision…" : (text || "Ask the co-pilot to explain the current decision.")}</p>
+        <p className="coPilotText" aria-live="polite">
+          {text || (streaming ? "" : "Reading the current decision…")}
+          {streaming && <span className="coPilotCaret" aria-hidden="true">▍</span>}
+        </p>
+        <form className="coPilotAsk" onSubmit={ask}>
+          <input
+            type="text"
+            value={question}
+            onChange={(event) => setQuestion(event.target.value)}
+            placeholder="Ask the co-pilot…"
+            aria-label="Ask the co-pilot a question"
+          />
+          <button type="submit" disabled={streaming || !question.trim()}>Ask</button>
+        </form>
         <div className="coPilotFoot">
-          <button type="button" onClick={run} disabled={busy}>{busy ? "…" : "Explain decision"}</button>
-          <small>AI explanation · advisory only{source ? ` · ${source}` : ""}</small>
+          <div className="coPilotControls">
+            <button type="button" onClick={() => startStream("")} disabled={streaming}>Explain</button>
+            <label className="coPilotAuto"><input type="checkbox" checked={auto} onChange={(event) => setAuto(event.target.checked)} /> live</label>
+            {coPilot.available && models.length > 0 && (
+              <select value={model} onChange={(event) => setModel(event.target.value)} aria-label="Co-pilot model">
+                <option value="">Auto</option>
+                {models.map((id) => <option key={id} value={id}>{modelLabel(id)}</option>)}
+              </select>
+            )}
+          </div>
+          <small>advisory only{source ? ` · ${source}` : ""}</small>
         </div>
       </div>
     </section>
@@ -1316,7 +1404,7 @@ function CoPilot({ narrate, coPilot = {} }) {
 }
 
 function App() {
-  const { snapshot, connected, control, reset, exportSession, loadParams, applyParams, runBacktest, triggerScenario, narrate } = useAurelion();
+  const { snapshot, connected, control, reset, exportSession, loadParams, applyParams, runBacktest, triggerScenario } = useAurelion();
   if (!snapshot) {
     return <main className="loading"><div className="sigil"><Sparkles size={24} /></div><span>Starting Aurelion</span></main>;
   }
@@ -1332,7 +1420,7 @@ function App() {
               <EdgeExplainability opportunities={snapshot.queuedOpportunities} />
               <RealityCheck opportunities={snapshot.queuedOpportunities} />
             </div>
-            <CoPilot narrate={narrate} coPilot={snapshot.coPilot} />
+            <CoPilot snapshot={snapshot} />
             <ResultsWorkbench snapshot={snapshot} loadParams={loadParams} applyParams={applyParams} runBacktest={runBacktest} />
           </div>
           <SideRail snapshot={snapshot} control={control} triggerScenario={triggerScenario} />

@@ -1687,6 +1687,90 @@ small,
   color: var(--muted);
 }
 
+.coPilotCaret {
+  color: var(--violet);
+  animation: coPilotBlink 1s steps(2, start) infinite;
+}
+
+@keyframes coPilotBlink {
+  to {
+    opacity: 0;
+  }
+}
+
+.coPilotAsk {
+  display: flex;
+  gap: 7px;
+}
+
+.coPilotAsk input {
+  flex: 1;
+  min-height: 32px;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.coPilotAsk button {
+  min-height: 32px;
+  padding: 5px 14px;
+  border: 1px solid rgba(96, 87, 186, 0.4);
+  border-radius: 7px;
+  background: rgba(96, 87, 186, 0.12);
+  color: var(--violet);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.coPilotAsk button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.coPilotControls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.coPilotControls button {
+  min-height: 30px;
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--paper);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.coPilotAuto {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.coPilotControls select {
+  min-height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 6px;
+}
+
 /* --- Accessibility: visible keyboard focus everywhere -------------------- */
 button:focus-visible,
 a:focus-visible,

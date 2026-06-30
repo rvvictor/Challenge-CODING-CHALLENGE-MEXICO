@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import site
 import sys
 from contextlib import asynccontextmanager
@@ -140,10 +141,20 @@ async def backtest(ticks: int = 250) -> dict:
 
 
 @app.get("/api/narrate")
-async def narrate() -> dict:
+async def narrate(question: str = "", model: str = "") -> dict:
     # Advisory, explanation-only co-pilot. Off-loaded so a (possibly slow) LLM
     # call never blocks the live tick loop or SSE delivery.
-    return await asyncio.to_thread(market_service.narrate)
+    return await asyncio.to_thread(market_service.narrate, question or None, model or None)
+
+
+@app.get("/api/narrate/stream")
+async def narrate_stream(q: str = "", model: str = "") -> StreamingResponse:
+    # Streams the co-pilot explanation token-by-token over SSE so it feels live.
+    async def event_source():
+        async for event in market_service.narrate_stream(q or None, model or None):
+            yield f"data: {json.dumps(event)}\n\n"
+
+    return StreamingResponse(event_source(), media_type="text/event-stream")
 
 
 @app.get("/api/config")

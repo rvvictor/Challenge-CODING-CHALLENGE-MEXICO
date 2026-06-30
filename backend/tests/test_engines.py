@@ -830,6 +830,35 @@ class CoPilotTests(unittest.TestCase):
         second = narrator.narrate(snapshot)
         self.assertTrue(second["cached"])
 
+    def test_narrator_streams_deterministic_chunks(self):
+        import asyncio
+
+        narrator = self._narrator()
+        snapshot = {
+            "mode": "demo",
+            "risk": {"paused": False, "reason": "Healthy"},
+            "models": {"cycleAlgo": "dfs", "slippageModel": "book_walk", "sizingMode": "fixed"},
+            "scenarios": {"active": []},
+            "metrics": {},
+            "queuedOpportunities": [{
+                "strategy": "simple", "status": "profitable", "buyExchange": "OKX", "sellExchange": "Kraken",
+                "netBps": 1.4, "confidence": 0.8, "reason": "Net edge cleared risk gates",
+            }],
+        }
+
+        async def collect():
+            events = []
+            async for event in narrator.stream_async(snapshot):
+                events.append(event)
+            return events
+
+        events = asyncio.run(collect())
+        deltas = [event for event in events if event["type"] == "delta"]
+        done = [event for event in events if event["type"] == "done"]
+        self.assertTrue(deltas)
+        self.assertEqual(done[-1]["source"], "deterministic")
+        self.assertIn("OKX -> Kraken", "".join(event["text"] for event in deltas))
+
 
 class SecurityTests(unittest.TestCase):
     def test_control_endpoints_require_token_when_configured(self):
