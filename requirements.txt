@@ -3,3 +3,4 @@ uvicorn[standard]==0.47.0
 ccxt==4.5.56
 redis==8.0.0
 psycopg[binary]>=3.2,<3.3
+anthropic>=0.69,<1.0

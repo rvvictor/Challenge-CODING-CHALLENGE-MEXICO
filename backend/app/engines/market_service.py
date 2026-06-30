@@ -38,6 +38,7 @@ from backend.app.engines.triangular import TriangularArbitrageEngine
 from backend.app.engines.venue_health import VenueHealthTracker
 from backend.app.integrations.ccxt_provider import CcxtStreamProvider
 from backend.app.integrations.global_market import GlobalMarketIntel
+from backend.app.integrations.llm_narrator import DecisionNarrator
 from backend.app.integrations.persistence import DurableEventSink
 from backend.app.integrations.redis_bus import RedisBus
 
@@ -71,6 +72,7 @@ class MarketService:
         self.redis = RedisBus(cfg)
         self.global_market = GlobalMarketIntel(cfg)
         self.venue_health = VenueHealthTracker(cfg)
+        self.narrator = DecisionNarrator(cfg)
         self.stream_provider: CcxtStreamProvider | None = None
         self.started_at = now_ms()
         self.task: asyncio.Task | None = None
@@ -390,6 +392,9 @@ class MarketService:
 
         return BacktestRunner(self.settings).run(ticks)
 
+    def narrate(self) -> dict:
+        return self.narrator.narrate(self.snapshot())
+
     def replay_feed(self, limit: int = 120) -> dict:
         durable = self.persistence.read(limit=limit)
         if durable:
@@ -633,6 +638,7 @@ class MarketService:
                 "volatilityModel": self.settings.volatility_model,
                 "calibrationEnabled": self.settings.calibration_enabled,
             },
+            "coPilot": {"available": self.narrator.available(), "model": self.narrator.model if self.narrator.available() else None},
             "metrics": metrics,
         }
 

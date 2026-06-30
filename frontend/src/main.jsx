@@ -181,7 +181,12 @@ function useAurelion() {
     return payload;
   }, []);
 
-  return { snapshot, connected, control, reset, exportSession, loadParams, applyParams, runBacktest, triggerScenario };
+  const narrate = React.useCallback(async () => {
+    const response = await fetch(`${API_BASE}/api/narrate`);
+    return response.json();
+  }, []);
+
+  return { snapshot, connected, control, reset, exportSession, loadParams, applyParams, runBacktest, triggerScenario, narrate };
 }
 
 function Metric({ icon: Icon, label, value, note, tone = "neutral" }) {
@@ -1278,8 +1283,40 @@ function ResultsWorkbench({ snapshot, loadParams, applyParams, runBacktest }) {
   );
 }
 
+function CoPilot({ narrate, coPilot = {} }) {
+  const [text, setText] = React.useState("");
+  const [source, setSource] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+
+  const run = React.useCallback(async () => {
+    setBusy(true);
+    try {
+      const result = await narrate();
+      setText(result.text || "");
+      setSource(result.source || "");
+    } finally {
+      setBusy(false);
+    }
+  }, [narrate]);
+
+  React.useEffect(() => { run(); }, [run]);
+
+  return (
+    <section className="surface coPilot">
+      <PanelTitle icon={Sparkles} title="AI Co-pilot" pill={coPilot.available ? "Claude" : "deterministic"} />
+      <div className="coPilotBody">
+        <p className="coPilotText">{busy ? "Reading the current decision…" : (text || "Ask the co-pilot to explain the current decision.")}</p>
+        <div className="coPilotFoot">
+          <button type="button" onClick={run} disabled={busy}>{busy ? "…" : "Explain decision"}</button>
+          <small>AI explanation · advisory only{source ? ` · ${source}` : ""}</small>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function App() {
-  const { snapshot, connected, control, reset, exportSession, loadParams, applyParams, runBacktest, triggerScenario } = useAurelion();
+  const { snapshot, connected, control, reset, exportSession, loadParams, applyParams, runBacktest, triggerScenario, narrate } = useAurelion();
   if (!snapshot) {
     return <main className="loading"><div className="sigil"><Sparkles size={24} /></div><span>Starting Aurelion</span></main>;
   }
@@ -1295,6 +1332,7 @@ function App() {
               <EdgeExplainability opportunities={snapshot.queuedOpportunities} />
               <RealityCheck opportunities={snapshot.queuedOpportunities} />
             </div>
+            <CoPilot narrate={narrate} coPilot={snapshot.coPilot} />
             <ResultsWorkbench snapshot={snapshot} loadParams={loadParams} applyParams={applyParams} runBacktest={runBacktest} />
           </div>
           <SideRail snapshot={snapshot} control={control} triggerScenario={triggerScenario} />

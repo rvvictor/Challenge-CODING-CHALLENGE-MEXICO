@@ -783,5 +783,53 @@ class StressLabTests(unittest.TestCase):
         self.assertEqual(len(autonomy["venues"]), len(settings.exchanges))
 
 
+class CoPilotTests(unittest.TestCase):
+    def _narrator(self):
+        import os
+
+        from backend.app.integrations.llm_narrator import DecisionNarrator
+
+        previous = os.environ.pop("ANTHROPIC_API_KEY", None)
+        narrator = DecisionNarrator(Settings())
+        if previous is not None:
+            os.environ["ANTHROPIC_API_KEY"] = previous
+        return narrator
+
+    def test_narrator_falls_back_without_key(self):
+        narrator = self._narrator()
+        self.assertFalse(narrator.available())
+        snapshot = {
+            "mode": "demo",
+            "risk": {"paused": False, "reason": "Healthy"},
+            "models": {"cycleAlgo": "dfs", "slippageModel": "book_walk", "sizingMode": "fixed"},
+            "scenarios": {"active": []},
+            "metrics": {"cumulativePnl": 12.5, "executedCount": 4, "detectedCount": 200, "bestNetBps": 1.4},
+            "queuedOpportunities": [{
+                "strategy": "simple", "status": "profitable", "buyExchange": "OKX", "sellExchange": "Kraken",
+                "netBps": 1.4, "evBps": 1.1, "confidence": 0.82, "reason": "Net edge cleared risk gates",
+            }],
+        }
+        result = narrator.narrate(snapshot)
+        self.assertEqual(result["source"], "deterministic")
+        self.assertIn("OKX -> Kraken", result["text"])
+        self.assertIn("bps", result["text"])
+
+    def test_narrator_explains_circuit_breaker_and_caches(self):
+        narrator = self._narrator()
+        snapshot = {
+            "mode": "demo",
+            "risk": {"paused": True, "reason": "Stale data: Bitstamp"},
+            "models": {"cycleAlgo": "bellman_ford", "slippageModel": "sqrt_impact", "sizingMode": "kelly"},
+            "scenarios": {"active": ["venue_outage"]},
+            "metrics": {},
+            "queuedOpportunities": [],
+        }
+        first = narrator.narrate(snapshot)
+        self.assertIn("circuit breaker", first["text"].lower())
+        self.assertIn("venue_outage", first["text"])
+        second = narrator.narrate(snapshot)
+        self.assertTrue(second["cached"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -139,6 +139,13 @@ async def backtest(ticks: int = 250) -> dict:
     return await asyncio.to_thread(market_service.run_backtest, ticks)
 
 
+@app.get("/api/narrate")
+async def narrate() -> dict:
+    # Advisory, explanation-only co-pilot. Off-loaded so a (possibly slow) LLM
+    # call never blocks the live tick loop or SSE delivery.
+    return await asyncio.to_thread(market_service.narrate)
+
+
 @app.get("/api/config")
 async def config() -> dict:
     return {

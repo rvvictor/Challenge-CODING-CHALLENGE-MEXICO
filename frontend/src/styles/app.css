@@ -1642,3 +1642,47 @@ small,
   color: var(--red) !important;
   font-weight: 800;
 }
+
+/* --- AI Co-pilot -------------------------------------------------------- */
+.coPilotBody {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.coPilotText {
+  margin: 0;
+  min-height: 40px;
+  color: var(--ink);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.coPilotFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.coPilotFoot button {
+  min-height: 32px;
+  padding: 6px 14px;
+  border: 1px solid rgba(96, 87, 186, 0.4);
+  border-radius: 7px;
+  background: rgba(96, 87, 186, 0.12);
+  color: var(--violet);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.coPilotFoot button:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.coPilotFoot small {
+  color: var(--muted);
+}
