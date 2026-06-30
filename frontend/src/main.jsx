@@ -914,14 +914,10 @@ function SideRail({ snapshot, control, triggerScenario }) {
         <PnlChart series={snapshot.pnlSeries} />
         <PnlBreakdown totals={snapshot.totals} />
       </section>
+      <WalletsPanel snapshot={snapshot} />
       <ExchangeCoverage coverage={snapshot.exchangeCoverage} quality={snapshot.venueQuality} health={snapshot.venueHealth} control={control} />
       <CalibrationPanel calibration={snapshot.calibration} enabled={snapshot.models?.calibrationEnabled} />
       <StressLab scenarios={snapshot.scenarios} triggerScenario={triggerScenario} />
-      <WalletsPanel snapshot={snapshot} />
-      <GlobalMarket globalMarket={snapshot.globalMarket || {}} />
-      <SystemStatus snapshot={snapshot} />
-      <LatencySloPanel slo={snapshot.latencySlo} />
-      <DemoQualityPanel quality={snapshot.demoQuality} mode={snapshot.mode} />
     </aside>
   );
 }
@@ -1009,6 +1005,10 @@ function Trades({ trades, metrics = {} }) {
 function InfrastructurePanel({ snapshot }) {
   return (
     <div className="infraDeck">
+      <SystemStatus snapshot={snapshot} />
+      <LatencySloPanel slo={snapshot.latencySlo} />
+      <DemoQualityPanel quality={snapshot.demoQuality} mode={snapshot.mode} />
+      <GlobalMarket globalMarket={snapshot.globalMarket || {}} />
       <Streams streams={snapshot.streams} redis={snapshot.redis} />
       <section className="surface">
         <PanelTitle icon={ShieldAlert} title="Risk Timeline" pill={`${snapshot.riskEvents.length} events`} />
@@ -1269,7 +1269,7 @@ function ResultsWorkbench({ snapshot, loadParams, applyParams, runBacktest }) {
     ["signals", "Signals", snapshot.opportunityHistory?.length || snapshot.opportunities?.length || 0],
     ["control", "Control Room", "live"],
     ["backtest", "Backtest", "replay"],
-    ["infra", "Infra", snapshot.streams?.streams?.length || snapshot.books?.length || 0],
+    ["infra", "Diagnostics", snapshot.streams?.streams?.length || snapshot.books?.length || 0],
   ];
   return (
     <section className="workbench">
