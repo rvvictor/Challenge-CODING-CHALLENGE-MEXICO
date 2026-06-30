@@ -165,8 +165,8 @@ function useAurelion() {
     URL.revokeObjectURL(url);
   }, []);
 
-  const runBacktest = React.useCallback(async (ticks = 250, regime = "normal") => {
-    const response = await fetch(`${API_BASE}/api/backtest?ticks=${ticks}&regime=${regime}`);
+  const runBacktest = React.useCallback(async (ticks = 250, regime = "normal", source = "simulated") => {
+    const response = await fetch(`${API_BASE}/api/backtest?ticks=${ticks}&regime=${regime}&source=${source}`);
     return response.json();
   }, []);
 
@@ -1224,26 +1224,36 @@ function ControlRoom({ loadParams, applyParams }) {
 
 // Event-driven replay of the current (tuned) strategy over deterministic data.
 const BACKTEST_REGIMES = ["calm", "normal", "volatile", "stressed"];
+const BACKTEST_SOURCES = [["simulated", "Simulated"], ["historical", "Real history"]];
 
 function Backtest({ runBacktest }) {
   const [ticks, setTicks] = React.useState(250);
   const [regime, setRegime] = React.useState("normal");
+  const [source, setSource] = React.useState("simulated");
   const [result, setResult] = React.useState(null);
   const [busy, setBusy] = React.useState(false);
 
   const run = async () => {
     setBusy(true);
     try {
-      setResult(await runBacktest(ticks, regime));
+      setResult(await runBacktest(ticks, regime, source));
     } finally {
       setBusy(false);
     }
   };
 
+  const dq = result?.dataQuality;
+  const usedReal = dq?.actual === "historical";
+  const fellBack = dq?.actual === "simulated-fallback";
+
   return (
     <section className="surface backtest">
       <PanelTitle icon={History} title="Backtest / Replay" pill={result ? `${result.executed} trades` : "idle"} />
       <div className="backtestToolbar tradeToolbar">
+        {BACKTEST_SOURCES.map(([id, label]) => (
+          <button key={id} type="button" className={source === id ? "active" : ""} onClick={() => setSource(id)}>{label}</button>
+        ))}
+        <span className="btDivider" aria-hidden="true" />
         {[120, 250, 500].map((n) => (
           <button key={n} type="button" className={ticks === n ? "active" : ""} onClick={() => setTicks(n)}>{n} ticks</button>
         ))}
@@ -1253,8 +1263,17 @@ function Backtest({ runBacktest }) {
         ))}
         <button type="button" className="btRun" onClick={run} disabled={busy}><FlaskConical size={13} /> {busy ? "running…" : "Run backtest"}</button>
       </div>
+      {source === "historical" && (
+        <div className="btSourceNote">Real OHLCV closes from live exchange APIs (public, no keys); order-book depth around each price is synthesized — real L2 history isn't freely available. Triangular legs are skipped for this source.</div>
+      )}
       {result ? (
         <div className="backtestBody">
+          {usedReal && (
+            <div className="btDataBadge good">real data: {(dq.exchanges || []).join(", ")}</div>
+          )}
+          {fellBack && (
+            <div className="btDataBadge warn">real data unavailable right now (network/exchange) — used the simulator instead</div>
+          )}
           <div className="btStats">
             <div className="btStat"><span>Trades</span><strong>{result.executed}</strong></div>
             <div className="btStat"><span>Hit rate</span><strong>{formatPercent(result.hitRate, 1)}</strong></div>
@@ -1264,12 +1283,18 @@ function Backtest({ runBacktest }) {
             <div className="btStat"><span>Sharpe-like</span><strong>{formatNumber(result.sharpeLike, 2)}</strong></div>
           </div>
           <PnlChart series={(result.equityCurve || []).map((point) => ({ time: point.t, pnl: point.pnl }))} />
+          {result.executed === 0 && (
+            <div className="btHonest">
+              No trades cleared the cost gates. Best edge observed: <b>{formatNumber(result.bestObservedNetBps, 2)} bps</b> after fees, slippage and latency
+              {usedReal ? " — real cross-exchange BTC arbitrage is efficiently priced right now; this is the system correctly refusing an unprofitable trade, not a bug." : "."}
+            </div>
+          )}
           <div className="btParams">
             <b>{result.regime}</b> regime · {result.wins}W / {result.losses}L · {result.detected} signals over {result.ticks} ticks · strategy {result.params.cycleAlgo}/{result.params.slippageModel}/{result.params.sizingMode} @ {result.params.minNetBps} bps
           </div>
         </div>
       ) : (
-        <div className="empty">Replay the current tuned strategy over deterministic market data under a chosen <b>regime</b> (calm → stressed) to measure hit rate, P&amp;L, drawdown and a Sharpe-like ratio. Tune in the Control Room, then backtest here.</div>
+        <div className="empty">Replay the current tuned strategy over simulated or <b>real exchange history</b> under a chosen regime, to measure hit rate, P&amp;L, drawdown and a Sharpe-like ratio. Tune in the Control Room, then backtest here.</div>
       )}
     </section>
   );

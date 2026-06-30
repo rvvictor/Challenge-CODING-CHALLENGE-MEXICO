@@ -415,10 +415,10 @@ class MarketService:
             self.calibrator.update(trade.get("buyExchangeId", ""), success)
             self.calibrator.update(trade.get("sellExchangeId", ""), success)
 
-    def run_backtest(self, ticks: int = 250, regime: str = "normal") -> dict:
+    def run_backtest(self, ticks: int = 250, regime: str = "normal", source: str = "simulated") -> dict:
         from backend.app.engines.backtest import BacktestRunner
 
-        return BacktestRunner(self.settings).run(ticks, regime)
+        return BacktestRunner(self.settings).run(ticks, regime, source)
 
     def narrate(self, question: str | None = None, model: str | None = None) -> dict:
         return self.narrator.narrate(self.snapshot(), question, model)

@@ -1520,6 +1520,48 @@ small,
   font-size: 12px;
 }
 
+.btSourceNote {
+  margin: 0 14px 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--paper-2);
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.btDataBadge {
+  display: inline-block;
+  width: fit-content;
+  padding: 5px 10px;
+  border-radius: 7px;
+  font-size: 11.5px;
+  font-weight: 800;
+}
+
+.btDataBadge.good {
+  border: 1px solid rgba(13, 125, 103, 0.34);
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.btDataBadge.warn {
+  border: 1px solid rgba(184, 122, 8, 0.4);
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+
+.btHonest {
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper-2);
+  color: var(--ink);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
 /* --- Self-calibration --------------------------------------------------- */
 .calBody {
   display: grid;

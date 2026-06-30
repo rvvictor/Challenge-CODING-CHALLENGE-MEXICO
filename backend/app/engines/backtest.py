@@ -10,11 +10,15 @@ from backend.app.engines.arbitrage import CrossExchangeArbitrageEngine
 from backend.app.engines.event_store import EventStore
 from backend.app.engines.execution import ExecutionSimulator
 from backend.app.engines.fills import best
+from backend.app.engines.historical_replay import HistoricalMarket
 from backend.app.engines.ledger import WalletLedger
 from backend.app.engines.queue import OpportunityQueue
 from backend.app.engines.risk import RiskManager
 from backend.app.engines.simulator import SimulatedMarket
 from backend.app.engines.triangular import TriangularArbitrageEngine
+from backend.app.integrations.historical_data import fetch_multi_exchange_history
+
+SOURCES = ("simulated", "historical")
 
 
 def now_ms() -> int:
@@ -46,10 +50,18 @@ class BacktestRunner:
     reported hit rate, drawdown and Sharpe-like ratio are credible rather than the
     best-case demo cadence. Fully isolated from the live session."""
 
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, historical_provider=None):
         self.settings = dataclasses.replace(settings, demo_min_execution_gap_ms=0, pair_cooldown_ms=0)
+        # Injectable so tests can supply synthetic candles instead of hitting
+        # real exchange APIs; defaults to the real fetcher.
+        self._historical_provider = historical_provider or fetch_multi_exchange_history
 
-    def _symbols(self, exchange) -> tuple[str, ...]:
+    def _symbols(self, exchange, source: str) -> tuple[str, ...]:
+        if source == "historical":
+            # Real-history mode currently covers cross-exchange BTC arbitrage only
+            # (real closes per venue); triangular/dynamic legs would need real
+            # historical ETH/SOL cross-rates too — left for a future iteration.
+            return (exchange.primary_symbol,)
         quote = "USD" if exchange.primary_symbol.endswith("/USD") else "USDT"
         dynamic = ("SOL/ETH", f"SOL/{quote}")
         return tuple(dict.fromkeys((exchange.primary_symbol, *exchange.triangular_symbols, *dynamic)))
@@ -76,11 +88,34 @@ class BacktestRunner:
         multiplier = max(-3.0, rng.gauss(1.0 - regime["drag"], regime["vol"]))
         return round(detected_pnl * multiplier, 4)
 
-    def run(self, ticks: int = 250, regime: str = "normal") -> dict:
+    def run(self, ticks: int = 250, regime: str = "normal", source: str = "simulated") -> dict:
         settings = self.settings
         regime_key = regime if regime in REGIMES else "normal"
         regime_params = REGIMES[regime_key]
         rng = random.Random(91237 + sum(ord(char) for char in regime_key))
+        ticks = max(1, min(int(ticks or 0), 5000))
+
+        requested_source = source if source in SOURCES else "simulated"
+        data_quality: dict = {"requested": requested_source}
+        if requested_source == "historical":
+            settings = dataclasses.replace(settings, triangular_enabled=False)
+            fetched = self._historical_provider(settings.exchanges, "1m", max(60, min(ticks, 500)))
+            candles_by_exchange = fetched.get("candles", {})
+            data_quality["statuses"] = fetched.get("statuses", {})
+            market = HistoricalMarket(settings.exchanges, candles_by_exchange)
+            if market.length < 5 or len(market.covered_exchange_ids()) < 2:
+                # Not enough real coverage (offline, rate-limited, geo-blocked) —
+                # degrade to the simulator rather than fail the request.
+                market = SimulatedMarket(settings.exchanges)
+                actual_source = "simulated-fallback"
+            else:
+                ticks = min(ticks, market.length)
+                actual_source = "historical"
+                data_quality["exchanges"] = market.covered_exchange_ids()
+        else:
+            market = SimulatedMarket(settings.exchanges)
+            actual_source = "simulated"
+        data_quality["actual"] = actual_source
 
         ledger = WalletLedger(settings)
         risk = RiskManager(settings)
@@ -89,10 +124,8 @@ class BacktestRunner:
         cross = CrossExchangeArbitrageEngine(settings, ledger)
         triangular = TriangularArbitrageEngine(settings, ledger)
         executor = ExecutionSimulator(settings, ledger, store, risk)
-        simulator = SimulatedMarket(settings.exchanges)
         books: dict = {}
 
-        ticks = max(1, min(int(ticks or 0), 5000))
         equity: list[float] = []
         trade_pnls: list[float] = []
         realized_total = 0.0
@@ -100,18 +133,24 @@ class BacktestRunner:
         executed = 0
         wins = 0
         paused_ticks = 0
+        best_net_bps_seen = -999.0
+        near_miss_count = 0
 
+        symbol_source = "historical" if actual_source == "historical" else "simulated"
         for index in range(ticks):
-            for scenario, cadence in regime_params["inject"].items():
-                if cadence and index % cadence == cadence - 1:
-                    simulator.inject_scenario(scenario, settings.exchanges)
+            if hasattr(market, "inject_scenario"):
+                for scenario, cadence in regime_params["inject"].items():
+                    if cadence and index % cadence == cadence - 1:
+                        market.inject_scenario(scenario, settings.exchanges)
 
-            simulator.advance(settings.exchanges)
+            market.advance(settings.exchanges)
             for exchange in settings.exchanges:
-                for symbol in self._symbols(exchange):
+                for symbol in self._symbols(exchange, symbol_source):
                     previous = books.get(f"{exchange.id}:{symbol}")
                     anchor = _book_mid(previous) if previous else None
-                    book = simulator.generate(exchange, settings.exchanges, symbol, anchor)
+                    book = market.generate(exchange, settings.exchanges, symbol, anchor)
+                    if book is None:
+                        continue
                     books[book.key] = book
 
             summaries = self._summaries(books)
@@ -125,6 +164,12 @@ class BacktestRunner:
             opportunities = cross.scan(primary) + triangular.scan(books)
             ranked = queue.rank(opportunities)
             detected += sum(1 for item in ranked if item.get("status") in ("profitable", "rejected", "blocked"))
+            for item in ranked:
+                net_bps = item.get("netBps")
+                if net_bps is not None:
+                    best_net_bps_seen = max(best_net_bps_seen, net_bps)
+                    if item.get("status") == "rejected" and net_bps > -10:
+                        near_miss_count += 1
             for trade in executor.try_execute(ranked, summaries):
                 executed += 1
                 realized = self._realized_pnl(float(trade["netProfit"]), regime_params, rng)
@@ -134,9 +179,12 @@ class BacktestRunner:
                     wins += 1
             equity.append(round(realized_total, 4))
 
-        return self._metrics(equity, trade_pnls, detected, executed, wins, ticks, paused_ticks, regime_key)
+        return self._metrics(
+            equity, trade_pnls, detected, executed, wins, ticks, paused_ticks, regime_key, data_quality,
+            best_net_bps_seen, near_miss_count,
+        )
 
-    def _metrics(self, equity, trade_pnls, detected, executed, wins, ticks, paused_ticks, regime) -> dict:
+    def _metrics(self, equity, trade_pnls, detected, executed, wins, ticks, paused_ticks, regime, data_quality, best_net_bps_seen, near_miss_count) -> dict:
         count = len(trade_pnls)
         total_pnl = round(sum(trade_pnls), 4)
 
@@ -158,7 +206,11 @@ class BacktestRunner:
             "ticks": ticks,
             "regime": regime,
             "regimes": list(REGIMES.keys()),
+            "sources": list(SOURCES),
+            "dataQuality": data_quality,
             "pausedTicks": paused_ticks,
+            "bestObservedNetBps": round(best_net_bps_seen, 3) if best_net_bps_seen > -999 else None,
+            "nearMissCount": near_miss_count,
             "detected": detected,
             "executed": executed,
             "wins": wins,

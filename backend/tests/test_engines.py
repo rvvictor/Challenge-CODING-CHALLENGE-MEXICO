@@ -6,7 +6,7 @@ import asyncio
 
 from backend.app.core.config import Settings
 from backend.app.core.models import Level, OrderBook
-from backend.app.engines.fills import estimate_fill
+from backend.app.engines.fills import best, estimate_fill
 from backend.app.engines.ledger import WalletLedger
 from backend.app.engines.queue import OpportunityQueue
 from backend.app.engines.risk import RiskManager
@@ -960,6 +960,72 @@ class ExecutionGatewayTests(unittest.TestCase):
             self.assertTrue(client.get("/api/execution").json()["guard"]["killSwitch"])
         finally:
             client.post("/api/control", json={"killSwitch": False, "executionGateway": "paper"})
+
+
+class HistoricalBacktestTests(unittest.TestCase):
+    def _fake_candles(self, base_price: float, count: int = 80, step: float = 0.0):
+        from backend.app.integrations.historical_data import Candle
+
+        rows = []
+        price = base_price
+        for i in range(count):
+            price = max(1.0, price + step)
+            rows.append(Candle(timestamp=1700000000000 + i * 60000, open=price, high=price * 1.001, low=price * 0.999, close=price, volume=12.0))
+        return rows
+
+    def test_historical_market_synthesizes_book_from_real_candle(self):
+        from backend.app.engines.historical_replay import HistoricalMarket
+
+        settings = Settings()
+        okx = settings.exchange_by_id("okx")
+        candles = {"okx": self._fake_candles(70000.0)}
+        market = HistoricalMarket(settings.exchanges, candles)
+        market.advance(settings.exchanges)
+        result = market.generate(okx, settings.exchanges, okx.primary_symbol)
+        self.assertIsNotNone(result)
+        self.assertEqual(result.source, "historical")
+        ask = best(result.asks, "ask")
+        bid = best(result.bids, "bid")
+        self.assertGreater(ask.price, bid.price)
+        self.assertAlmostEqual((ask.price + bid.price) / 2, 70000.0, delta=50)
+
+    def test_historical_market_returns_none_for_non_primary_symbol(self):
+        from backend.app.engines.historical_replay import HistoricalMarket
+
+        settings = Settings()
+        okx = settings.exchange_by_id("okx")
+        market = HistoricalMarket(settings.exchanges, {"okx": self._fake_candles(70000.0)})
+        market.advance(settings.exchanges)
+        self.assertIsNone(market.generate(okx, settings.exchanges, "ETH/BTC"))
+
+    def test_backtest_runs_over_injected_real_history(self):
+        from backend.app.engines.backtest import BacktestRunner
+
+        # Two venues with a persistent divergence: okx cheaper, kraken richer —
+        # a real, reproducible arbitrage signal without hitting the network.
+        def fake_provider(exchanges, timeframe, limit):
+            candles = {}
+            for exchange in exchanges:
+                base = 69800.0 if exchange.id == "okx" else 70200.0
+                candles[exchange.id] = self._fake_candles(base, count=80)
+            return {"candles": candles, "statuses": {exchange.id: "live" for exchange in exchanges}}
+
+        runner = BacktestRunner(Settings(market_mode="demo"), historical_provider=fake_provider)
+        result = runner.run(ticks=60, regime="normal", source="historical")
+        self.assertEqual(result["dataQuality"]["actual"], "historical")
+        self.assertIn("okx", result["dataQuality"]["exchanges"])
+        self.assertGreater(result["executed"], 0)
+
+    def test_backtest_falls_back_to_simulated_without_real_coverage(self):
+        from backend.app.engines.backtest import BacktestRunner
+
+        def empty_provider(exchanges, timeframe, limit):
+            return {"candles": {}, "statuses": {exchange.id: "unavailable" for exchange in exchanges}}
+
+        runner = BacktestRunner(Settings(market_mode="demo"), historical_provider=empty_provider)
+        result = runner.run(ticks=30, source="historical")
+        self.assertEqual(result["dataQuality"]["actual"], "simulated-fallback")
+        self.assertEqual(result["ticks"], 30)
 
 
 if __name__ == "__main__":
