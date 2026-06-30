@@ -129,7 +129,7 @@ def explain_opportunity(item: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
-def latency_slo(books: list[dict[str, Any]]) -> dict[str, Any]:
+def latency_slo(books: list[dict[str, Any]], decision_latencies: list[float] | None = None) -> dict[str, Any]:
     ages = [float(book.get("ageMs") or 0) for book in books]
     updates = [float(book.get("latencyMs") or 0) for book in books]
     p95_age = percentile(ages, 0.95)
@@ -139,7 +139,7 @@ def latency_slo(books: list[dict[str, Any]]) -> dict[str, Any]:
         status = "breach"
     elif p95_age > 1000 or p95_update > 450:
         status = "watch"
-    return {
+    payload = {
         "status": status,
         "healthy": status != "breach",
         "summary": "SLO healthy" if status == "green" else "Latency watch" if status == "watch" else "Latency breach",
@@ -156,6 +156,18 @@ def latency_slo(books: list[dict[str, Any]]) -> dict[str, Any]:
             "targetP95": 450,
         },
     }
+    if decision_latencies:
+        # Internal processing time: from "books read this tick" to "opportunities
+        # scanned, scored and risk-gated" — isolates Aurelion's own compute
+        # overhead from network/exchange latency (bookAgeMs/updateLatencyMs above).
+        # Answers "how fast does the system itself decide once it has the data?"
+        payload["decisionMs"] = {
+            "p50": rounded(percentile(decision_latencies, 0.5), 2),
+            "p95": rounded(percentile(decision_latencies, 0.95), 2),
+            "last": rounded(decision_latencies[-1], 2),
+            "samples": len(decision_latencies),
+        }
+    return payload
 
 
 def venue_quality(books: list[dict[str, Any]]) -> list[dict[str, Any]]:

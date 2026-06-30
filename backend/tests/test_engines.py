@@ -1028,5 +1028,30 @@ class HistoricalBacktestTests(unittest.TestCase):
         self.assertEqual(result["ticks"], 30)
 
 
+class DecisionLatencyTests(unittest.TestCase):
+    def test_latency_slo_reports_decision_latency_when_given(self):
+        from backend.app.engines.edge_analysis import latency_slo
+
+        books = [{"ageMs": 100, "latencyMs": 50}, {"ageMs": 200, "latencyMs": 80}]
+        without = latency_slo(books)
+        self.assertNotIn("decisionMs", without)
+        with_samples = latency_slo(books, [0.4, 0.6, 0.5, 1.2])
+        self.assertIn("decisionMs", with_samples)
+        self.assertEqual(with_samples["decisionMs"]["samples"], 4)
+        self.assertGreater(with_samples["decisionMs"]["p95"], 0)
+
+    def test_market_service_tracks_decision_latency_per_tick(self):
+        from backend.app.engines.market_service import MarketService
+
+        service = MarketService(Settings(market_mode="demo"))
+        service.tick()
+        service.tick()
+        self.assertTrue(len(service.decision_latency_window) >= 1)
+        snapshot = service.snapshot()
+        self.assertIn("decisionMs", snapshot["latencySlo"])
+        service.reset()
+        self.assertEqual(service.decision_latency_window, [])
+
+
 if __name__ == "__main__":
     unittest.main()

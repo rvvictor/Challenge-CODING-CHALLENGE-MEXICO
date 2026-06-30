@@ -688,6 +688,28 @@ small,
   background: var(--red-soft);
 }
 
+.sloDecision {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0 11px 9px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--paper-2);
+}
+
+.sloDecision span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.sloDecision b {
+  color: var(--galaxy);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
 .sloStrip {
   display: flex;
   flex-wrap: wrap;

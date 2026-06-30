@@ -89,6 +89,10 @@ class MarketService:
         # Baseline snapshot of every tunable parameter, captured at startup so the
         # Control Room "reset" returns to the configured (env-derived) defaults.
         self.default_parameters = parameter_values(cfg)
+        # Rolling window of internal decision latency (books-read -> ranked +
+        # risk-gated), in ms. Isolated from network/exchange latency so the
+        # dashboard can show "how fast does Aurelion itself decide."
+        self.decision_latency_window: list[float] = []
 
     async def start(self) -> None:
         await self.redis.start()
@@ -293,6 +297,7 @@ class MarketService:
         self.simulator.volatility_stress_until = 0
         self.pre_trade_guard.kill_switch = False
         self.set_execution_gateway("paper")
+        self.decision_latency_window = []
         self.started_at = now_ms()
         self.scan_tick = 0
         self.recorded_signal_times.clear()
@@ -330,6 +335,10 @@ class MarketService:
         if self.mode == "demo" or self.degraded_demo:
             self.generate_demo_books()
 
+        # Decision-latency window starts once books are read: it measures
+        # Aurelion's own processing time (scan, score, risk-gate), separate from
+        # network/exchange latency already tracked per-book (latencyMs/ageMs).
+        decision_started = time.perf_counter()
         primary = self.primary_books()
         summaries = self.book_summaries(primary)
         stream_snapshot = self.stream_provider.snapshot() if self.stream_provider else {"streams": []}
@@ -353,6 +362,9 @@ class MarketService:
         primary_map = {book.exchange_id: book for book in adjusted_primary}
         opportunities = self.cross_engine.scan(primary_map) + self.triangular_engine.scan(adjusted_books)
         ranked = [explain_opportunity(item) for item in self.queue.rank(opportunities)]
+        decision_latency_ms = (time.perf_counter() - decision_started) * 1000
+        self.decision_latency_window.append(decision_latency_ms)
+        self.decision_latency_window = self.decision_latency_window[-200:]
         self.last_scan = ranked
         if ranked:
             curated = self.curated_opportunities(ranked)
@@ -638,7 +650,7 @@ class MarketService:
                 "universeCount": len(self.settings.exchange_universe),
                 "profile": self.settings.active_exchanges or "all",
             },
-            "latencySlo": latency_slo(books),
+            "latencySlo": latency_slo(books, self.decision_latency_window),
             "venueQuality": venue_quality(books),
             "demoQuality": demo_quality(self.mode, metrics, current - self.started_at, risk_snapshot),
             "edgeLedger": self.edge_ledger.snapshot(),

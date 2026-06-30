@@ -613,12 +613,13 @@ function GlobalMarket({ globalMarket }) {
 function LatencySloPanel({ slo = {} }) {
   const age = slo.bookAgeMs || {};
   const update = slo.updateLatencyMs || {};
+  const decision = slo.decisionMs;
   return (
     <section className={`surface sloPanel ${slo.status || "green"}`}>
       <PanelTitle icon={Gauge} title="Speed" pill={slo.summary || "loading"} />
       <div className="sloGrid">
         <article>
-          <span>Libros p95</span>
+          <span>Book age p95</span>
           <b>{Math.round(age.p95 || 0)} ms</b>
           <small>target {Math.round(age.targetP95 || 0)} ms</small>
         </article>
@@ -628,6 +629,12 @@ function LatencySloPanel({ slo = {} }) {
           <small>target {Math.round(update.targetP95 || 0)} ms</small>
         </article>
       </div>
+      {decision && (
+        <div className="sloDecision">
+          <span>Aurelion decision time (scan + score + risk-gate, ex. network)</span>
+          <b>{formatNumber(decision.p50, 2)} ms p50 · {formatNumber(decision.p95, 2)} ms p95</b>
+        </div>
+      )}
       <div className="sloStrip">
         <span>p50 age {Math.round(age.p50 || 0)} ms</span>
         <span>p99 age {Math.round(age.p99 || 0)} ms</span>
