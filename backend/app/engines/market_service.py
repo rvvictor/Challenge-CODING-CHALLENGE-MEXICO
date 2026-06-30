@@ -179,6 +179,42 @@ class MarketService:
         await self.redis.publish("snapshots", snapshot)
         self.broadcast(snapshot)
 
+    async def trigger_scenario(self, name: str) -> dict:
+        """Adversarial Stress Lab: inject a one-click crisis and let the bot react
+        (circuit breaker, venue demotion, partial/leg-failure handling)."""
+        current = now_ms()
+        key = (name or "").strip().lower()
+        applied = ""
+        if self.mode == "demo" or self.degraded_demo:
+            applied = self.simulator.inject_scenario(key, self.settings.exchanges)
+        if key in ("flash_crash", "volatility"):
+            self.risk.activate(
+                "volatility",
+                "Stress scenario: flash crash 3.20% in <1s",
+                current,
+                {"changePct": 3.2, "scenario": "flash_crash", "stressTest": True},
+            )
+            applied = applied or "flash_crash"
+        if key == "leg_failure":
+            self.executor.leg_failure_until = current + 20000
+            applied = applied or "leg_failure"
+        event = {
+            "id": f"SC-{current}",
+            "type": "scenario",
+            "time": current,
+            "condition": key or "unknown",
+            "reason": f"Adversarial scenario injected: {key or 'unknown'}",
+            "metadata": {"scenario": key, "source": "stress-lab"},
+        }
+        self.store.add_event(event)
+        self.edge_ledger.append("scenario", {"scenario": key, "applied": applied})
+        await self.redis.publish("risk", event)
+        self.flush_risk_events()
+        snapshot = self.snapshot()
+        await self.redis.publish("snapshots", snapshot)
+        self.broadcast(snapshot)
+        return {"applied": applied, "active": snapshot["scenarios"]["active"]}
+
     def set_auto_execution(self, enabled: bool) -> None:
         self.risk.set_auto_execution(enabled)
 
@@ -227,6 +263,9 @@ class MarketService:
         self.executor.reset()
         self.venue_health.reset()
         self.calibrator.reset()
+        self.simulator.scenarios.clear()
+        self.simulator.outage_venue = None
+        self.simulator.volatility_stress_until = 0
         self.started_at = now_ms()
         self.scan_tick = 0
         self.recorded_signal_times.clear()
@@ -579,6 +618,12 @@ class MarketService:
                 "latencyMeaning": "Book age is the freshness of the latest order book. Update latency is how long the provider waited for the last exchange update.",
             },
             "calibration": self.calibrator.snapshot(),
+            "scenarios": {
+                "active": self.simulator.active_scenarios() if (self.mode == "demo" or self.degraded_demo) else [],
+                "available": list(self.simulator.SCENARIOS),
+                "legFailureActive": current < self.executor.leg_failure_until,
+            },
+            "inventoryAutonomy": self.ledger.inventory_autonomy(self.settings.exchanges, mark_price),
             "models": {
                 "cycleAlgo": self.settings.cycle_algo,
                 "slippageModel": self.settings.slippage_model,

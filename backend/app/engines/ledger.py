@@ -136,6 +136,50 @@ class WalletLedger:
         sell["USDT"] = float(sell["USDT"]) + sell_credit
         self.realized_pnl += trade["netProfit"]
 
+    def inventory_autonomy(self, exchanges, mark_price: float) -> dict:
+        """How many more typical trades each venue can fund before running dry.
+
+        A venue needs USDT to be a buy leg and BTC to be a sell leg, so we report
+        both runways and the limiting one. The session figure is the weakest venue
+        (or, with pooled rebalancing on, the pooled runway), which is the real
+        constraint on how long the bot can keep operating without a transfer."""
+        mark_price = mark_price or 70000.0
+        trade_btc = max(self.settings.max_trade_btc, 1e-9)
+        buy_notional = trade_btc * mark_price
+        rows = []
+        total_usdt = 0.0
+        total_btc = 0.0
+        for exchange in exchanges:
+            wallet = self.balances.get(exchange.id)
+            if not wallet:
+                continue
+            usdt = float(wallet["USDT"])
+            btc = float(wallet["BTC"])
+            total_usdt += usdt
+            total_btc += btc
+            usdt_trades = usdt / buy_notional if buy_notional else 0
+            btc_trades = btc / trade_btc if trade_btc else 0
+            fundable = min(usdt_trades, btc_trades)
+            rows.append({
+                "exchangeId": exchange.id,
+                "exchangeName": wallet["exchangeName"],
+                "usdtTrades": round(usdt_trades, 1),
+                "btcTrades": round(btc_trades, 1),
+                "tradesFundable": round(fundable, 1),
+                "low": fundable < 5,
+            })
+        pooled = min(total_usdt / buy_notional if buy_notional else 0, total_btc / trade_btc if trade_btc else 0)
+        per_venue_min = min((row["tradesFundable"] for row in rows), default=0.0)
+        return {
+            "tradeBtc": trade_btc,
+            "venues": rows,
+            "perVenueMin": round(per_venue_min, 1),
+            "pooledAutonomy": round(pooled, 1),
+            "sessionAutonomy": round(pooled if self.settings.inventory_rebalance_enabled else per_venue_min, 1),
+            "rebalanceEnabled": self.settings.inventory_rebalance_enabled,
+            "lowVenues": sum(1 for row in rows if row["low"]),
+        }
+
     def totals(self, mark_price: float, exchanges=None, eth_mark_price: float | None = None) -> dict:
         wallets = self.active(exchanges) if exchanges is not None else self.all()
         usdt = sum(float(wallet["USDT"]) for wallet in wallets)

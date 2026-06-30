@@ -21,6 +21,9 @@ class SimulatedMarket:
         self.triangular_shock: dict | None = None
         self.dynamic_shock: dict | None = None
         self.volatility_stress_until = 0
+        # Adversarial Stress Lab: named scenarios active until a future tick.
+        self.scenarios: dict[str, int] = {}
+        self.outage_venue: str | None = None
         for index, exchange in enumerate(exchanges):
             self.state[f"{exchange.id}:BTC"] = {"basis_bps": (index - len(exchanges) / 2) * 0.35, "liq": self.random.uniform(0.7, 1.35)}
             self.state[f"{exchange.id}:ETHBTC"] = {"basis_bps": (index - len(exchanges) / 2) * 0.22, "liq": self.random.uniform(8, 26)}
@@ -40,6 +43,32 @@ class SimulatedMarket:
         direction = 1 if self.random.random() >= 0.5 else -1
         self.global_btc *= 1 + direction * change_pct / 100
         self.volatility_stress_until = self.tick + duration_ticks
+
+    SCENARIOS = ("flash_crash", "liquidity_crunch", "latency_spike", "venue_outage", "leg_failure")
+
+    def inject_scenario(self, name: str, exchanges: tuple[ExchangeConfig, ...], duration_ticks: int = 16) -> str:
+        name = (name or "").strip().lower()
+        if name in ("flash_crash", "flash-crash", "volatility"):
+            self.inject_volatility_stress()
+            self.scenarios["flash_crash"] = self.tick + duration_ticks
+            return "flash_crash"
+        if name == "venue_outage" and exchanges:
+            self.outage_venue = self.random.choice(exchanges).id
+            self.scenarios["venue_outage"] = self.tick + duration_ticks
+            return "venue_outage"
+        if name in ("liquidity_crunch", "latency_spike", "leg_failure"):
+            self.scenarios[name] = self.tick + duration_ticks
+            return name
+        return ""
+
+    def scenario_active(self, name: str) -> bool:
+        return self.scenarios.get(name, 0) > self.tick
+
+    def active_scenarios(self) -> list[str]:
+        names = [name for name, until in self.scenarios.items() if until > self.tick]
+        if self.tick < self.volatility_stress_until and "flash_crash" not in names:
+            names.append("volatility_stress")
+        return names
 
     def maybe_shock(self, exchanges: tuple[ExchangeConfig, ...]) -> None:
         cross_active = self.shock and self.shock["until"] > self.tick
@@ -147,7 +176,7 @@ class SimulatedMarket:
             and self.shock
             and exchange.id in {self.shock["cheap"], self.shock["rich"]}
             and (self.tick - self.shock["started"] in {0, 2, 5} or self.random.random() < 0.09)
-        )
+        ) or (self.scenario_active("liquidity_crunch") and kind == "BTC")
         for i in range(20):
             if kind in {"ETHBTC", "SOLETH"}:
                 gap = i * self.random.uniform(0.000004, 0.000018)
@@ -169,6 +198,16 @@ class SimulatedMarket:
             bids.append(Level(round(mid - half_spread - gap, decimals), round(qty * self.random.uniform(0.85, 1.18), 6)))
 
         now = int(time.time() * 1000)
+        # Scenario overrides: latency spike inflates round-trip latency; venue
+        # outage backdates one venue's books so they read as stale (which trips the
+        # stale-data circuit breaker and demotes the venue via health scoring).
+        latency_ms = round(self.random.uniform(15, 95))
+        if self.scenario_active("latency_spike"):
+            latency_ms = round(self.random.uniform(750, 1600))
+        timestamp = now
+        if self.scenario_active("venue_outage") and self.outage_venue == exchange.id:
+            timestamp = now - 15000
+            latency_ms = max(latency_ms, 1200)
         return OrderBook(
             key=f"{exchange.id}:{symbol}",
             exchange_id=exchange.id,
@@ -182,6 +221,6 @@ class SimulatedMarket:
             confidence=max(0.5, exchange.confidence - 0.12),
             asks=sort_levels(asks, "ask"),
             bids=sort_levels(bids, "bid"),
-            latency_ms=round(self.random.uniform(15, 95)),
-            timestamp=now,
+            latency_ms=latency_ms,
+            timestamp=timestamp,
         )

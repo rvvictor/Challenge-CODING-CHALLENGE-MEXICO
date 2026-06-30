@@ -170,7 +170,18 @@ function useAurelion() {
     return response.json();
   }, []);
 
-  return { snapshot, connected, control, reset, exportSession, loadParams, applyParams, runBacktest };
+  const triggerScenario = React.useCallback(async (scenario) => {
+    const response = await fetch(`${API_BASE}/api/scenario`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ scenario }),
+    });
+    const payload = await response.json();
+    if (payload.snapshot) setSnapshot(payload.snapshot);
+    return payload;
+  }, []);
+
+  return { snapshot, connected, control, reset, exportSession, loadParams, applyParams, runBacktest, triggerScenario };
 }
 
 function Metric({ icon: Icon, label, value, note, tone = "neutral" }) {
@@ -825,16 +836,64 @@ function PnlBreakdown({ totals = {} }) {
   );
 }
 
+const SCENARIO_LABELS = {
+  flash_crash: "Flash crash",
+  liquidity_crunch: "Liquidity crunch",
+  latency_spike: "Latency spike",
+  venue_outage: "Venue outage",
+  leg_failure: "Leg failure",
+};
+
+function StressLab({ scenarios = {}, triggerScenario }) {
+  const [busy, setBusy] = React.useState("");
+  const active = scenarios.active || [];
+  const available = scenarios.available || [];
+  const fire = async (name) => {
+    setBusy(name);
+    try {
+      await triggerScenario(name);
+    } finally {
+      setBusy("");
+    }
+  };
+  return (
+    <section className="surface stressLab">
+      <PanelTitle icon={FlaskConical} title="Stress Lab" pill={active.length ? `${active.length} active` : "stable"} />
+      <div className="stressGrid">
+        {available.map((name) => (
+          <button key={name} type="button" className={active.includes(name) ? "active" : ""} disabled={busy === name} onClick={() => fire(name)}>
+            {SCENARIO_LABELS[name] || name}
+          </button>
+        ))}
+      </div>
+      {active.length > 0 && (
+        <div className="stressActive">Injected: {active.map((name) => SCENARIO_LABELS[name] || name).join(", ")}. Watch the circuit breaker, venue health and trade reconciliation respond.</div>
+      )}
+    </section>
+  );
+}
+
 function WalletsPanel({ snapshot }) {
+  const autonomy = snapshot.inventoryAutonomy || {};
+  const venueRows = autonomy.venues || [];
+  const lowSet = new Set(venueRows.filter((venue) => venue.low).map((venue) => venue.exchangeId));
+  const fundableById = Object.fromEntries(venueRows.map((venue) => [venue.exchangeId, venue.tradesFundable]));
   return (
     <section className="surface">
       <PanelTitle icon={DatabaseZap} title="Wallets" pill={formatMoney(snapshot.totals.markToMarket)} />
+      {autonomy.sessionAutonomy != null && (
+        <div className="autonomyBar">
+          <span>Inventory autonomy</span>
+          <b className={autonomy.sessionAutonomy < 8 ? "amberTone" : ""}>{autonomy.sessionAutonomy} trades</b>
+          <small>{autonomy.rebalanceEnabled ? "pooled" : "per-venue"}{autonomy.lowVenues ? ` · ${autonomy.lowVenues} low` : ""}</small>
+        </div>
+      )}
       <div className="wallets">
         {snapshot.wallets.map((wallet) => (
-          <article key={wallet.exchangeId}>
+          <article key={wallet.exchangeId} className={lowSet.has(wallet.exchangeId) ? "walletLow" : ""}>
             <b>{wallet.exchangeName}</b>
             <span>{formatMoney(wallet.USDT)}</span>
-            <small>{formatBtc(wallet.BTC)} / {formatNumber(wallet.ETH, 3)} ETH</small>
+            <small>{formatBtc(wallet.BTC)} / {formatNumber(wallet.ETH, 3)} ETH{fundableById[wallet.exchangeId] != null ? ` · ${fundableById[wallet.exchangeId]} trades` : ""}</small>
           </article>
         ))}
       </div>
@@ -842,7 +901,7 @@ function WalletsPanel({ snapshot }) {
   );
 }
 
-function SideRail({ snapshot, control }) {
+function SideRail({ snapshot, control, triggerScenario }) {
   return (
     <aside className="sideRail">
       <section className="surface pnlCard">
@@ -852,6 +911,7 @@ function SideRail({ snapshot, control }) {
       </section>
       <ExchangeCoverage coverage={snapshot.exchangeCoverage} quality={snapshot.venueQuality} health={snapshot.venueHealth} control={control} />
       <CalibrationPanel calibration={snapshot.calibration} enabled={snapshot.models?.calibrationEnabled} />
+      <StressLab scenarios={snapshot.scenarios} triggerScenario={triggerScenario} />
       <WalletsPanel snapshot={snapshot} />
       <GlobalMarket globalMarket={snapshot.globalMarket || {}} />
       <SystemStatus snapshot={snapshot} />
@@ -929,6 +989,9 @@ function Trades({ trades, metrics = {} }) {
               {trade.strategy === "triangular" && <small>{trade.legs?.map((leg) => `${leg.from}->${leg.to}`).join(" / ")}</small>}
               {trade.partial && <small>{formatPercent(clampRatio(trade.filledRatio))} of target</small>}
               {!trade.partial && <small>100% of target</small>}
+              {trade.reconciliation?.netExposureBtc > 0 && (
+                <small className="reconNote">leg failure · covered {formatBtc(trade.reconciliation.netExposureBtc)} ({formatMoney(trade.reconciliation.coverCost)})</small>
+              )}
             </div>
           </article>
         ))}
@@ -1216,7 +1279,7 @@ function ResultsWorkbench({ snapshot, loadParams, applyParams, runBacktest }) {
 }
 
 function App() {
-  const { snapshot, connected, control, reset, exportSession, loadParams, applyParams, runBacktest } = useAurelion();
+  const { snapshot, connected, control, reset, exportSession, loadParams, applyParams, runBacktest, triggerScenario } = useAurelion();
   if (!snapshot) {
     return <main className="loading"><div className="sigil"><Sparkles size={24} /></div><span>Starting Aurelion</span></main>;
   }
@@ -1234,7 +1297,7 @@ function App() {
             </div>
             <ResultsWorkbench snapshot={snapshot} loadParams={loadParams} applyParams={applyParams} runBacktest={runBacktest} />
           </div>
-          <SideRail snapshot={snapshot} control={control} />
+          <SideRail snapshot={snapshot} control={control} triggerScenario={triggerScenario} />
         </section>
       </main>
     </>

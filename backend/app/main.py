@@ -75,6 +75,10 @@ class ParameterPayload(BaseModel):
     reset: bool = Field(default=False)
 
 
+class ScenarioPayload(BaseModel):
+    scenario: str = Field(default="")
+
+
 @app.get("/api/health")
 async def health() -> dict:
     return {"ok": True, "botName": settings.app_name, "mode": market_service.mode}
@@ -196,6 +200,12 @@ async def update_params(body: ParameterPayload, _: None = Depends(require_contro
     result = market_service.parameters()
     result["applied"] = applied
     return result
+
+
+@app.post("/api/scenario")
+async def scenario(body: ScenarioPayload, _: None = Depends(require_control_auth)) -> dict:
+    result = await market_service.trigger_scenario(body.scenario)
+    return {"result": result, "snapshot": market_service.snapshot()}
 
 
 @app.post("/api/reset")

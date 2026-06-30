@@ -727,5 +727,61 @@ class BacktestAndLearningTests(unittest.TestCase):
         sink.close()
 
 
+class StressLabTests(unittest.TestCase):
+    def _sim(self):
+        settings = Settings()
+        sim = SimulatedMarket(settings.exchanges)
+        sim.advance(settings.exchanges)
+        return settings, sim
+
+    def test_liquidity_crunch_thins_the_book(self):
+        settings, sim = self._sim()
+        self.assertEqual(sim.inject_scenario("liquidity_crunch", settings.exchanges), "liquidity_crunch")
+        self.assertTrue(sim.scenario_active("liquidity_crunch"))
+        exchange = settings.exchanges[0]
+        book = sim.generate(exchange, settings.exchanges, exchange.primary_symbol)
+        self.assertTrue(all(level.qty < 0.001 for level in book.asks))
+
+    def test_venue_outage_makes_books_stale(self):
+        settings, sim = self._sim()
+        sim.inject_scenario("venue_outage", settings.exchanges)
+        exchange = settings.exchange_by_id(sim.outage_venue)
+        book = sim.generate(exchange, settings.exchanges, exchange.primary_symbol)
+        self.assertLess(book.timestamp, int(time.time() * 1000) - 9000)
+        self.assertGreaterEqual(book.latency_ms, 1200)
+
+    def test_latency_spike_inflates_latency(self):
+        settings, sim = self._sim()
+        sim.inject_scenario("latency_spike", settings.exchanges)
+        exchange = settings.exchanges[0]
+        book = sim.generate(exchange, settings.exchanges, exchange.primary_symbol)
+        self.assertGreaterEqual(book.latency_ms, 700)
+
+    def test_leg_failure_reconciliation_opens_and_covers_exposure(self):
+        from backend.app.engines.event_store import EventStore
+        from backend.app.engines.execution import ExecutionSimulator
+
+        settings = Settings()
+        executor = ExecutionSimulator(settings, WalletLedger(settings), EventStore(), RiskManager(settings))
+        opportunity = {"strategy": "simple", "qtyBtc": 0.01, "sellPrice": 71000}
+
+        hedged = executor.reconcile_fills(opportunity)
+        self.assertTrue(hedged["hedged"])
+        self.assertEqual(hedged["netExposureBtc"], 0)
+
+        executor.leg_failure_until = int(time.time() * 1000) + 10000
+        failed = executor.reconcile_fills(opportunity)
+        self.assertGreater(failed["netExposureBtc"], 0)
+        self.assertGreater(failed["coverCost"], 0)
+        self.assertEqual(failed["correctiveAction"], "cover-residual")
+
+    def test_inventory_autonomy_reports_runway(self):
+        settings = Settings()
+        autonomy = WalletLedger(settings).inventory_autonomy(settings.exchanges, 70000)
+        self.assertTrue(autonomy["venues"])
+        self.assertGreater(autonomy["sessionAutonomy"], 0)
+        self.assertEqual(len(autonomy["venues"]), len(settings.exchanges))
+
+
 if __name__ == "__main__":
     unittest.main()
