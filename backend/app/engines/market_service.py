@@ -334,6 +334,12 @@ class MarketService:
         self.scan_tick += 1
         if self.mode == "demo" or self.degraded_demo:
             self.generate_demo_books()
+            # Demo realism: periodically (~every 72s) inject a brief leg-failure
+            # window through the same Stress Lab mechanism a user can trigger
+            # manually, so an unattended live demo session occasionally shows a
+            # real reconciled loss instead of a monotonically rising P&L curve.
+            if self.scan_tick % 160 == 77:
+                self.schedule(self.trigger_scenario("leg_failure"))
 
         # Decision-latency window starts once books are read: it measures
         # Aurelion's own processing time (scan, score, risk-gate), separate from
@@ -432,11 +438,11 @@ class MarketService:
 
         return BacktestRunner(self.settings).run(ticks, regime, source)
 
-    def narrate(self, question: str | None = None, model: str | None = None) -> dict:
-        return self.narrator.narrate(self.snapshot(), question, model)
+    def narrate(self, question: str | None = None, model: str | None = None, trade_id: str | None = None) -> dict:
+        return self.narrator.narrate(self.snapshot(), question, model, trade_id)
 
-    def narrate_stream(self, question: str | None = None, model: str | None = None):
-        return self.narrator.stream_async(self.snapshot(), question, model)
+    def narrate_stream(self, question: str | None = None, model: str | None = None, trade_id: str | None = None):
+        return self.narrator.stream_async(self.snapshot(), question, model, trade_id)
 
     def replay_feed(self, limit: int = 120) -> dict:
         durable = self.persistence.read(limit=limit)

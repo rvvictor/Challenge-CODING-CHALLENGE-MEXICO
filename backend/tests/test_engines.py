@@ -843,6 +843,50 @@ class CoPilotTests(unittest.TestCase):
         second = narrator.narrate(snapshot)
         self.assertTrue(second["cached"])
 
+    def test_narrator_explains_a_specific_trade_deterministically(self):
+        narrator = self._narrator()
+        snapshot = {
+            "mode": "demo",
+            "risk": {"paused": False, "reason": "Healthy"},
+            "models": {"cycleAlgo": "dfs", "slippageModel": "book_walk", "sizingMode": "fixed"},
+            "scenarios": {"active": []},
+            "metrics": {},
+            "queuedOpportunities": [],
+            "trades": [{
+                "id": "T-leg-1",
+                "strategy": "simple",
+                "buyExchange": "OKX",
+                "sellExchange": "Kraken",
+                "status": "leg-failure",
+                "partial": True,
+                "filledRatio": 0.55,
+                "netProfit": -3.21,
+                "netBps": -4.5,
+                "executionQuality": {"edgeCaptureBps": -4.5, "adverseMoveCost": 0.4},
+                "reconciliation": {"netExposureBtc": 0.0045, "coverCost": 2.1},
+            }],
+        }
+        result = narrator.narrate(snapshot, trade_id="T-leg-1")
+        self.assertEqual(result["source"], "deterministic")
+        self.assertIn("OKX -> Kraken", result["text"])
+        self.assertIn("55%", result["text"])
+        self.assertIn("2.1", result["text"])
+
+    def test_narrate_unknown_trade_id_falls_back_to_general(self):
+        narrator = self._narrator()
+        snapshot = {
+            "mode": "demo",
+            "risk": {"paused": False, "reason": "Healthy"},
+            "models": {"cycleAlgo": "dfs", "slippageModel": "book_walk", "sizingMode": "fixed"},
+            "scenarios": {"active": []},
+            "metrics": {},
+            "queuedOpportunities": [],
+            "trades": [],
+        }
+        result = narrator.narrate(snapshot, trade_id="does-not-exist")
+        self.assertEqual(result["source"], "deterministic")
+        self.assertIn("No actionable opportunity", result["text"])
+
     def test_narrator_streams_deterministic_chunks(self):
         import asyncio
 

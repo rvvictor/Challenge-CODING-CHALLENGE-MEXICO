@@ -961,6 +961,27 @@ small,
   gap: 10px;
 }
 
+.tradeTopActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.explainTradeBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 22px;
+  padding: 2px 8px;
+  border: 1px solid rgba(96, 87, 186, 0.35);
+  border-radius: 6px;
+  background: rgba(96, 87, 186, 0.1);
+  color: var(--violet);
+  cursor: pointer;
+  font-size: 10.5px;
+  font-weight: 800;
+}
+
 .wallets small,
 .tradeList em,
 .tradeList small {

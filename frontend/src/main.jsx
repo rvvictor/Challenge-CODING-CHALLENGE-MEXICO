@@ -952,7 +952,7 @@ function executionKindClass(item) {
   return "filled";
 }
 
-function Trades({ trades, metrics = {} }) {
+function Trades({ trades, metrics = {}, onExplainTrade }) {
   const [filter, setFilter] = React.useState("all");
   const filters = [
     ["all", "All"],
@@ -985,7 +985,14 @@ function Trades({ trades, metrics = {} }) {
           <article className={trade.partial ? "partialTrade" : ""} key={trade.id}>
             <div className="tradeTop">
               <b>{fillTitle(trade)}</b>
-              <em className={`badge ${executionKindClass(trade)}`}>{executionKind(trade)}</em>
+              <div className="tradeTopActions">
+                <em className={`badge ${executionKindClass(trade)}`}>{executionKind(trade)}</em>
+                {onExplainTrade && (
+                  <button type="button" className="explainTradeBtn" onClick={() => onExplainTrade(trade.id)}>
+                    <Sparkles size={11} /> explain
+                  </button>
+                )}
+              </div>
             </div>
             <span>{trade.strategy === "triangular" ? `${trade.cyclePath?.join(" -> ")} / ${formatMoney(trade.quoteIn)}` : formatBtc(trade.qtyBtc)}</span>
             <em className={trade.netProfit >= 0 ? "green" : "red"}>{formatMoney(trade.netProfit)}</em>
@@ -1326,7 +1333,7 @@ function CalibrationPanel({ calibration, enabled }) {
   );
 }
 
-function ResultsWorkbench({ snapshot, loadParams, applyParams, runBacktest, control }) {
+function ResultsWorkbench({ snapshot, loadParams, applyParams, runBacktest, control, onExplainTrade }) {
   const [tab, setTab] = React.useState("opportunities");
   const tabs = [
     ["opportunities", "Opportunities", snapshot.queue?.queued || 0],
@@ -1346,7 +1353,7 @@ function ResultsWorkbench({ snapshot, loadParams, applyParams, runBacktest, cont
         ))}
       </div>
       {tab === "opportunities" && <OpportunityTable opportunities={snapshot.queuedOpportunities} queue={snapshot.queue} now={snapshot.now} />}
-      {tab === "trades" && <Trades trades={snapshot.trades} metrics={snapshot.metrics} />}
+      {tab === "trades" && <Trades trades={snapshot.trades} metrics={snapshot.metrics} onExplainTrade={onExplainTrade} />}
       {tab === "signals" && <OpportunityHistory opportunities={snapshot.opportunityHistory || snapshot.opportunities} metrics={snapshot.metrics} now={snapshot.now} />}
       {tab === "control" && <ControlRoom loadParams={loadParams} applyParams={applyParams} />}
       {tab === "backtest" && <Backtest runBacktest={runBacktest} />}
@@ -1374,7 +1381,7 @@ function modelLabel(id) {
 // Live, streaming, conversational co-pilot. Re-explains automatically when the top
 // decision changes (debounced + rate-limited), streams tokens over SSE, and answers
 // free-text questions. Strictly advisory — it never decides or executes.
-function CoPilot({ snapshot }) {
+function CoPilot({ snapshot, focusTrade }) {
   const coPilot = snapshot?.coPilot || {};
   const models = coPilot.models || [];
   const [text, setText] = React.useState("");
@@ -1386,8 +1393,9 @@ function CoPilot({ snapshot }) {
   const esRef = React.useRef(null);
   const lastKeyRef = React.useRef("");
   const lastRunRef = React.useRef(0);
+  const lastFocusNonceRef = React.useRef(0);
 
-  const startStream = React.useCallback((askText) => {
+  const startStream = React.useCallback((askText, tradeId) => {
     if (esRef.current) { esRef.current.close(); esRef.current = null; }
     setText("");
     setSource("");
@@ -1396,6 +1404,7 @@ function CoPilot({ snapshot }) {
     const params = new URLSearchParams();
     if (askText) params.set("q", askText);
     if (model) params.set("model", model);
+    if (tradeId) params.set("tradeId", tradeId);
     const events = new EventSource(`${API_BASE}/api/narrate/stream?${params.toString()}`);
     esRef.current = events;
     events.onmessage = (event) => {
@@ -1430,6 +1439,13 @@ function CoPilot({ snapshot }) {
     }, delay);
     return () => clearTimeout(timer);
   }, [contextKey, auto, startStream]);
+
+  React.useEffect(() => {
+    if (!focusTrade?.nonce || focusTrade.nonce === lastFocusNonceRef.current) return;
+    lastFocusNonceRef.current = focusTrade.nonce;
+    lastKeyRef.current = `trade:${focusTrade.id}`;
+    startStream("", focusTrade.id);
+  }, [focusTrade, startStream]);
 
   React.useEffect(() => () => { if (esRef.current) esRef.current.close(); }, []);
 
@@ -1477,6 +1493,7 @@ function CoPilot({ snapshot }) {
 
 function App() {
   const { snapshot, connected, control, reset, exportSession, loadParams, applyParams, runBacktest, triggerScenario } = useAurelion();
+  const [explainTrade, setExplainTrade] = React.useState(null);
   if (!snapshot) {
     return <main className="loading"><div className="sigil"><Sparkles size={24} /></div><span>Starting Aurelion</span></main>;
   }
@@ -1492,8 +1509,15 @@ function App() {
               <EdgeExplainability opportunities={snapshot.queuedOpportunities} />
               <RealityCheck opportunities={snapshot.queuedOpportunities} />
             </div>
-            <CoPilot snapshot={snapshot} />
-            <ResultsWorkbench snapshot={snapshot} loadParams={loadParams} applyParams={applyParams} runBacktest={runBacktest} control={control} />
+            <CoPilot snapshot={snapshot} focusTrade={explainTrade} />
+            <ResultsWorkbench
+              snapshot={snapshot}
+              loadParams={loadParams}
+              applyParams={applyParams}
+              runBacktest={runBacktest}
+              control={control}
+              onExplainTrade={(id) => setExplainTrade({ id, nonce: Date.now() })}
+            />
           </div>
           <SideRail snapshot={snapshot} control={control} triggerScenario={triggerScenario} />
         </section>

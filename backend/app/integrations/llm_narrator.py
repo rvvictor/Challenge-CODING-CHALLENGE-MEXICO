@@ -58,7 +58,34 @@ class DecisionNarrator:
     def _resolve_model(self, model: str | None) -> str:
         return model if model in ALLOWED_MODELS else self.model
 
-    def _build_context(self, snapshot: dict) -> dict:
+    def _trade_route(self, trade: dict) -> str:
+        if trade.get("strategy") == "triangular":
+            return " -> ".join(trade.get("cyclePath") or [])
+        return f"{trade.get('buyExchange')} -> {trade.get('sellExchange')}"
+
+    def _focus_trade(self, snapshot: dict, trade_id: str | None) -> dict | None:
+        if not trade_id:
+            return None
+        for trade in snapshot.get("trades") or []:
+            if trade.get("id") == trade_id:
+                reconciliation = trade.get("reconciliation") or {}
+                return {
+                    "id": trade.get("id"),
+                    "route": self._trade_route(trade),
+                    "strategy": trade.get("strategy"),
+                    "status": trade.get("status"),
+                    "partial": trade.get("partial"),
+                    "filledRatio": trade.get("filledRatio"),
+                    "netProfit": trade.get("netProfit"),
+                    "netBps": trade.get("netBps"),
+                    "edgeCaptureBps": (trade.get("executionQuality") or {}).get("edgeCaptureBps"),
+                    "adverseMoveCost": (trade.get("executionQuality") or {}).get("adverseMoveCost"),
+                    "legExposureBtc": reconciliation.get("netExposureBtc"),
+                    "coverCost": reconciliation.get("coverCost") or trade.get("coverCost"),
+                }
+        return None
+
+    def _build_context(self, snapshot: dict, trade_id: str | None = None) -> dict:
         risk = snapshot.get("risk", {})
         metrics = snapshot.get("metrics", {})
         scenarios = (snapshot.get("scenarios") or {}).get("active", [])
@@ -66,12 +93,8 @@ class DecisionNarrator:
         top = queued[0] if queued else None
         decision = None
         if top:
-            if top.get("strategy") == "triangular":
-                route = " -> ".join(top.get("cyclePath") or [])
-            else:
-                route = f"{top.get('buyExchange')} -> {top.get('sellExchange')}"
             decision = {
-                "route": route,
+                "route": self._trade_route(top),
                 "strategy": top.get("strategy"),
                 "status": top.get("status"),
                 "netBps": top.get("netBps"),
@@ -91,16 +114,19 @@ class DecisionNarrator:
             "bestNetBps": metrics.get("bestNetBps"),
             "autonomy": (snapshot.get("inventoryAutonomy") or {}).get("sessionAutonomy"),
             "decision": decision,
+            "focusTrade": self._focus_trade(snapshot, trade_id),
         }
 
     def _context_key(self, ctx: dict) -> str:
         decision = ctx.get("decision") or {}
+        focus = ctx.get("focusTrade") or {}
         return "|".join(str(part) for part in (
             ctx.get("paused"),
             decision.get("route"),
             decision.get("status"),
             round(decision.get("netBps") or 0, 1),
             ",".join(ctx.get("scenarios") or []),
+            focus.get("id"),
         ))
 
     def _change_note(self, decision: dict | None) -> str:
@@ -117,7 +143,28 @@ class DecisionNarrator:
         direction = "improved" if after > before else "weakened"
         return f"Its net edge {direction} from {before} to {after} bps since the last read."
 
+    def _fallback_focus_trade(self, focus: dict) -> str:
+        parts: list[str] = [f"Trade {focus['route']} ({focus.get('strategy')}) is recorded as {focus.get('status')}."]
+        net = focus.get("netProfit")
+        if net is not None:
+            parts.append(f"Net P&L: {net:+.4f} after all modeled costs.")
+        if focus.get("partial"):
+            ratio = round((focus.get("filledRatio") or 0) * 100)
+            parts.append(f"It only filled {ratio}% of the target size.")
+        capture = focus.get("edgeCaptureBps")
+        if capture is not None:
+            parts.append(f"It captured {capture} bps of edge after the adverse price move during execution.")
+        exposure = focus.get("legExposureBtc")
+        if exposure:
+            parts.append(
+                f"One leg under-filled, leaving {exposure} BTC of open exposure; the bot covered the residual "
+                f"at a worse price, costing {focus.get('coverCost')} — that correction is included in the net P&L above."
+            )
+        return " ".join(parts)
+
     def _fallback(self, ctx: dict) -> str:
+        if ctx.get("focusTrade"):
+            return self._fallback_focus_trade(ctx["focusTrade"])
         parts: list[str] = []
         if ctx.get("paused"):
             parts.append(
@@ -161,6 +208,15 @@ class DecisionNarrator:
 
     def _prompt(self, ctx: dict, question: str | None) -> str:
         facts = json.dumps(ctx, default=str)
+        if ctx.get("focusTrade"):
+            base = (
+                "Explain this specific executed trade (ctx.focusTrade) to a non-expert evaluator: what "
+                "happened, whether it filled cleanly or had a problem (partial fill / leg failure / "
+                "adverse price move), and how that affected its P&L."
+            )
+            if question:
+                base += f" The evaluator also asked: {question}"
+            return f"{base}\n\nFacts:\n{facts}"
         if question:
             return (
                 "Answer the evaluator's question about Aurelion's current state, grounded ONLY in these "
@@ -193,11 +249,11 @@ class DecisionNarrator:
         self._cache_at = when
         self._prev_decision = decision
 
-    def narrate(self, snapshot: dict, question: str | None = None, model: str | None = None) -> dict:
-        ctx = self._build_context(snapshot)
+    def narrate(self, snapshot: dict, question: str | None = None, model: str | None = None, trade_id: str | None = None) -> dict:
+        ctx = self._build_context(snapshot, trade_id)
         key = self._context_key(ctx)
         current = now_ms()
-        if not question and key == self._cache_key and self._cache_text and current - self._cache_at < self._cache_ttl_ms:
+        if not question and not trade_id and key == self._cache_key and self._cache_text and current - self._cache_at < self._cache_ttl_ms:
             return {"source": self._cache_source, "text": self._cache_text, "cached": True, "model": self.model if self.available() else None}
         if not self.available():
             text = self._answer_or_fallback(ctx, question)
@@ -220,9 +276,9 @@ class DecisionNarrator:
             yield {"type": "delta", "text": (word if index == 0 else " " + word)}
             await asyncio.sleep(0.012)
 
-    async def stream_async(self, snapshot: dict, question: str | None = None, model: str | None = None):
+    async def stream_async(self, snapshot: dict, question: str | None = None, model: str | None = None, trade_id: str | None = None):
         """Async generator of {'type': 'delta'|'done', ...} events for SSE."""
-        ctx = self._build_context(snapshot)
+        ctx = self._build_context(snapshot, trade_id)
         key = self._context_key(ctx)
         if not self.available():
             text = self._answer_or_fallback(ctx, question)
