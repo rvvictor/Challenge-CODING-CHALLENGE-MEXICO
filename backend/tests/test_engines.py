@@ -666,5 +666,66 @@ class QuantModelTests(unittest.TestCase):
         self.assertEqual(sd_risk._window_volatility_pct(100, 100), 0.0)
 
 
+class BacktestAndLearningTests(unittest.TestCase):
+    def test_calibrator_learns_and_gates_by_samples(self):
+        from backend.app.engines.calibration import SuccessCalibrator
+
+        calibrator = SuccessCalibrator(alpha_prior=9, beta_prior=1, min_samples=4)
+        self.assertEqual(calibrator.factor("okx"), 1.0)  # cold start is neutral
+        for _ in range(6):
+            calibrator.update("okx", False)
+        self.assertLess(calibrator.probability("okx"), 0.9)  # prior 0.9 drops with failures
+        self.assertLess(calibrator.factor("okx"), 1.0)       # applied once >= min_samples
+        for _ in range(50):
+            calibrator.update("kraken", True)
+        self.assertGreater(calibrator.probability("kraken"), 0.9)
+
+    def test_calibration_reduces_confidence_when_enabled(self):
+        from backend.app.engines.arbitrage import CrossExchangeArbitrageEngine
+        from backend.app.engines.calibration import SuccessCalibrator
+
+        settings = Settings(market_mode="demo", calibration_enabled=True)
+        calibrator = SuccessCalibrator(min_samples=2)
+        for _ in range(8):
+            calibrator.update("kraken", False)  # make kraken look unreliable
+        engine = CrossExchangeArbitrageEngine(settings, WalletLedger(settings), calibrator)
+        okx = settings.exchange_by_id("okx")
+        kraken = settings.exchange_by_id("kraken")
+        books = {
+            "okx": book(okx, "BTC/USDT", [(70000, 1)], [(69990, 1)]),
+            "kraken": book(kraken, "BTC/USDT", [(71010, 1)], [(71000, 1)]),
+        }
+        opportunity = next(o for o in engine.scan(books) if o["strategy"] == "simple")
+        self.assertLess(opportunity["confidence"], 1.0)
+
+    def test_backtest_runner_produces_metrics(self):
+        from backend.app.engines.backtest import BacktestRunner
+
+        result = BacktestRunner(Settings(market_mode="demo")).run(ticks=40)
+        for key in ("ticks", "detected", "executed", "hitRate", "totalPnl", "maxDrawdown", "sharpeLike", "equityCurve", "params"):
+            self.assertIn(key, result)
+        self.assertEqual(result["ticks"], 40)
+        self.assertTrue(result["equityCurve"])
+        self.assertGreaterEqual(result["executed"], 0)
+
+    def test_persistence_read_and_count_roundtrip(self):
+        import os
+        import tempfile
+
+        from backend.app.integrations.persistence import DurableEventSink
+
+        tmp = os.path.join(tempfile.mkdtemp(), "aurelion-test.db")
+        sink = DurableEventSink(Settings(persistence_enabled=True, sqlite_path=tmp))
+        if sink.status != "connected":
+            self.skipTest("sqlite sink unavailable in this environment")
+        sink.append("opportunity", {"route": "OKX -> Kraken", "netBps": 1.2})
+        sink.append_many("trade", [{"id": "T1"}, {"id": "T2"}])
+        self.assertEqual(sink.count(), 3)
+        trades = sink.read(kind="trade")
+        self.assertEqual(len(trades), 2)
+        self.assertEqual(trades[0]["payload"]["id"], "T2")  # newest first
+        sink.close()
+
+
 if __name__ == "__main__":
     unittest.main()

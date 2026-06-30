@@ -1,6 +1,6 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
-import { Activity, ArrowRightLeft, ChartNoAxesCombined, CirclePause, Clock3, DatabaseZap, FileDown, Gauge, Globe2, ListChecks, Network, Power, Radar, RefreshCw, RotateCcw, ShieldAlert, SlidersHorizontal, Sparkles, Triangle, Zap } from "lucide-react";
+import { Activity, ArrowRightLeft, Brain, ChartNoAxesCombined, CirclePause, Clock3, DatabaseZap, FileDown, FlaskConical, Gauge, Globe2, History, ListChecks, Network, Power, Radar, RefreshCw, RotateCcw, ShieldAlert, SlidersHorizontal, Sparkles, Triangle, Zap } from "lucide-react";
 import "./styles/app.css";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "";
@@ -165,7 +165,12 @@ function useAurelion() {
     URL.revokeObjectURL(url);
   }, []);
 
-  return { snapshot, connected, control, reset, exportSession, loadParams, applyParams };
+  const runBacktest = React.useCallback(async (ticks = 250) => {
+    const response = await fetch(`${API_BASE}/api/backtest?ticks=${ticks}`);
+    return response.json();
+  }, []);
+
+  return { snapshot, connected, control, reset, exportSession, loadParams, applyParams, runBacktest };
 }
 
 function Metric({ icon: Icon, label, value, note, tone = "neutral" }) {
@@ -846,6 +851,7 @@ function SideRail({ snapshot, control }) {
         <PnlBreakdown totals={snapshot.totals} />
       </section>
       <ExchangeCoverage coverage={snapshot.exchangeCoverage} quality={snapshot.venueQuality} health={snapshot.venueHealth} control={control} />
+      <CalibrationPanel calibration={snapshot.calibration} enabled={snapshot.models?.calibrationEnabled} />
       <WalletsPanel snapshot={snapshot} />
       <GlobalMarket globalMarket={snapshot.globalMarket || {}} />
       <SystemStatus snapshot={snapshot} />
@@ -1115,13 +1121,79 @@ function ControlRoom({ loadParams, applyParams }) {
   );
 }
 
-function ResultsWorkbench({ snapshot, loadParams, applyParams }) {
+// Event-driven replay of the current (tuned) strategy over deterministic data.
+function Backtest({ runBacktest }) {
+  const [ticks, setTicks] = React.useState(250);
+  const [result, setResult] = React.useState(null);
+  const [busy, setBusy] = React.useState(false);
+
+  const run = async () => {
+    setBusy(true);
+    try {
+      setResult(await runBacktest(ticks));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="surface backtest">
+      <PanelTitle icon={History} title="Backtest / Replay" pill={result ? `${result.executed} trades` : "idle"} />
+      <div className="backtestToolbar tradeToolbar">
+        {[120, 250, 500].map((n) => (
+          <button key={n} type="button" className={ticks === n ? "active" : ""} onClick={() => setTicks(n)}>{n} ticks</button>
+        ))}
+        <button type="button" className="btRun" onClick={run} disabled={busy}><FlaskConical size={13} /> {busy ? "running…" : "Run backtest"}</button>
+      </div>
+      {result ? (
+        <div className="backtestBody">
+          <div className="btStats">
+            <div className="btStat"><span>Trades</span><strong>{result.executed}</strong></div>
+            <div className="btStat"><span>Hit rate</span><strong>{formatPercent(result.hitRate, 1)}</strong></div>
+            <div className="btStat"><span>Total P&amp;L</span><strong className={result.totalPnl >= 0 ? "green" : "red"}>{formatMoney(result.totalPnl)}</strong></div>
+            <div className="btStat"><span>Avg / trade</span><strong>{formatMoney(result.avgPnlPerTrade)}</strong></div>
+            <div className="btStat"><span>Max drawdown</span><strong>{formatMoney(result.maxDrawdown)}</strong></div>
+            <div className="btStat"><span>Sharpe-like</span><strong>{formatNumber(result.sharpeLike, 2)}</strong></div>
+          </div>
+          <PnlChart series={(result.equityCurve || []).map((point) => ({ time: point.t, pnl: point.pnl }))} />
+          <div className="btParams">
+            Replayed: {result.params.cycleAlgo} · {result.params.slippageModel} · {result.params.sizingMode} · min edge {result.params.minNetBps} bps · {result.detected} signals over {result.ticks} ticks
+          </div>
+        </div>
+      ) : (
+        <div className="empty">Replay the current tuned strategy over deterministic market data to measure hit rate, P&amp;L, drawdown and a Sharpe-like ratio. Tune in the Control Room, then backtest here.</div>
+      )}
+    </section>
+  );
+}
+
+function CalibrationPanel({ calibration, enabled }) {
+  if (!calibration) return null;
+  const venues = calibration.venues || [];
+  return (
+    <section className="surface calibration">
+      <PanelTitle icon={Brain} title="Self-calibration" pill={enabled ? "applied" : "tracking"} />
+      <div className="calBody">
+        {venues.length ? venues.map((venue) => (
+          <div className="calRow" key={venue.venue}>
+            <b>{venue.venue}</b>
+            <div className="calBar"><span className={venue.probability >= 0.75 ? "good" : venue.probability >= 0.5 ? "warn" : "bad"} style={{ width: `${Math.round(clampRatio(venue.probability) * 100)}%` }} /></div>
+            <small>{formatPercent(venue.probability, 0)} · {venue.samples} fills{venue.applied ? "" : " · warming"}</small>
+          </div>
+        )) : <div className="empty">Learning venue reliability from fills…</div>}
+      </div>
+    </section>
+  );
+}
+
+function ResultsWorkbench({ snapshot, loadParams, applyParams, runBacktest }) {
   const [tab, setTab] = React.useState("opportunities");
   const tabs = [
     ["opportunities", "Opportunities", snapshot.queue?.queued || 0],
     ["trades", "Trades", snapshot.trades?.length || 0],
     ["signals", "Signals", snapshot.opportunityHistory?.length || snapshot.opportunities?.length || 0],
     ["control", "Control Room", "live"],
+    ["backtest", "Backtest", "replay"],
     ["infra", "Infra", snapshot.streams?.streams?.length || snapshot.books?.length || 0],
   ];
   return (
@@ -1137,13 +1209,14 @@ function ResultsWorkbench({ snapshot, loadParams, applyParams }) {
       {tab === "trades" && <Trades trades={snapshot.trades} metrics={snapshot.metrics} />}
       {tab === "signals" && <OpportunityHistory opportunities={snapshot.opportunityHistory || snapshot.opportunities} metrics={snapshot.metrics} now={snapshot.now} />}
       {tab === "control" && <ControlRoom loadParams={loadParams} applyParams={applyParams} />}
+      {tab === "backtest" && <Backtest runBacktest={runBacktest} />}
       {tab === "infra" && <InfrastructurePanel snapshot={snapshot} />}
     </section>
   );
 }
 
 function App() {
-  const { snapshot, connected, control, reset, exportSession, loadParams, applyParams } = useAurelion();
+  const { snapshot, connected, control, reset, exportSession, loadParams, applyParams, runBacktest } = useAurelion();
   if (!snapshot) {
     return <main className="loading"><div className="sigil"><Sparkles size={24} /></div><span>Starting Aurelion</span></main>;
   }
@@ -1159,7 +1232,7 @@ function App() {
               <EdgeExplainability opportunities={snapshot.queuedOpportunities} />
               <RealityCheck opportunities={snapshot.queuedOpportunities} />
             </div>
-            <ResultsWorkbench snapshot={snapshot} loadParams={loadParams} applyParams={applyParams} />
+            <ResultsWorkbench snapshot={snapshot} loadParams={loadParams} applyParams={applyParams} runBacktest={runBacktest} />
           </div>
           <SideRail snapshot={snapshot} control={control} />
         </section>

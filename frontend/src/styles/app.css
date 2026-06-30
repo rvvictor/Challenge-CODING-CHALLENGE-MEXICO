@@ -1455,3 +1455,113 @@ small,
     grid-template-columns: 1fr;
   }
 }
+
+/* --- Backtest / Replay -------------------------------------------------- */
+.btRun {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-color: rgba(31, 111, 150, 0.4) !important;
+  background: var(--blue-soft) !important;
+  color: var(--blue) !important;
+}
+
+.btRun:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.backtestBody {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.btStats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.btStat {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper-2);
+}
+
+.btStat span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.btStat strong {
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+}
+
+.btParams {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* --- Self-calibration --------------------------------------------------- */
+.calBody {
+  display: grid;
+  gap: 9px;
+  padding: 12px 14px;
+}
+
+.calRow {
+  display: grid;
+  grid-template-columns: 64px 1fr auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.calRow b {
+  font-size: 12.5px;
+}
+
+.calBar {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--paper-2);
+  overflow: hidden;
+}
+
+.calBar span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+}
+
+.calBar span.good {
+  background: var(--green);
+}
+
+.calBar span.warn {
+  background: var(--amber);
+}
+
+.calBar span.bad {
+  background: var(--red);
+}
+
+.calRow small {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .btStats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

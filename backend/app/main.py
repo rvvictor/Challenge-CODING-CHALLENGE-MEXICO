@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import site
 import sys
 from contextlib import asynccontextmanager
@@ -123,9 +124,15 @@ async def export_session() -> dict:
 
 
 @app.get("/api/replay")
-async def replay() -> dict:
-    snapshot = market_service.snapshot()
-    return snapshot["replay"]
+async def replay(limit: int = 120) -> dict:
+    return market_service.replay_feed(limit)
+
+
+@app.get("/api/backtest")
+async def backtest(ticks: int = 250) -> dict:
+    # Runs the engines over a deterministic replay using the current parameters.
+    # Off-loaded to a thread so the live tick loop / SSE are not blocked.
+    return await asyncio.to_thread(market_service.run_backtest, ticks)
 
 
 @app.get("/api/config")

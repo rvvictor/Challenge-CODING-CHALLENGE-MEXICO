@@ -145,6 +145,7 @@ class Settings:
     sizing_mode: str = os.getenv("SIZING_MODE", "fixed")
     kelly_fraction: float = number_env("KELLY_FRACTION", 0.5)
     volatility_model: str = os.getenv("VOLATILITY_MODEL", "range")
+    calibration_enabled: bool = bool_env("CALIBRATION_ENABLED", False)
     triangular_enabled: bool = bool_env("TRIANGULAR_ENABLED", True)
     triangular_quote_size: float = number_env("TRIANGULAR_QUOTE_SIZE", 650)
     triangular_min_net_profit_usd: float = number_env("TRIANGULAR_MIN_NET_PROFIT_USD", 0.18)
@@ -235,6 +236,7 @@ PARAMETER_REGISTRY: tuple[ParameterSpec, ...] = (
     ParameterSpec("sizing_mode", "models", "Position sizing", "fixed (use max trade size) or kelly (fractional-Kelly sizing by edge quality).", "choice", options=("fixed", "kelly")),
     ParameterSpec("kelly_fraction", "models", "Kelly fraction", "Fraction of full Kelly used when sizing is set to kelly.", "float", 0.0, 1.0, 0.05, ""),
     ParameterSpec("volatility_model", "models", "Volatility model", "range (oldest->now %), ewma (exponentially weighted) or stddev (rolling sigma of returns).", "choice", options=("range", "ewma", "stddev")),
+    ParameterSpec("calibration_enabled", "models", "Bayesian calibration", "When on, a Beta-Bernoulli success rate per venue (learned from realized fills) multiplies into confidence, so the bot trusts failing venues less.", "bool"),
     # Execution & gates
     ParameterSpec("min_trade_btc", "execution", "Min trade size", "Smallest executable size; below this an opportunity is blocked.", "float", 0.0005, 0.05, 0.0005, "BTC"),
     ParameterSpec("max_trade_btc", "execution", "Max trade size", "Largest size simulated per trade (position cap).", "float", 0.001, 0.1, 0.001, "BTC"),

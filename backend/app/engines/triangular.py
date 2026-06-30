@@ -19,9 +19,10 @@ def rounded(value: float, decimals: int = 6) -> float:
 
 
 class TriangularArbitrageEngine:
-    def __init__(self, settings: Settings, ledger: WalletLedger):
+    def __init__(self, settings: Settings, ledger: WalletLedger, calibrator=None):
         self.settings = settings
         self.ledger = ledger
+        self.calibrator = calibrator
 
     def scan(self, books: dict[str, OrderBook]) -> list[dict]:
         if not self.settings.triangular_enabled:
@@ -255,6 +256,8 @@ class TriangularArbitrageEngine:
         gross_bps = gross_profit / quote_in * 10000
         max_age = max(current - book.timestamp for book in cycle_books if book)
         confidence = min(exchange.confidence, *(book.confidence for book in cycle_books if book), max(0.2, 1 - max_age / self.settings.max_book_age_ms))
+        if self.settings.calibration_enabled and self.calibrator:
+            confidence *= self.calibrator.factor(exchange_id)
         total_costs = max(0, gross_quote_out - final_quote_out) + latency_risk_cost
         ev = expected_value_score(
             net_profit=net_profit,

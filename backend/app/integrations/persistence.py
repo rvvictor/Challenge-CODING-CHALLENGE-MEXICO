@@ -104,6 +104,64 @@ class DurableEventSink:
             self.status = "error"
             self.error = str(exc)
 
+    def read(self, kind: str | None = None, limit: int = 200) -> list[dict]:
+        """Read recorded events for this session, newest first. Closes the loop on
+        the 'durable + auditable' promise: replay/export can be served from the
+        store rather than only from in-memory state."""
+        if not self.enabled or self.status != "connected":
+            return []
+        limit = max(1, min(int(limit or 0), 2000))
+        try:
+            if self.driver == "postgres" and self._pg:
+                with self._pg.cursor() as cursor:
+                    if kind:
+                        cursor.execute(
+                            "SELECT kind, payload, created_at FROM aurelion_events WHERE session_id = %s AND kind = %s ORDER BY id DESC LIMIT %s",
+                            (self.session_id, kind, limit),
+                        )
+                    else:
+                        cursor.execute(
+                            "SELECT kind, payload, created_at FROM aurelion_events WHERE session_id = %s ORDER BY id DESC LIMIT %s",
+                            (self.session_id, limit),
+                        )
+                    rows = cursor.fetchall()
+                return [{"kind": row[0], "payload": row[1], "createdAt": row[2]} for row in rows]
+            if self.driver == "sqlite" and self._sqlite:
+                cursor = self._sqlite.cursor()
+                if kind:
+                    cursor.execute(
+                        "SELECT kind, payload, created_at FROM aurelion_events WHERE session_id = ? AND kind = ? ORDER BY id DESC LIMIT ?",
+                        (self.session_id, kind, limit),
+                    )
+                else:
+                    cursor.execute(
+                        "SELECT kind, payload, created_at FROM aurelion_events WHERE session_id = ? ORDER BY id DESC LIMIT ?",
+                        (self.session_id, limit),
+                    )
+                rows = cursor.fetchall()
+                return [{"kind": row[0], "payload": json.loads(row[1]), "createdAt": row[2]} for row in rows]
+        except Exception as exc:
+            self.status = "error"
+            self.error = str(exc)
+        return []
+
+    def count(self) -> int:
+        if not self.enabled or self.status != "connected":
+            return 0
+        try:
+            if self.driver == "postgres" and self._pg:
+                with self._pg.cursor() as cursor:
+                    cursor.execute("SELECT COUNT(*) FROM aurelion_events WHERE session_id = %s", (self.session_id,))
+                    return int(cursor.fetchone()[0])
+            if self.driver == "sqlite" and self._sqlite:
+                cursor = self._sqlite.cursor()
+                cursor.execute("SELECT COUNT(*) FROM aurelion_events WHERE session_id = ?", (self.session_id,))
+                return int(cursor.fetchone()[0])
+        except Exception as exc:
+            self.status = "error"
+            self.error = str(exc)
+        return 0
+
     def snapshot(self) -> dict:
         return {
             "enabled": self.enabled,

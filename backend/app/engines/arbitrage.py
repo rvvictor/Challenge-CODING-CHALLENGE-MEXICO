@@ -21,9 +21,10 @@ def rounded(value: float, decimals: int = 6) -> float:
 
 
 class CrossExchangeArbitrageEngine:
-    def __init__(self, settings: Settings, ledger: WalletLedger):
+    def __init__(self, settings: Settings, ledger: WalletLedger, calibrator=None):
         self.settings = settings
         self.ledger = ledger
+        self.calibrator = calibrator
 
     def scan(self, books_by_exchange: dict[str, OrderBook]) -> list[dict]:
         current = now_ms()
@@ -140,6 +141,8 @@ class CrossExchangeArbitrageEngine:
         gross_bps = gross_profit / buy_fill.quote * 10000 if buy_fill.quote else 0
         age_confidence = max(0.2, 1 - max(current - buy_book.timestamp, current - sell_book.timestamp) / self.settings.max_book_age_ms)
         confidence = min(buy_book.confidence, sell_book.confidence, age_confidence)
+        if self.settings.calibration_enabled and self.calibrator:
+            confidence *= self.calibrator.factor(buy_book.exchange_id, sell_book.exchange_id)
         inventory_penalty = rebalance_cost if capacity["mode"] == "rebalanced" else 0
         ev = expected_value_score(
             net_profit=net_profit,

@@ -17,6 +17,7 @@ from backend.app.core.config import (
 )
 from backend.app.core.models import OrderBook
 from backend.app.engines.arbitrage import CrossExchangeArbitrageEngine
+from backend.app.engines.calibration import SuccessCalibrator
 from backend.app.engines.edge_analysis import (
     compact_opportunity_record,
     demo_quality,
@@ -61,8 +62,9 @@ class MarketService:
         self.store = EventStore(persistence=self.persistence)
         self.ledger = WalletLedger(cfg)
         self.risk = RiskManager(cfg)
-        self.cross_engine = CrossExchangeArbitrageEngine(cfg, self.ledger)
-        self.triangular_engine = TriangularArbitrageEngine(cfg, self.ledger)
+        self.calibrator = SuccessCalibrator()
+        self.cross_engine = CrossExchangeArbitrageEngine(cfg, self.ledger, self.calibrator)
+        self.triangular_engine = TriangularArbitrageEngine(cfg, self.ledger, self.calibrator)
         self.queue = OpportunityQueue()
         self.edge_ledger = EdgeLedger()
         self.executor = ExecutionSimulator(cfg, self.ledger, self.store, self.risk)
@@ -224,6 +226,7 @@ class MarketService:
         self.risk.reset()
         self.executor.reset()
         self.venue_health.reset()
+        self.calibrator.reset()
         self.started_at = now_ms()
         self.scan_tick = 0
         self.recorded_signal_times.clear()
@@ -246,8 +249,8 @@ class MarketService:
             self.risk.reset()
             self.venue_health.reset()
             self.started_at = now_ms()
-        self.cross_engine = CrossExchangeArbitrageEngine(self.settings, self.ledger)
-        self.triangular_engine = TriangularArbitrageEngine(self.settings, self.ledger)
+        self.cross_engine = CrossExchangeArbitrageEngine(self.settings, self.ledger, self.calibrator)
+        self.triangular_engine = TriangularArbitrageEngine(self.settings, self.ledger, self.calibrator)
         self.queue = OpportunityQueue()
         self.executor = ExecutionSimulator(self.settings, self.ledger, self.store, self.risk)
 
@@ -292,6 +295,7 @@ class MarketService:
 
         self.last_executions = self.executor.try_execute(ranked, summaries)
         for trade in self.last_executions:
+            self._record_calibration(trade)
             self.edge_ledger.append("trade", self.compact_trade_record(trade))
             self.schedule(self.redis.publish("trades", trade))
         self.flush_risk_events()
@@ -333,6 +337,33 @@ class MarketService:
     def record_edge_decisions(self, opportunities: list[dict]) -> None:
         for opportunity in opportunities:
             self.edge_ledger.append("opportunity", compact_opportunity_record(opportunity))
+
+    def _record_calibration(self, trade: dict) -> None:
+        success = (not trade.get("partial")) and float(trade.get("netProfit", 0)) >= 0
+        if trade.get("strategy") == "triangular":
+            self.calibrator.update(trade.get("exchangeId", ""), success)
+        else:
+            self.calibrator.update(trade.get("buyExchangeId", ""), success)
+            self.calibrator.update(trade.get("sellExchangeId", ""), success)
+
+    def run_backtest(self, ticks: int = 250) -> dict:
+        from backend.app.engines.backtest import BacktestRunner
+
+        return BacktestRunner(self.settings).run(ticks)
+
+    def replay_feed(self, limit: int = 120) -> dict:
+        durable = self.persistence.read(limit=limit)
+        if durable:
+            return {
+                "source": f"durable-{self.persistence.driver}",
+                "eventCount": self.persistence.count(),
+                "events": durable,
+            }
+        return {
+            "source": "edge-ledger-memory",
+            "eventCount": len(self.edge_ledger.records),
+            "events": self.edge_ledger.latest(limit),
+        }
 
     def compact_trade_record(self, trade: dict) -> dict:
         if trade.get("strategy") == "triangular":
@@ -547,6 +578,7 @@ class MarketService:
                 "restFallbackActive": any(book["source"] == "rest" for book in books),
                 "latencyMeaning": "Book age is the freshness of the latest order book. Update latency is how long the provider waited for the last exchange update.",
             },
+            "calibration": self.calibrator.snapshot(),
             "models": {
                 "cycleAlgo": self.settings.cycle_algo,
                 "slippageModel": self.settings.slippage_model,
@@ -554,6 +586,7 @@ class MarketService:
                 "sizingMode": self.settings.sizing_mode,
                 "kellyFraction": self.settings.kelly_fraction,
                 "volatilityModel": self.settings.volatility_model,
+                "calibrationEnabled": self.settings.calibration_enabled,
             },
             "metrics": metrics,
         }
