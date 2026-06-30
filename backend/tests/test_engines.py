@@ -701,12 +701,25 @@ class BacktestAndLearningTests(unittest.TestCase):
     def test_backtest_runner_produces_metrics(self):
         from backend.app.engines.backtest import BacktestRunner
 
-        result = BacktestRunner(Settings(market_mode="demo")).run(ticks=40)
-        for key in ("ticks", "detected", "executed", "hitRate", "totalPnl", "maxDrawdown", "sharpeLike", "equityCurve", "params"):
+        result = BacktestRunner(Settings(market_mode="demo")).run(ticks=40, regime="calm")
+        for key in ("ticks", "regime", "detected", "executed", "hitRate", "totalPnl", "maxDrawdown", "sharpeLike", "equityCurve", "params"):
             self.assertIn(key, result)
         self.assertEqual(result["ticks"], 40)
+        self.assertEqual(result["regime"], "calm")
         self.assertTrue(result["equityCurve"])
         self.assertGreaterEqual(result["executed"], 0)
+
+    def test_backtest_stressed_regime_is_realistic(self):
+        from backend.app.engines.backtest import BacktestRunner
+
+        result = BacktestRunner(Settings(market_mode="demo")).run(ticks=90, regime="stressed")
+        self.assertEqual(result["regime"], "stressed")
+        # A stressed regime must produce real losses and a drawdown, not the
+        # best-case demo cadence.
+        self.assertGreater(result["executed"], 0)
+        self.assertGreater(result["losses"], 0)
+        self.assertGreater(result["maxDrawdown"], 0)
+        self.assertLess(result["hitRate"], 1.0)
 
     def test_persistence_read_and_count_roundtrip(self):
         import os

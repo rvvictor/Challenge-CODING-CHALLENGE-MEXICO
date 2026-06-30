@@ -1471,6 +1471,13 @@ small,
   cursor: progress;
 }
 
+.btDivider {
+  width: 1px;
+  align-self: stretch;
+  margin: 2px 2px;
+  background: var(--line);
+}
+
 .backtestBody {
   display: grid;
   gap: 12px;

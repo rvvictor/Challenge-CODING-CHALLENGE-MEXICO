@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import math
+import random
 import time
 
 from backend.app.core.config import Settings
@@ -26,16 +27,26 @@ def _book_mid(book) -> float | None:
     return (ask.price + bid.price) / 2 if ask and bid else None
 
 
+# Market regimes for the backtest. `drag`/`vol` parameterize a realized-execution
+# model (the gap between the detected edge and the actually-realized P&L); `inject`
+# schedules adverse scenarios so the engine itself produces pauses, partials and
+# thinner books. `calm` reproduces the original best-case demo behavior.
+REGIMES: dict[str, dict] = {
+    "calm": {"drag": 0.0, "vol": 0.12, "inject": {}},
+    "normal": {"drag": 0.22, "vol": 0.75, "inject": {"latency_spike": 60}},
+    "volatile": {"drag": 0.45, "vol": 1.30, "inject": {"flash_crash": 30, "latency_spike": 45}},
+    "stressed": {"drag": 0.85, "vol": 1.75, "inject": {"liquidity_crunch": 22, "latency_spike": 30, "venue_outage": 48}},
+}
+
+
 class BacktestRunner:
     """Event-driven replay of the deterministic market through the *same* engines,
-    using a snapshot of the current parameters. Fully isolated from the live
-    session (its own ledger/risk/engines), so it answers "how would the strategy
-    I've tuned have performed?" without touching live state.
-    """
+    on an isolated copy of the current (tuned) parameters. A selectable market
+    regime injects adverse conditions and a realized-execution model, so the
+    reported hit rate, drawdown and Sharpe-like ratio are credible rather than the
+    best-case demo cadence. Fully isolated from the live session."""
 
     def __init__(self, settings: Settings):
-        # Copy the live parameters but disable wall-clock throttles, since a
-        # backtest advances many ticks within the same millisecond.
         self.settings = dataclasses.replace(settings, demo_min_execution_gap_ms=0, pair_cooldown_ms=0)
 
     def _symbols(self, exchange) -> tuple[str, ...]:
@@ -59,8 +70,18 @@ class BacktestRunner:
             })
         return summaries
 
-    def run(self, ticks: int = 250) -> dict:
+    def _realized_pnl(self, detected_pnl: float, regime: dict, rng: random.Random) -> float:
+        """Realized-execution model: detected edge degraded by a regime drag plus
+        edge-scaled Gaussian noise. Reproducible per regime, can go negative."""
+        multiplier = max(-3.0, rng.gauss(1.0 - regime["drag"], regime["vol"]))
+        return round(detected_pnl * multiplier, 4)
+
+    def run(self, ticks: int = 250, regime: str = "normal") -> dict:
         settings = self.settings
+        regime_key = regime if regime in REGIMES else "normal"
+        regime_params = REGIMES[regime_key]
+        rng = random.Random(91237 + sum(ord(char) for char in regime_key))
+
         ledger = WalletLedger(settings)
         risk = RiskManager(settings)
         store = EventStore()
@@ -74,12 +95,17 @@ class BacktestRunner:
         ticks = max(1, min(int(ticks or 0), 5000))
         equity: list[float] = []
         trade_pnls: list[float] = []
+        realized_total = 0.0
         detected = 0
         executed = 0
         wins = 0
         paused_ticks = 0
 
-        for _ in range(ticks):
+        for index in range(ticks):
+            for scenario, cadence in regime_params["inject"].items():
+                if cadence and index % cadence == cadence - 1:
+                    simulator.inject_scenario(scenario, settings.exchanges)
+
             simulator.advance(settings.exchanges)
             for exchange in settings.exchanges:
                 for symbol in self._symbols(exchange):
@@ -90,28 +116,27 @@ class BacktestRunner:
 
             summaries = self._summaries(books)
             risk.evaluate_market(summaries)
-            risk_state = risk.snapshot(now_ms())
-            if risk_state["paused"]:
+            if risk.snapshot(now_ms())["paused"]:
                 paused_ticks += 1
-                equity.append(round(ledger.realized_pnl, 4))
+                equity.append(round(realized_total, 4))
                 continue
 
             primary = {book.exchange_id: book for book in books.values() if book.primary and book.asks and book.bids}
             opportunities = cross.scan(primary) + triangular.scan(books)
             ranked = queue.rank(opportunities)
             detected += sum(1 for item in ranked if item.get("status") in ("profitable", "rejected", "blocked"))
-            trades = executor.try_execute(ranked, summaries)
-            for trade in trades:
+            for trade in executor.try_execute(ranked, summaries):
                 executed += 1
-                pnl = float(trade["netProfit"])
-                trade_pnls.append(pnl)
-                if pnl >= 0:
+                realized = self._realized_pnl(float(trade["netProfit"]), regime_params, rng)
+                trade_pnls.append(realized)
+                realized_total += realized
+                if realized >= 0:
                     wins += 1
-            equity.append(round(ledger.realized_pnl, 4))
+            equity.append(round(realized_total, 4))
 
-        return self._metrics(equity, trade_pnls, detected, executed, wins, ticks, paused_ticks)
+        return self._metrics(equity, trade_pnls, detected, executed, wins, ticks, paused_ticks, regime_key)
 
-    def _metrics(self, equity, trade_pnls, detected, executed, wins, ticks, paused_ticks) -> dict:
+    def _metrics(self, equity, trade_pnls, detected, executed, wins, ticks, paused_ticks, regime) -> dict:
         count = len(trade_pnls)
         total_pnl = round(sum(trade_pnls), 4)
 
@@ -131,6 +156,8 @@ class BacktestRunner:
 
         return {
             "ticks": ticks,
+            "regime": regime,
+            "regimes": list(REGIMES.keys()),
             "pausedTicks": paused_ticks,
             "detected": detected,
             "executed": executed,
@@ -142,7 +169,7 @@ class BacktestRunner:
             "maxDrawdown": round(max_drawdown, 4),
             "sharpeLike": sharpe_like,
             "finalEquity": equity[-1] if equity else 0.0,
-            "equityCurve": [{"t": index, "pnl": value} for index, value in enumerate(equity[-240:])],
+            "equityCurve": [{"t": position, "pnl": value} for position, value in enumerate(equity[-240:])],
             "params": {
                 "minNetBps": self.settings.min_net_bps,
                 "maxTradeBtc": self.settings.max_trade_btc,

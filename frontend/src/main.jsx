@@ -165,8 +165,8 @@ function useAurelion() {
     URL.revokeObjectURL(url);
   }, []);
 
-  const runBacktest = React.useCallback(async (ticks = 250) => {
-    const response = await fetch(`${API_BASE}/api/backtest?ticks=${ticks}`);
+  const runBacktest = React.useCallback(async (ticks = 250, regime = "normal") => {
+    const response = await fetch(`${API_BASE}/api/backtest?ticks=${ticks}&regime=${regime}`);
     return response.json();
   }, []);
 
@@ -1190,15 +1190,18 @@ function ControlRoom({ loadParams, applyParams }) {
 }
 
 // Event-driven replay of the current (tuned) strategy over deterministic data.
+const BACKTEST_REGIMES = ["calm", "normal", "volatile", "stressed"];
+
 function Backtest({ runBacktest }) {
   const [ticks, setTicks] = React.useState(250);
+  const [regime, setRegime] = React.useState("normal");
   const [result, setResult] = React.useState(null);
   const [busy, setBusy] = React.useState(false);
 
   const run = async () => {
     setBusy(true);
     try {
-      setResult(await runBacktest(ticks));
+      setResult(await runBacktest(ticks, regime));
     } finally {
       setBusy(false);
     }
@@ -1211,6 +1214,10 @@ function Backtest({ runBacktest }) {
         {[120, 250, 500].map((n) => (
           <button key={n} type="button" className={ticks === n ? "active" : ""} onClick={() => setTicks(n)}>{n} ticks</button>
         ))}
+        <span className="btDivider" aria-hidden="true" />
+        {BACKTEST_REGIMES.map((name) => (
+          <button key={name} type="button" className={regime === name ? "active" : ""} onClick={() => setRegime(name)}>{name}</button>
+        ))}
         <button type="button" className="btRun" onClick={run} disabled={busy}><FlaskConical size={13} /> {busy ? "running…" : "Run backtest"}</button>
       </div>
       {result ? (
@@ -1219,17 +1226,17 @@ function Backtest({ runBacktest }) {
             <div className="btStat"><span>Trades</span><strong>{result.executed}</strong></div>
             <div className="btStat"><span>Hit rate</span><strong>{formatPercent(result.hitRate, 1)}</strong></div>
             <div className="btStat"><span>Total P&amp;L</span><strong className={result.totalPnl >= 0 ? "green" : "red"}>{formatMoney(result.totalPnl)}</strong></div>
-            <div className="btStat"><span>Avg / trade</span><strong>{formatMoney(result.avgPnlPerTrade)}</strong></div>
-            <div className="btStat"><span>Max drawdown</span><strong>{formatMoney(result.maxDrawdown)}</strong></div>
+            <div className="btStat"><span>Avg / trade</span><strong className={result.avgPnlPerTrade >= 0 ? "green" : "red"}>{formatMoney(result.avgPnlPerTrade)}</strong></div>
+            <div className="btStat"><span>Max drawdown</span><strong className="red">{formatMoney(result.maxDrawdown)}</strong></div>
             <div className="btStat"><span>Sharpe-like</span><strong>{formatNumber(result.sharpeLike, 2)}</strong></div>
           </div>
           <PnlChart series={(result.equityCurve || []).map((point) => ({ time: point.t, pnl: point.pnl }))} />
           <div className="btParams">
-            Replayed: {result.params.cycleAlgo} · {result.params.slippageModel} · {result.params.sizingMode} · min edge {result.params.minNetBps} bps · {result.detected} signals over {result.ticks} ticks
+            <b>{result.regime}</b> regime · {result.wins}W / {result.losses}L · {result.detected} signals over {result.ticks} ticks · strategy {result.params.cycleAlgo}/{result.params.slippageModel}/{result.params.sizingMode} @ {result.params.minNetBps} bps
           </div>
         </div>
       ) : (
-        <div className="empty">Replay the current tuned strategy over deterministic market data to measure hit rate, P&amp;L, drawdown and a Sharpe-like ratio. Tune in the Control Room, then backtest here.</div>
+        <div className="empty">Replay the current tuned strategy over deterministic market data under a chosen <b>regime</b> (calm → stressed) to measure hit rate, P&amp;L, drawdown and a Sharpe-like ratio. Tune in the Control Room, then backtest here.</div>
       )}
     </section>
   );

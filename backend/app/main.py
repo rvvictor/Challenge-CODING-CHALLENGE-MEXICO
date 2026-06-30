@@ -134,10 +134,10 @@ async def replay(limit: int = 120) -> dict:
 
 
 @app.get("/api/backtest")
-async def backtest(ticks: int = 250) -> dict:
-    # Runs the engines over a deterministic replay using the current parameters.
-    # Off-loaded to a thread so the live tick loop / SSE are not blocked.
-    return await asyncio.to_thread(market_service.run_backtest, ticks)
+async def backtest(ticks: int = 250, regime: str = "normal") -> dict:
+    # Runs the engines over a deterministic replay using the current parameters and
+    # a market regime. Off-loaded to a thread so the live loop / SSE are not blocked.
+    return await asyncio.to_thread(market_service.run_backtest, ticks, regime)
 
 
 @app.get("/api/narrate")
