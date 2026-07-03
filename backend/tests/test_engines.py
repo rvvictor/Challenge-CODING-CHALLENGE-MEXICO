@@ -905,8 +905,9 @@ class CoPilotTests(unittest.TestCase):
         }
         result = narrator.narrate(snapshot, trade_id="does-not-exist")
         self.assertEqual(result["source"], "deterministic")
-        # Phrasing rotates between grounded variants; all of them say "actionable".
-        self.assertIn("actionable", result["text"].lower())
+        # Phrasing rotates between grounded variants; every idle variant explains
+        # that visible spreads do not survive costs.
+        self.assertIn("costs", result["text"].lower())
 
     def test_narrator_streams_deterministic_chunks(self):
         import asyncio

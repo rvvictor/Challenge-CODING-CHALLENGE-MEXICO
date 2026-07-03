@@ -292,7 +292,7 @@ PARAMETER_REGISTRY: tuple[ParameterSpec, ...] = (
     ParameterSpec("health_slow_latency_ms", "venue", "Slow latency", "Latency above which a venue is flagged slow.", "int", 100, 5000, 50, "ms"),
     ParameterSpec("health_min_score", "venue", "Min health score", "Health score floor (0-100) below which a venue is demoted.", "float", 0.0, 100.0, 1.0, ""),
     # Wide-net discovery
-    ParameterSpec("discovery_enabled", "discovery", "Discovery lane", "Background scout that sweeps the full venue universe plus XRP/LTC/SOL pairs off the hot loop.", "bool"),
+    ParameterSpec("discovery_enabled", "discovery", "Discovery lane", "Background scout that sweeps the full venue universe plus XRP/LTC/SOL/AVAX pairs off the hot loop.", "bool"),
     ParameterSpec("discovery_interval_ms", "discovery", "Sweep interval", "How often the discovery lane sweeps the wide universe.", "int", 10000, 600000, 5000, "ms"),
     ParameterSpec("discovery_min_persistence", "discovery", "Promotion streak", "Consecutive sweeps a route must clear the edge threshold before it is flagged promotable.", "int", 1, 20, 1, "sweeps"),
     # Floor of -30 is deliberate: real edges on majors sit at -20..-25 bps after

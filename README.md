@@ -263,6 +263,33 @@ costo de latencia** de escanear 10 exchanges en el loop caliente:
 - Endpoints: `GET /api/discovery`, `POST /api/discovery/sweep` (con auth opcional).
 - 4 parámetros nuevos en el Control Room (grupo *Wide-net discovery*): encendido,
   cadencia, umbral de edge y racha de promoción.
+- Universo de pares: XRP y LTC (primera canasta de las respuestas al comité),
+  SOL y AVAX (segunda canasta), más BTC/ETH como referencia.
+
+### Laboratorio de investigación y entrenamiento
+
+La fase de observación descrita en las respuestas al comité —medir cuánto duran
+las oportunidades, qué porcentaje desaparece antes de poder ejecutarse y qué
+rutas se deterioran— ahora está implementada como una pestaña *Research Lab*
+con dos capacidades:
+
+- **Modelo de dinámica de spreads (ajustado a datos reales)**: ajusta un proceso
+  de reversión a la media (**Ornstein-Uhlenbeck**, en su forma discreta AR(1) con
+  OLS de forma cerrada, sin dependencias de ML) al spread entre cada par de
+  venues usando historial OHLCV real. Reporta por par: **half-life** de las
+  dislocaciones, sigma estacionaria, **episodios de dislocación por hora**, su
+  **duración mediana**, el **porcentaje que desaparece en menos de una vela** y
+  si algún episodio superó el muro de comisiones entry-tier. Marco teórico:
+  Bertram (2010), umbrales óptimos de arbitraje estadístico para procesos OU.
+- **Entrenador de parámetros**: búsqueda aleatoria con semilla sobre el registro
+  del Control Room, evaluada re-ejecutando el mercado a través de **los mismos
+  motores** vía el backtest (el patrón *hyperopt* de freqtrade, el bot open
+  source más usado). El trial 0 siempre es la configuración actual, así que la
+  mejora es comparable uno a uno. Objetivo: `totalPnl − 0.5·maxDrawdown`. El
+  preset aprendido se aplica por `/api/params` como cualquier cambio manual:
+  visible en el Control Room, auditable en el edge ledger y reversible.
+- Endpoints: `GET /api/research/spread`, `POST /api/research/autotune` (auth
+  opcional). Ambos corren fuera del loop en vivo.
 
 ---
 
@@ -280,9 +307,13 @@ Ruta recomendada de evaluación (modo demo, determinístico):
 5. **Stress Lab**: inyectar *Venue outage* o *Liquidity crunch* y observar el circuit
    breaker; inyectar *Leg failure* y revisar la conciliación en *Executed Trades*.
 6. **AI Co-pilot**: pedir la explicación de la decisión actual.
-7. **Wide-Net Radar**: ver el barrido real de 10 exchanges + XRP/LTC/SOL (datos
-   públicos en vivo) y comprobar que ningún edge sobrevive las comisiones entry-tier
-   — la validación empírica de por qué el bot es selectivo.
+7. **Wide-Net Radar**: ver el barrido real de 10 exchanges + XRP/LTC/SOL/AVAX
+   (datos públicos en vivo) y comprobar que ningún edge sobrevive las comisiones
+   entry-tier — la validación empírica de por qué el bot es selectivo.
+8. **Research Lab**: ajustar los modelos de spread sobre historial real (half-life
+   y duración de dislocaciones medidas, no supuestas) y entrenar un preset de
+   parámetros con el replay; aplicar el preset aprendido y verlo reflejado en el
+   Control Room.
 
 ---
 
@@ -318,6 +349,17 @@ Para transparencia ante un jurado cuantitativo:
   sustituto conservador del recorrido de libro que hace el carril caliente. Un ticker
   cruzado >2% se descarta como dato corrupto, no como oportunidad. Efecto: el radar
   nunca reporta un edge fantasma por datos malos.
+- **Modelo de spreads (OU/AR(1))**: la resolución de duración es una vela (1 min);
+  la literatura sitúa la ventana real de arbitraje en segundos (Kaiko 2025: <4 s en
+  pares mayores; Makarov & Schoar 2020 documentan que el arbitraje grande entre
+  exchanges es principalmente entre países con controles de capital). Un episodio
+  que "dura una vela" en nuestros datos casi seguro duró segundos. Efecto: las
+  duraciones reportadas son cotas superiores, declaradas como tales.
+- **Entrenador de parámetros**: búsqueda aleatoria (no bayesiana) a propósito —
+  con ~30 trials es transparente, reproducible por semilla y suficiente para el
+  espacio de ~15 parámetros; el objetivo penaliza drawdown para no premiar
+  configuraciones que solo suben el P&L asumiendo más riesgo. Efecto: el preset
+  aprendido es defendible y cada trial queda listado con su score.
 
 ---
 
@@ -512,6 +554,8 @@ Binance, OKX, Kraken, Coinbase, Bitstamp, Bybit, KuCoin, Gate.io, Bitfinex, Gemi
 | `GET /api/backtest` | Replay determinístico de la estrategia actual con métricas. |
 | `GET /api/discovery` | Último barrido del radar de red amplia (rutas, persistencia, promotables). |
 | `POST /api/discovery/sweep` | Dispara un barrido manual del radar (con auth opcional). |
+| `GET /api/research/spread` | Ajusta modelos OU de spread por par de venues sobre historial real. |
+| `POST /api/research/autotune` | Entrena un preset de parámetros vía backtest (con auth opcional). |
 | `POST /api/scenario` | Inyecta un escenario adverso del Stress Lab (con auth opcional). |
 | `GET /api/narrate` | Explicación consultiva (Claude o determinística) de la decisión actual. |
 | `POST /api/control` | Cambia modo, ejecución, exchanges activos o activa stress de volatilidad. |

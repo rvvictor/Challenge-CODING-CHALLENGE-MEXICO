@@ -187,7 +187,7 @@ class WideNetRadar:
             "lastSweep": result,
             "promotableCount": sum(1 for route in (result.get("topRoutes") or []) if route.get("promotable")),
             "note": (
-                "Discovery lane: the full venue universe plus XRP/LTC/SOL pairs, priced from batched "
+                "Discovery lane: the full venue universe plus XRP/LTC/SOL/AVAX pairs, priced from batched "
                 "public tickers on a slow background cadence. The hot loop and its decision latency are untouched."
             ),
         }
