@@ -245,6 +245,25 @@ cuando hay `ANTHROPIC_API_KEY`; si no, usa una explicación determinística cons
 con los mismos datos, de modo que funciona sin llave durante la evaluación. La llamada
 corre fuera del loop en vivo.
 
+### Radar de red amplia (descubrimiento en dos carriles)
+
+Responde a la pregunta "¿y si el edge está en otro par u otro venue?" **sin pagar el
+costo de latencia** de escanear 10 exchanges en el loop caliente:
+
+- **Carril caliente** (sin cambios): los 5 venues más rápidos, BTC+ETH, decisiones en
+  ~5 ms medidos por tick.
+- **Carril de descubrimiento** (nuevo): un scout en segundo plano barre **todo el
+  universo de 10 exchanges** más pares **XRP, LTC y SOL** usando una sola petición
+  batched de tickers públicos por venue (paralelizada por hilos). Valora cada ruta
+  cross-exchange y triangular con el **mismo catálogo de comisiones entry-tier**, y
+  registra cuántos barridos consecutivos sobrevive cada edge. Una ruta que persiste
+  por encima del umbral se marca **promotable**: evidencia de que ese venue/par
+  merece un lugar en el carril caliente. La promoción es decisión humana.
+- Pestaña *Wide-Net Radar* en el workbench; datos públicos read-only, sin llaves.
+- Endpoints: `GET /api/discovery`, `POST /api/discovery/sweep` (con auth opcional).
+- 4 parámetros nuevos en el Control Room (grupo *Wide-net discovery*): encendido,
+  cadencia, umbral de edge y racha de promoción.
+
 ---
 
 ## Para el jurado
@@ -261,6 +280,9 @@ Ruta recomendada de evaluación (modo demo, determinístico):
 5. **Stress Lab**: inyectar *Venue outage* o *Liquidity crunch* y observar el circuit
    breaker; inyectar *Leg failure* y revisar la conciliación en *Executed Trades*.
 6. **AI Co-pilot**: pedir la explicación de la decisión actual.
+7. **Wide-Net Radar**: ver el barrido real de 10 exchanges + XRP/LTC/SOL (datos
+   públicos en vivo) y comprobar que ningún edge sobrevive las comisiones entry-tier
+   — la validación empírica de por qué el bot es selectivo.
 
 ---
 
@@ -291,6 +313,11 @@ Para transparencia ante un jurado cuantitativo:
 - **Latencia**: el costo de riesgo usa la latencia promedio por pierna; la probabilidad
   de captura usa decaimiento exponencial por half-life. Son simplificaciones
   deliberadas y declaradas.
+- **Radar de red amplia**: los tickers no traen profundidad, así que cada pierna se
+  cobra la comisión taker del venue **más** su buffer de slippage configurado — el
+  sustituto conservador del recorrido de libro que hace el carril caliente. Un ticker
+  cruzado >2% se descarta como dato corrupto, no como oportunidad. Efecto: el radar
+  nunca reporta un edge fantasma por datos malos.
 
 ---
 
@@ -315,8 +342,10 @@ backend/
       edge_analysis.py              Explicabilidad, SLO de latencia y calidad demo
       edge_ledger.py                Ledger de decisiones reproducible
       event_store.py                Historial en memoria con persistencia opcional
+      discovery.py                  Radar de red amplia (carril de descubrimiento)
     integrations/
       ccxt_provider.py              Proveedor WebSocket-first con respaldo REST
+      market_scout.py               Scout de tickers batched para el radar
       redis_bus.py                  Pub/Sub opcional
       persistence.py                Persistencia durable en Postgres o SQLite
       global_market.py              Contexto externo de BTC/ETH
@@ -481,6 +510,8 @@ Binance, OKX, Kraken, Coinbase, Bitstamp, Bybit, KuCoin, Gate.io, Bitfinex, Gemi
 | `GET /api/export/session` | Exportación completa de sesión para revisión. |
 | `GET /api/replay` | Eventos de replay desde el almacén durable (o memoria como respaldo). |
 | `GET /api/backtest` | Replay determinístico de la estrategia actual con métricas. |
+| `GET /api/discovery` | Último barrido del radar de red amplia (rutas, persistencia, promotables). |
+| `POST /api/discovery/sweep` | Dispara un barrido manual del radar (con auth opcional). |
 | `POST /api/scenario` | Inyecta un escenario adverso del Stress Lab (con auth opcional). |
 | `GET /api/narrate` | Explicación consultiva (Claude o determinística) de la decisión actual. |
 | `POST /api/control` | Cambia modo, ejecución, exchanges activos o activa stress de volatilidad. |

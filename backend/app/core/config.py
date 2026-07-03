@@ -295,7 +295,10 @@ PARAMETER_REGISTRY: tuple[ParameterSpec, ...] = (
     ParameterSpec("discovery_enabled", "discovery", "Discovery lane", "Background scout that sweeps the full venue universe plus XRP/LTC/SOL pairs off the hot loop.", "bool"),
     ParameterSpec("discovery_interval_ms", "discovery", "Sweep interval", "How often the discovery lane sweeps the wide universe.", "int", 10000, 600000, 5000, "ms"),
     ParameterSpec("discovery_min_persistence", "discovery", "Promotion streak", "Consecutive sweeps a route must clear the edge threshold before it is flagged promotable.", "int", 1, 20, 1, "sweeps"),
-    ParameterSpec("discovery_min_net_bps", "discovery", "Edge threshold", "Net edge a discovered route must show to build a persistence streak.", "float", -10.0, 25.0, 0.25, "bps"),
+    # Floor of -30 is deliberate: real edges on majors sit at -20..-25 bps after
+    # entry-tier fees, so tracking WHICH route is persistently closest requires a
+    # threshold below them. Promotion still demands netBps >= this value.
+    ParameterSpec("discovery_min_net_bps", "discovery", "Edge threshold", "Net edge a discovered route must show to build a persistence streak (set below 0 to track persistent near-misses).", "float", -30.0, 25.0, 0.25, "bps"),
     # Engine & demo cadence
     ParameterSpec("evaluation_interval_ms", "cadence", "Tick interval", "How often the engine evaluates the market.", "int", 100, 5000, 50, "ms"),
     ParameterSpec("execution_adverse_bps_per_second", "cadence", "Adverse move rate", "Adverse price drift charged per second of execution latency.", "float", 0.0, 10.0, 0.1, "bps/s"),

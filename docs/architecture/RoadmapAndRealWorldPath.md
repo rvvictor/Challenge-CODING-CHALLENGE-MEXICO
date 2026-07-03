@@ -130,7 +130,16 @@ target deploy, and do we present live as a second tab alongside demo.
 
 **Polish**
 9. Session export → shareable report (PDF/HTML) for judges.
-10. Multi-pair beyond BTC (XRP/LTC/SOL per the committee answers) as a demo toggle.
+10. ~~Multi-pair beyond BTC (XRP/LTC/SOL per the committee answers)~~ — SHIPPED as the
+    **Wide-Net Radar** (two-lane architecture): a background scout sweeps the full
+    10-venue universe plus XRP/LTC/SOL from batched public tickers, prices every
+    cross-exchange and ticker-triangular route with the entry-tier fee catalog, and
+    tracks per-route persistence across sweeps. Measured: hot-lane decision latency
+    unchanged while sweeping (median 5.4 ms during a sweep vs 4.6 ms idle); a real
+    sweep covers 8 reachable venues / ~67 series / 334 routes in ~9–14 s. Real
+    finding (July 2026): best route ≈ −21 bps net, with LTC/XRP cross-venue routes
+    leading the board — no edge survives entry-tier fees, which validates the bot's
+    selectivity empirically.
 11. i18n pass (the UI is English, the README is Spanish — make it intentional).
 
 ---
