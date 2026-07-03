@@ -90,11 +90,13 @@ class BacktestRunner:
         multiplier = max(-3.0, rng.gauss(1.0 - regime["drag"], regime["vol"]))
         return round(detected_pnl * multiplier, 4)
 
-    def run(self, ticks: int = 250, regime: str = "normal", source: str = "simulated") -> dict:
+    def run(self, ticks: int = 250, regime: str = "normal", source: str = "simulated", market_seed: int = 0) -> dict:
+        # market_seed=0 preserves the historical default replay exactly; any other
+        # value produces an independent market realization (out-of-sample pass).
         settings = self.settings
         regime_key = regime if regime in REGIMES else "normal"
         regime_params = REGIMES[regime_key]
-        rng = random.Random(91237 + sum(ord(char) for char in regime_key))
+        rng = random.Random(91237 + sum(ord(char) for char in regime_key) + int(market_seed))
         ticks = max(1, min(int(ticks or 0), 5000))
 
         requested_source = source if source in SOURCES else "simulated"
@@ -102,11 +104,11 @@ class BacktestRunner:
         if requested_source == "historical":
             fetched = self._historical_provider(settings.exchanges, "1m", max(60, min(ticks, 500)))
             data_quality["statuses"] = fetched.get("statuses", {})
-            market = HistoricalMarket(settings.exchanges, fetched.get("candles", {}))
+            market = HistoricalMarket(settings.exchanges, fetched.get("candles", {}), seed=20260112 + int(market_seed))
             if market.length < 5 or len(market.covered_exchange_ids()) < 2:
                 # Not enough real coverage (offline, rate-limited, geo-blocked) —
                 # degrade to the simulator rather than fail the request.
-                market = SimulatedMarket(settings.exchanges)
+                market = SimulatedMarket(settings.exchanges, seed=71021 + int(market_seed))
                 actual_source = "simulated-fallback"
             else:
                 ticks = min(ticks, market.length)
@@ -114,7 +116,7 @@ class BacktestRunner:
                 data_quality["exchanges"] = market.covered_exchange_ids()
                 data_quality["series"] = market.covered_series_count()
         else:
-            market = SimulatedMarket(settings.exchanges)
+            market = SimulatedMarket(settings.exchanges, seed=71021 + int(market_seed))
             actual_source = "simulated"
         data_quality["actual"] = actual_source
 

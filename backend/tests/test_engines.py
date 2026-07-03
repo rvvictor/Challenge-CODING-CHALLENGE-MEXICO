@@ -1397,6 +1397,108 @@ class ResearchLabTests(unittest.TestCase):
         self.assertIn("baseline", first)
         self.assertIsInstance(first["improvedVsBaseline"], bool)
 
+    def test_simulated_market_seed_changes_realization(self):
+        settings = Settings(market_mode="demo")
+        first = SimulatedMarket(settings.exchanges, seed=1)
+        second = SimulatedMarket(settings.exchanges, seed=2)
+        exchange = settings.exchanges[0]
+        first.advance(settings.exchanges)
+        second.advance(settings.exchanges)
+        book_a = first.generate(exchange, settings.exchanges, exchange.primary_symbol)
+        book_b = second.generate(exchange, settings.exchanges, exchange.primary_symbol)
+        self.assertNotEqual(book_a.asks[0].price, book_b.asks[0].price)
+
+    def test_backtest_default_is_deterministic_and_market_seed_varies_it(self):
+        from backend.app.engines.backtest import BacktestRunner
+
+        base_a = BacktestRunner(Settings(market_mode="demo")).run(60, "normal")
+        base_b = BacktestRunner(Settings(market_mode="demo")).run(60, "normal")
+        self.assertEqual(base_a["equityCurve"], base_b["equityCurve"])
+        seeded = BacktestRunner(Settings(market_mode="demo")).run(60, "normal", market_seed=104729)
+        self.assertNotEqual(base_a["equityCurve"], seeded["equityCurve"])
+
+    def test_trainer_validation_selects_by_out_of_sample_score(self):
+        from backend.app.engines.autotune import ParameterTrainer
+
+        result = ParameterTrainer(Settings(market_mode="demo")).train(trials=4, ticks=30, regime="calm", seed=3)
+        self.assertIn("validationSeed", result)
+        self.assertIsInstance(result["baseline"]["validationScore"], float)
+        validated = [row for row in result["leaderboard"] if row["validationScore"] is not None]
+        self.assertTrue(validated, "top candidates must be validated out-of-sample")
+        best_validation = max(row["validationScore"] for row in validated)
+        self.assertEqual(result["best"]["validationScore"], best_validation)
+        for row in validated:
+            self.assertIsInstance(row["overfitGap"], float)
+
+    def test_trainer_robust_mode_scores_across_regimes(self):
+        from backend.app.engines.autotune import ParameterTrainer
+
+        result = ParameterTrainer(Settings(market_mode="demo")).train(trials=2, ticks=25, robust=True, seed=1)
+        self.assertTrue(result["robust"])
+        self.assertEqual(result["regimes"], ["normal", "volatile", "stressed"])
+        self.assertEqual(set(result["baseline"]["perRegime"].keys()), {"normal", "volatile", "stressed"})
+        self.assertIn("worstRegimeScore", result["baseline"])
+
+    def test_research_store_roundtrip(self):
+        import tempfile
+        from pathlib import Path
+
+        from backend.app.integrations import research_store
+
+        payload = {
+            "generatedAt": 1234567890123,
+            "baseline": {"score": 1.0, "validationScore": 0.8},
+            "best": {"score": 2.0, "validationScore": 1.5},
+            "improvedVsBaseline": True,
+            "robust": False,
+            "source": "simulated",
+            "regime": "normal",
+        }
+        original = research_store.RESEARCH_DIR
+        with tempfile.TemporaryDirectory() as tmp:
+            research_store.RESEARCH_DIR = Path(tmp)
+            try:
+                name = research_store.save_research("autotune", payload)
+                self.assertIsNotNone(name)
+                sessions = research_store.load_research()
+                self.assertEqual(len(sessions), 1)
+                self.assertEqual(sessions[0]["kind"], "autotune")
+                self.assertIn("score", sessions[0]["headline"])
+                self.assertEqual(sessions[0]["payload"]["best"]["validationScore"], 1.5)
+            finally:
+                research_store.RESEARCH_DIR = original
+
+    def test_judge_report_contains_key_sections(self):
+        from backend.app.engines.report import build_report_html
+
+        snapshot = {
+            "mode": "demo",
+            "uptimeMs": 120000,
+            "metrics": {"cumulativePnl": 1.23, "executedCount": 3, "winRate": 0.5, "detectedCount": 10},
+            "latencySlo": {"decisionMs": {"p50": 4.0, "p95": 8.0}},
+            "risk": {"paused": False},
+            "models": {"cycleAlgo": "bellman_ford", "slippageModel": "sqrt_impact", "sizingMode": "kelly", "volatilityModel": "ewma", "calibrationEnabled": True},
+            "exchangeCoverage": {"activeCount": 5, "universeCount": 10},
+            "discovery": {
+                "universeCount": 10, "bases": ["BTC", "LTC"],
+                "lastSweep": {"venuesLive": 8, "seriesCount": 60, "routesPriced": 300, "topRoutes": [
+                    {"route": "KuCoin -> Bybit", "kind": "cross", "base": "LTC", "grossBps": 2.1, "costsBps": 23.4, "netBps": -21.3},
+                ]},
+            },
+            "pnlSeries": [{"time": 1, "pnl": 0.0}, {"time": 2, "pnl": 0.6}, {"time": 3, "pnl": 1.23}],
+        }
+        research = [{
+            "kind": "autotune", "generatedAt": 1234567890123, "headline": "normal / simulated: score 1.0 -> 1.5 (validation), improved",
+            "payload": {"baseline": {"score": 1.0, "validationScore": 0.8}, "best": {"score": 2.0, "validationScore": 1.5, "changedVsCurrent": {"min_net_bps": {"from": 0.75, "to": 4.2}}}},
+        }]
+        report = build_report_html(snapshot, research)
+        self.assertIn("Reporte para el jurado", report)
+        self.assertIn("bellman_ford", report)
+        self.assertIn("KuCoin -&gt; Bybit", report)
+        self.assertIn("polyline", report)
+        self.assertIn("validación", report)
+        self.assertIn("paper trading", report)
+
 
 if __name__ == "__main__":
     unittest.main()

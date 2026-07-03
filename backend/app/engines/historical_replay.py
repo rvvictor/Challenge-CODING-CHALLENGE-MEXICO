@@ -26,13 +26,15 @@ class HistoricalMarket:
     swap sources without changing its replay loop.
     """
 
-    def __init__(self, exchanges: tuple[ExchangeConfig, ...], candles_by_key: dict[str, list[Candle]]):
+    def __init__(self, exchanges: tuple[ExchangeConfig, ...], candles_by_key: dict[str, list[Candle]], seed: int = 20260112):
         self.exchanges_by_id = {exchange.id: exchange for exchange in exchanges}
         self.candles = {
             key: rows for key, rows in candles_by_key.items()
             if rows and key.split(":", 1)[0] in self.exchanges_by_id
         }
-        self.random = random.Random(20260112)
+        # Alternate seeds re-draw the synthesized book geometry around the SAME
+        # real prices — an independent noise realization for validation.
+        self.random = random.Random(seed)
         self.index = -1
         self.length = min((len(rows) for rows in self.candles.values()), default=0)
 

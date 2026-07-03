@@ -13,7 +13,7 @@ if USER_SITE not in sys.path:
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -146,6 +146,7 @@ class AutotunePayload(BaseModel):
     regime: str = Field(default="normal")
     source: str = Field(default="simulated")
     seed: int = Field(default=7)
+    robust: bool = Field(default=False)
 
 
 @app.get("/api/research/spread")
@@ -160,8 +161,23 @@ async def research_autotune(body: AutotunePayload, _: None = Depends(require_con
     # Trains a parameter preset by replaying the market through the same
     # engines many times (hyperopt pattern). CPU-bound — off-loaded.
     return await asyncio.to_thread(
-        market_service.run_autotune, body.trials, body.ticks, body.regime, body.source, body.seed
+        market_service.run_autotune, body.trials, body.ticks, body.regime, body.source, body.seed, body.robust
     )
+
+
+@app.get("/api/research/history")
+async def research_history(limit: int = 12) -> dict:
+    # Persisted Research Lab artifacts (.aurelion/research/): the bot keeps
+    # what it learned across restarts.
+    return await asyncio.to_thread(market_service.research_history, min(max(limit, 1), 40))
+
+
+@app.get("/api/export/report")
+async def export_report() -> HTMLResponse:
+    # One-click judge report: a single self-contained HTML page (Spanish)
+    # built from the live snapshot + persisted research artifacts.
+    html_text = await asyncio.to_thread(market_service.judge_report_html)
+    return HTMLResponse(html_text)
 
 
 @app.get("/api/discovery")

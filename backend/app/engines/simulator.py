@@ -9,8 +9,10 @@ from backend.app.engines.fills import sort_levels
 
 
 class SimulatedMarket:
-    def __init__(self, exchanges: tuple[ExchangeConfig, ...]):
-        self.random = random.Random(71021)
+    # Seeded so the demo is reproducible; an alternate seed yields an independent
+    # market realization (used by the trainer's out-of-sample validation pass).
+    def __init__(self, exchanges: tuple[ExchangeConfig, ...], seed: int = 71021):
+        self.random = random.Random(seed)
         self.tick = 0
         self.book_tick = 0
         self.global_btc = 70000.0
