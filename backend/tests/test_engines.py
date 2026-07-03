@@ -1007,14 +1007,14 @@ class ExecutionGatewayTests(unittest.TestCase):
 
 
 class HistoricalBacktestTests(unittest.TestCase):
-    def _fake_candles(self, base_price: float, count: int = 80, step: float = 0.0):
+    def _fake_candles(self, base_price: float, count: int = 80, step: float = 0.0, volume_override: float = 12.0):
         from backend.app.integrations.historical_data import Candle
 
         rows = []
         price = base_price
         for i in range(count):
-            price = max(1.0, price + step)
-            rows.append(Candle(timestamp=1700000000000 + i * 60000, open=price, high=price * 1.001, low=price * 0.999, close=price, volume=12.0))
+            price = max(0.000001, price + step)
+            rows.append(Candle(timestamp=1700000000000 + i * 60000, open=price, high=price * 1.001, low=price * 0.999, close=price, volume=volume_override))
         return rows
 
     def test_historical_market_synthesizes_book_from_real_candle(self):
@@ -1022,7 +1022,7 @@ class HistoricalBacktestTests(unittest.TestCase):
 
         settings = Settings()
         okx = settings.exchange_by_id("okx")
-        candles = {"okx": self._fake_candles(70000.0)}
+        candles = {"okx:BTC/USDT": self._fake_candles(70000.0)}
         market = HistoricalMarket(settings.exchanges, candles)
         market.advance(settings.exchanges)
         result = market.generate(okx, settings.exchanges, okx.primary_symbol)
@@ -1033,14 +1033,47 @@ class HistoricalBacktestTests(unittest.TestCase):
         self.assertGreater(ask.price, bid.price)
         self.assertAlmostEqual((ask.price + bid.price) / 2, 70000.0, delta=50)
 
-    def test_historical_market_returns_none_for_non_primary_symbol(self):
+    def test_historical_market_handles_sub_dollar_triangular_pairs(self):
         from backend.app.engines.historical_replay import HistoricalMarket
 
         settings = Settings()
         okx = settings.exchange_by_id("okx")
-        market = HistoricalMarket(settings.exchanges, {"okx": self._fake_candles(70000.0)})
+        market = HistoricalMarket(settings.exchanges, {
+            "okx:ETH/BTC": self._fake_candles(0.052),
+        })
         market.advance(settings.exchanges)
-        self.assertIsNone(market.generate(okx, settings.exchanges, "ETH/BTC"))
+        book_result = market.generate(okx, settings.exchanges, "ETH/BTC")
+        self.assertIsNotNone(book_result)
+        self.assertFalse(book_result.primary)
+        ask = best(book_result.asks, "ask")
+        bid = best(book_result.bids, "bid")
+        self.assertGreater(ask.price, bid.price)  # spread survives rounding at 8 decimals
+        self.assertAlmostEqual((ask.price + bid.price) / 2, 0.052, delta=0.001)
+        # No-history symbol still degrades to None
+        self.assertIsNone(market.generate(okx, settings.exchanges, "SOL/ETH"))
+
+    def test_triangular_engine_finds_cycle_on_real_history_books(self):
+        from backend.app.engines.historical_replay import HistoricalMarket
+
+        settings = Settings(market_mode="demo")
+        okx = settings.exchange_by_id("okx")
+        # Real-shaped series with a deliberate cross-rate dislocation:
+        # ETH/USDT (6.0) rich vs ETH/BTC * BTC/USDT (0.05 * 100 = 5.0).
+        market = HistoricalMarket(settings.exchanges, {
+            "okx:BTC/USDT": self._fake_candles(100.0, volume_override=4800),
+            "okx:ETH/BTC": self._fake_candles(0.05, volume_override=4800),
+            "okx:ETH/USDT": self._fake_candles(6.0, volume_override=4800),
+        })
+        market.advance(settings.exchanges)
+        books = {}
+        for symbol in ("BTC/USDT", "ETH/BTC", "ETH/USDT"):
+            generated = market.generate(okx, settings.exchanges, symbol)
+            self.assertIsNotNone(generated)
+            books[generated.key] = generated
+        engine = TriangularArbitrageEngine(settings, WalletLedger(settings))
+        opportunities = engine.scan(books)
+        profitable = [o for o in opportunities if o["strategy"] == "triangular" and o["status"] == "profitable"]
+        self.assertTrue(profitable, "expected a profitable triangular cycle on dislocated real-history books")
 
     def test_backtest_runs_over_injected_real_history(self):
         from backend.app.engines.backtest import BacktestRunner
@@ -1051,8 +1084,8 @@ class HistoricalBacktestTests(unittest.TestCase):
             candles = {}
             for exchange in exchanges:
                 base = 69800.0 if exchange.id == "okx" else 70200.0
-                candles[exchange.id] = self._fake_candles(base, count=80)
-            return {"candles": candles, "statuses": {exchange.id: "live" for exchange in exchanges}}
+                candles[f"{exchange.id}:{exchange.primary_symbol}"] = self._fake_candles(base, count=80)
+            return {"candles": candles, "statuses": {}}
 
         runner = BacktestRunner(Settings(market_mode="demo"), historical_provider=fake_provider)
         result = runner.run(ticks=60, regime="normal", source="historical")

@@ -58,10 +58,12 @@ class BacktestRunner:
 
     def _symbols(self, exchange, source: str) -> tuple[str, ...]:
         if source == "historical":
-            # Real-history mode currently covers cross-exchange BTC arbitrage only
-            # (real closes per venue); triangular/dynamic legs would need real
-            # historical ETH/SOL cross-rates too — left for a future iteration.
-            return (exchange.primary_symbol,)
+            # Real-history mode covers cross-exchange BTC plus the triangular legs
+            # (ETH/BTC, ETH/quote) with real fetched cross-rates. SOL dynamic legs
+            # are excluded to keep the fetch fast; missing series degrade per-book.
+            from backend.app.integrations.historical_data import history_symbols
+
+            return history_symbols(exchange)
         quote = "USD" if exchange.primary_symbol.endswith("/USD") else "USDT"
         dynamic = ("SOL/ETH", f"SOL/{quote}")
         return tuple(dict.fromkeys((exchange.primary_symbol, *exchange.triangular_symbols, *dynamic)))
@@ -98,11 +100,9 @@ class BacktestRunner:
         requested_source = source if source in SOURCES else "simulated"
         data_quality: dict = {"requested": requested_source}
         if requested_source == "historical":
-            settings = dataclasses.replace(settings, triangular_enabled=False)
             fetched = self._historical_provider(settings.exchanges, "1m", max(60, min(ticks, 500)))
-            candles_by_exchange = fetched.get("candles", {})
             data_quality["statuses"] = fetched.get("statuses", {})
-            market = HistoricalMarket(settings.exchanges, candles_by_exchange)
+            market = HistoricalMarket(settings.exchanges, fetched.get("candles", {}))
             if market.length < 5 or len(market.covered_exchange_ids()) < 2:
                 # Not enough real coverage (offline, rate-limited, geo-blocked) —
                 # degrade to the simulator rather than fail the request.
@@ -112,6 +112,7 @@ class BacktestRunner:
                 ticks = min(ticks, market.length)
                 actual_source = "historical"
                 data_quality["exchanges"] = market.covered_exchange_ids()
+                data_quality["series"] = market.covered_series_count()
         else:
             market = SimulatedMarket(settings.exchanges)
             actual_source = "simulated"
