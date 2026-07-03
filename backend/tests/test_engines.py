@@ -905,7 +905,8 @@ class CoPilotTests(unittest.TestCase):
         }
         result = narrator.narrate(snapshot, trade_id="does-not-exist")
         self.assertEqual(result["source"], "deterministic")
-        self.assertIn("No actionable opportunity", result["text"])
+        # Phrasing rotates between grounded variants; all of them say "actionable".
+        self.assertIn("actionable", result["text"].lower())
 
     def test_narrator_streams_deterministic_chunks(self):
         import asyncio
@@ -1301,6 +1302,99 @@ class WideNetRadarTests(unittest.TestCase):
         self.assertIn("discovery", snapshot)
         self.assertEqual(snapshot["discovery"]["sweepCount"], 0)
         self.assertEqual(snapshot["discovery"]["universeCount"], 10)
+
+
+class ResearchLabTests(unittest.TestCase):
+    """Spread-dynamics fitting (OU/AR(1)) and the parameter trainer."""
+
+    def test_ar1_fit_recovers_known_ou_parameters(self):
+        import math
+        import random
+
+        from backend.app.engines.spread_model import fit_ar1
+
+        rng = random.Random(11)
+        phi_true, mu_true, dt = 0.9, 5.0, 60000.0
+        series = [mu_true]
+        for _ in range(360):
+            series.append(mu_true * (1 - phi_true) + phi_true * series[-1] + rng.gauss(0, 0.5))
+        fit = fit_ar1(series, dt)
+        self.assertIsNotNone(fit)
+        self.assertAlmostEqual(fit["phi"], phi_true, delta=0.06)
+        self.assertAlmostEqual(fit["meanBps"], mu_true, delta=0.6)
+        expected_half_life = -dt * math.log(2) / math.log(phi_true)
+        self.assertLess(abs(fit["halfLifeMs"] - expected_half_life) / expected_half_life, 0.65)
+
+    def test_episode_scanner_counts_runs_and_durations(self):
+        from backend.app.engines.spread_model import scan_episodes
+
+        series = [0.0] * 10 + [15.0] * 3 + [0.0] * 5 + [12.0] + [0.0] * 10
+        result = scan_episodes(series, mean=0.0, threshold=10.0, dt_ms=60000)
+        self.assertEqual(result["count"], 2)
+        self.assertEqual(result["medianDurationMs"], 3 * 60000)
+        self.assertEqual(result["vanishedWithinOneSamplePct"], 50.0)
+        self.assertAlmostEqual(result["peakExcessBps"], 5.0, delta=0.01)
+
+    def test_spread_lab_finds_executable_episode_with_injected_history(self):
+        import random
+
+        from backend.app.core.config import ExchangeConfig
+        from backend.app.engines.spread_model import SpreadDynamicsLab
+        from backend.app.integrations.historical_data import Candle
+
+        alpha = ExchangeConfig("alpha", "Alpha", "alpha", "BTC/USDT", ("BTC/USDT",), 10, 0.0, 0.0001, 1.0, 0.95)
+        beta = ExchangeConfig("beta", "Beta", "beta", "BTC/USDT", ("BTC/USDT",), 10, 0.0, 0.0001, 1.0, 0.95)
+        settings = Settings(exchange_universe=(alpha, beta), active_exchanges="alpha,beta")
+
+        rng = random.Random(5)
+        spread_bps = [0.0]
+        for _ in range(240):
+            spread_bps.append(0.85 * spread_bps[-1] + rng.gauss(0, 1.2))
+        for i in range(120, 124):  # injected dislocation clearing the 20 bps fee wall
+            spread_bps[i] = 40.0
+
+        def provider(exchanges, timeframe, limit, use_cache=True):
+            base_ts = 1_780_000_000_000
+            alpha_candles = []
+            beta_candles = []
+            for i, s in enumerate(spread_bps):
+                ts = base_ts + i * 60000
+                price_a = 50000.0
+                price_b = price_a * (1 - s / 10000)
+                alpha_candles.append(Candle(ts, price_a, price_a, price_a, price_a, 5.0))
+                beta_candles.append(Candle(ts, price_b, price_b, price_b, price_b, 5.0))
+            return {"candles": {"alpha:BTC/USDT": alpha_candles, "beta:BTC/USDT": beta_candles}, "statuses": {}}
+
+        lab = SpreadDynamicsLab(settings, provider=provider)
+        study = lab.study()
+        self.assertEqual(study["pairsFitted"], 1)
+        pair = study["pairs"][0]
+        self.assertTrue(pair["fitted"])
+        self.assertGreaterEqual(pair["executable"]["count"], 1)
+        self.assertIn("fee wall", pair["verdict"])
+        self.assertTrue(study["summary"]["capturableNow"])
+
+    def test_parameter_trainer_is_deterministic_and_respects_bounds(self):
+        from backend.app.engines.autotune import ParameterTrainer
+
+        first = ParameterTrainer(Settings(market_mode="demo")).train(trials=4, ticks=30, regime="calm", seed=3)
+        second = ParameterTrainer(Settings(market_mode="demo")).train(trials=4, ticks=30, regime="calm", seed=3)
+        self.assertEqual(first["best"]["score"], second["best"]["score"])
+        self.assertEqual(first["best"]["params"], second["best"]["params"])
+        self.assertEqual(len(first["leaderboard"]), 3)
+        trainer = ParameterTrainer(Settings(market_mode="demo"))
+        for row in first["leaderboard"]:
+            for spec in trainer.specs:
+                value = row["params"].get(spec.key)
+                if value is None:
+                    continue
+                if spec.kind == "choice":
+                    self.assertIn(value, spec.options)
+                else:
+                    self.assertGreaterEqual(value, spec.minimum)
+                    self.assertLessEqual(value, spec.maximum)
+        self.assertIn("baseline", first)
+        self.assertIsInstance(first["improvedVsBaseline"], bool)
 
 
 if __name__ == "__main__":

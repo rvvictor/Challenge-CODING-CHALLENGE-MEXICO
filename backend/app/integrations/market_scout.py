@@ -12,8 +12,8 @@ from backend.app.core.config import ExchangeConfig
 # round-trip of wall time — and it runs entirely off the hot tick loop, so the
 # 5-venue decision path keeps its measured ~3 ms latency untouched.
 
-DISCOVERY_BASES = ("BTC", "ETH", "XRP", "LTC", "SOL")
-BTC_LEG_BASES = ("ETH", "XRP", "LTC", "SOL")
+DISCOVERY_BASES = ("BTC", "ETH", "XRP", "LTC", "SOL", "AVAX")
+BTC_LEG_BASES = ("ETH", "XRP", "LTC", "SOL", "AVAX")
 SCOUT_WORKERS = 10
 SCOUT_TIMEOUT_MS = 8000
 

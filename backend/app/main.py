@@ -140,6 +140,30 @@ async def replay(limit: int = 120) -> dict:
     return market_service.replay_feed(limit)
 
 
+class AutotunePayload(BaseModel):
+    trials: int = Field(default=24, ge=2, le=80)
+    ticks: int = Field(default=220, ge=40, le=1000)
+    regime: str = Field(default="normal")
+    source: str = Field(default="simulated")
+    seed: int = Field(default=7)
+
+
+@app.get("/api/research/spread")
+async def research_spread(timeframe: str = "1m", limit: int = 300) -> dict:
+    # Fits OU spread dynamics on real exchange history. Network-bound —
+    # off-loaded so it can never block the live loop or SSE.
+    return await asyncio.to_thread(market_service.run_spread_study, timeframe, min(max(limit, 60), 500))
+
+
+@app.post("/api/research/autotune")
+async def research_autotune(body: AutotunePayload, _: None = Depends(require_control_auth)) -> dict:
+    # Trains a parameter preset by replaying the market through the same
+    # engines many times (hyperopt pattern). CPU-bound — off-loaded.
+    return await asyncio.to_thread(
+        market_service.run_autotune, body.trials, body.ticks, body.regime, body.source, body.seed
+    )
+
+
 @app.get("/api/discovery")
 async def discovery() -> dict:
     return market_service.discovery.snapshot()

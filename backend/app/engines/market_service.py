@@ -482,6 +482,35 @@ class MarketService:
 
         return BacktestRunner(self.settings).run(ticks, regime, source)
 
+    # ---- Research & Training Lab (off the hot loop, called via to_thread) ------
+    def run_spread_study(self, timeframe: str = "1m", limit: int = 300) -> dict:
+        from backend.app.engines.spread_model import SpreadDynamicsLab
+
+        study = SpreadDynamicsLab(self.settings).study(timeframe, limit)
+        self.edge_ledger.append("research", {
+            "kind": "spread-study",
+            "pairsFitted": study.get("pairsFitted"),
+            "medianHalfLifeMs": (study.get("summary") or {}).get("medianHalfLifeMs"),
+            "executableEpisodes": (study.get("summary") or {}).get("executableEpisodes"),
+        })
+        return study
+
+    def run_autotune(self, trials: int = 24, ticks: int = 220, regime: str = "normal", source: str = "simulated", seed: int = 7) -> dict:
+        from backend.app.engines.autotune import ParameterTrainer
+
+        result = ParameterTrainer(self.settings).train(trials, ticks, regime, source, seed)
+        best = result.get("best") or {}
+        self.edge_ledger.append("research", {
+            "kind": "autotune",
+            "trials": result.get("trials"),
+            "regime": result.get("regime"),
+            "source": result.get("source"),
+            "baselineScore": (result.get("baseline") or {}).get("score"),
+            "bestScore": best.get("score"),
+            "improved": result.get("improvedVsBaseline"),
+        })
+        return result
+
     def narrate(self, question: str | None = None, model: str | None = None, trade_id: str | None = None) -> dict:
         return self.narrator.narrate(self.snapshot(), question, model, trade_id)
 
