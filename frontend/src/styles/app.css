@@ -1939,3 +1939,119 @@ input:focus-visible,
   outline: 2px solid var(--blue);
   outline-offset: 2px;
 }
+
+/* --- Wide-Net Radar (discovery lane) -------------------------------------- */
+.radarPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.radarNote {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.radarNote b {
+  color: var(--ink);
+}
+
+.radarStats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(105px, 1fr));
+  gap: 8px;
+}
+
+.radarStats span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper-2);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.radarStats span b {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.radarStats span b.green {
+  color: var(--green);
+}
+
+.radarRoutes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 380px;
+  overflow-y: auto;
+}
+
+.radarRoutes article {
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+}
+
+.radarRoutes article.radarPositive {
+  border-color: rgba(13, 125, 103, 0.35);
+  background: var(--green-soft);
+}
+
+.radarRouteTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.radarRouteTop b {
+  font-size: 12.5px;
+}
+
+.radarRouteNums {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+  font-size: 11.5px;
+}
+
+.radarRouteNums small {
+  color: var(--muted);
+  font-weight: 750;
+}
+
+.radarRouteNums b {
+  font-weight: 900;
+}
+
+.radarStreak {
+  color: var(--blue) !important;
+}
+
+.badge.promotable {
+  color: var(--green);
+  background: var(--green-soft);
+  border: 1px solid rgba(13, 125, 103, 0.35);
+}
+
+.radarActions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.radarActions small {
+  color: var(--muted);
+}

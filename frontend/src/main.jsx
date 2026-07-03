@@ -170,6 +170,11 @@ function useAurelion() {
     return response.json();
   }, []);
 
+  const sweepDiscovery = React.useCallback(async () => {
+    const response = await fetch(`${API_BASE}/api/discovery/sweep`, { method: "POST", headers: authHeaders() });
+    return response.json();
+  }, []);
+
   const triggerScenario = React.useCallback(async (scenario) => {
     const response = await fetch(`${API_BASE}/api/scenario`, {
       method: "POST",
@@ -186,7 +191,7 @@ function useAurelion() {
     return response.json();
   }, []);
 
-  return { snapshot, connected, control, reset, exportSession, loadParams, applyParams, runBacktest, triggerScenario, narrate };
+  return { snapshot, connected, control, reset, exportSession, loadParams, applyParams, runBacktest, triggerScenario, sweepDiscovery, narrate };
 }
 
 function Metric({ icon: Icon, label, value, note, tone = "neutral" }) {
@@ -1333,13 +1338,76 @@ function CalibrationPanel({ calibration, enabled }) {
   );
 }
 
-function ResultsWorkbench({ snapshot, loadParams, applyParams, runBacktest, control, onExplainTrade }) {
+// Wide-net discovery lane: real read-only ticker sweeps over the FULL venue
+// universe (incl. XRP/LTC/SOL), completely off the hot loop. Shows every route
+// priced with the same entry-tier fee catalog and how long each edge persists.
+function WideNetRadarPanel({ discovery = {}, sweepDiscovery }) {
+  const [busy, setBusy] = React.useState(false);
+  const sweep = discovery.lastSweep || {};
+  const routes = sweep.topRoutes || [];
+  const ageSec = sweep.at ? Math.max(0, Math.round((Date.now() - sweep.at) / 1000)) : null;
+  const runSweep = async () => {
+    setBusy(true);
+    try { await sweepDiscovery(); } finally { setBusy(false); }
+  };
+  return (
+    <section className="surface radarPanel">
+      <PanelTitle icon={Radar} title="Wide-Net Radar" pill={discovery.enabled ? `${sweep.venuesLive ?? 0}/${discovery.universeCount || 0} venues` : "off"} />
+      <p className="radarNote">
+        A background scout sweeps all {discovery.universeCount || 0} venues + {(discovery.bases || []).join("/")} from batched public tickers —
+        the hot loop and its decision latency are untouched. Routes holding above {discovery.minNetBps} bps net for {discovery.minPersistence}+
+        consecutive sweeps get flagged <b>promotable</b>; adding them to the active set stays your call.
+      </p>
+      <div className="radarStats">
+        <span>Last sweep<b>{ageSec == null ? "pending" : `${ageSec}s ago`}</b></span>
+        <span>Sweep time<b>{sweep.durationMs ? `${formatNumber(sweep.durationMs / 1000, 1)}s` : "—"}</b></span>
+        <span>Series<b>{sweep.seriesCount ?? 0}</b></span>
+        <span>Routes priced<b>{sweep.routesPriced ?? 0}</b></span>
+        <span>Net-positive<b className={sweep.positiveCount ? "green" : ""}>{sweep.positiveCount ?? 0}</b></span>
+        <span>Cadence<b>{Math.round((discovery.intervalMs || 0) / 1000)}s</b></span>
+      </div>
+      <div className="radarRoutes">
+        {routes.map((route) => (
+          <article key={route.id} className={route.netBps > 0 ? "radarPositive" : ""}>
+            <div className="radarRouteTop">
+              <b>{route.route}</b>
+              <em className={`badge ${route.kind === "cross" ? "filled" : "triangular"}`}>{route.kind} · {route.base}</em>
+            </div>
+            <div className="radarRouteNums">
+              <small>gross {formatNumber(route.grossBps, 1)} bps</small>
+              <small>costs {formatNumber(route.costsBps, 1)} bps</small>
+              <b className={route.netBps > 0 ? "green" : "red"}>net {formatNumber(route.netBps, 1)} bps</b>
+              {route.streak > 0 && <small className="radarStreak">seen ×{route.streak}</small>}
+              {route.promotable && <em className="badge promotable">promotable</em>}
+              {route.crossQuote && <small title="Buy and sell legs quote in USD vs USDT">USD/USDT</small>}
+            </div>
+          </article>
+        ))}
+        {!routes.length && (
+          <div className="empty">
+            {discovery.sweepCount ? "No routes priced in the last sweep — venues unreachable from this network" : "First sweep pending — the scout runs automatically in the background"}
+          </div>
+        )}
+      </div>
+      <div className="radarActions">
+        <button type="button" className="iconButton" onClick={runSweep} disabled={busy}>
+          <RefreshCw size={12} /> {busy ? "sweeping..." : "sweep now"}
+        </button>
+        <small>read-only public data · no API keys · fee model: entry-tier taker + slippage buffer per leg</small>
+      </div>
+    </section>
+  );
+}
+
+function ResultsWorkbench({ snapshot, loadParams, applyParams, runBacktest, control, sweepDiscovery, onExplainTrade }) {
   const [tab, setTab] = React.useState("opportunities");
+  const radarPositive = snapshot.discovery?.lastSweep?.positiveCount;
   const tabs = [
     ["opportunities", "Opportunities", snapshot.queue?.queued || 0],
     ["trades", "Trades", snapshot.trades?.length || 0],
     ["signals", "Signals", snapshot.opportunityHistory?.length || snapshot.opportunities?.length || 0],
     ["control", "Control Room", "live"],
+    ["radar", "Wide-Net Radar", radarPositive != null ? radarPositive : "scout"],
     ["backtest", "Backtest", "replay"],
     ["infra", "Diagnostics", snapshot.streams?.streams?.length || snapshot.books?.length || 0],
   ];
@@ -1356,6 +1424,7 @@ function ResultsWorkbench({ snapshot, loadParams, applyParams, runBacktest, cont
       {tab === "trades" && <Trades trades={snapshot.trades} metrics={snapshot.metrics} onExplainTrade={onExplainTrade} />}
       {tab === "signals" && <OpportunityHistory opportunities={snapshot.opportunityHistory || snapshot.opportunities} metrics={snapshot.metrics} now={snapshot.now} />}
       {tab === "control" && <ControlRoom loadParams={loadParams} applyParams={applyParams} />}
+      {tab === "radar" && <WideNetRadarPanel discovery={snapshot.discovery} sweepDiscovery={sweepDiscovery} />}
       {tab === "backtest" && <Backtest runBacktest={runBacktest} />}
       {tab === "infra" && <InfrastructurePanel snapshot={snapshot} control={control} />}
     </section>
@@ -1505,7 +1574,7 @@ function CoPilot({ snapshot, focusTrade }) {
 }
 
 function App() {
-  const { snapshot, connected, control, reset, exportSession, loadParams, applyParams, runBacktest, triggerScenario } = useAurelion();
+  const { snapshot, connected, control, reset, exportSession, loadParams, applyParams, runBacktest, triggerScenario, sweepDiscovery } = useAurelion();
   const [explainTrade, setExplainTrade] = React.useState(null);
   if (!snapshot) {
     return <main className="loading"><div className="sigil"><Sparkles size={24} /></div><span>Starting Aurelion</span></main>;
@@ -1529,6 +1598,7 @@ function App() {
               applyParams={applyParams}
               runBacktest={runBacktest}
               control={control}
+              sweepDiscovery={sweepDiscovery}
               onExplainTrade={(id) => setExplainTrade({ id, nonce: Date.now() })}
             />
           </div>
