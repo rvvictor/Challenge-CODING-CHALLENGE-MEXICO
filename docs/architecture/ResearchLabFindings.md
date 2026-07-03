@@ -70,6 +70,38 @@ aggressively when edge exists and refuses to fabricate it when it doesn't.
 median 4.0 ms, max 28.3 ms (idle baseline ~4.6 ms median). Training runs
 off-thread and does not degrade the live decision path.
 
+**Run C — robust mode with out-of-sample validation (v2), 16 trials × 3
+regimes (94 s, 69 backtests):**
+
+Candidates were scored across normal/volatile/stressed simultaneously; the top
+5 by training score were re-scored on an *independent market realization*
+(different seed) and the winner was chosen by validation score.
+
+| | Train score | Validation score | Overfit gap |
+| --- | --- | --- | --- |
+| Baseline (current params) | 27.0 | 12.9 | 14.1 |
+| Best learned preset | 200.4 | **122.8** | 77.5 |
+
+Three findings worth noting honestly:
+
+1. **The validation pass does real work.** Every top candidate scored 40–78
+   points lower out-of-sample than in-sample — exactly the overfit signal the
+   pass exists to expose. Selection by validation score is what makes the
+   learned preset defensible.
+2. **The baseline's per-regime decomposition is diagnostic**: the current
+   configuration scores 76.3 in the normal regime but ~1–4 in volatile and
+   stressed — it was implicitly tuned for fair weather. The robust winner
+   raised the cross-regime average 9.5× *by validation*.
+3. **The winner's worst-regime score is 0.0** — in the stressed regime it
+   chooses not to trade at all rather than lose. That is the correct behavior
+   for an arbitrage system in a storm, and the `worstRegimeScore` field makes
+   it visible instead of hiding it in an average.
+
+Post-run checks: the training session persisted to `.aurelion/research/` and
+appears in `GET /api/research/history`; the judge report (`/api/export/report`)
+renders with all sections; hot-loop decision latency immediately after the run:
+p50 3.65 ms / p95 5.92 ms.
+
 ## 3. Honest conclusions
 
 1. The market data confirms the design thesis: on reachable, liquid venues,

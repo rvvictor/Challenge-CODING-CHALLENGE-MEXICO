@@ -288,8 +288,21 @@ con dos capacidades:
   mejora es comparable uno a uno. Objetivo: `totalPnl − 0.5·maxDrawdown`. El
   preset aprendido se aplica por `/api/params` como cualquier cambio manual:
   visible en el Control Room, auditable en el edge ledger y reversible.
+- **Validación out-of-sample**: los mejores candidatos se re-evalúan sobre una
+  **realización de mercado independiente** (semilla distinta) y el ganador se
+  elige por score de validación, reportando la brecha train/validación — la
+  defensa estándar contra presets sobreajustados.
+- **Modo robusto**: entrena a través de los regímenes normal/volátil/estresado
+  a la vez y agrega los scores (promedio + peor régimen), de modo que el preset
+  aprendido tiene que aguantar mal clima, no solo el régimen donde se ajustó.
+- **Aprendizaje persistente**: cada estudio y entrenamiento se guarda en
+  `.aurelion/research/`; la pestaña lista las sesiones y permite re-aplicar un
+  preset aprendido con un clic, incluso después de reiniciar.
+- **Reporte para el jurado** (`GET /api/export/report`): HTML autocontenido en
+  español con resumen de sesión, curva de P&L, modelos activos, radar y la
+  comparación train/validación del último entrenamiento. Botón en el header.
 - Endpoints: `GET /api/research/spread`, `POST /api/research/autotune` (auth
-  opcional). Ambos corren fuera del loop en vivo.
+  opcional), `GET /api/research/history`. Todos corren fuera del loop en vivo.
 
 ---
 
@@ -555,7 +568,9 @@ Binance, OKX, Kraken, Coinbase, Bitstamp, Bybit, KuCoin, Gate.io, Bitfinex, Gemi
 | `GET /api/discovery` | Último barrido del radar de red amplia (rutas, persistencia, promotables). |
 | `POST /api/discovery/sweep` | Dispara un barrido manual del radar (con auth opcional). |
 | `GET /api/research/spread` | Ajusta modelos OU de spread por par de venues sobre historial real. |
-| `POST /api/research/autotune` | Entrena un preset de parámetros vía backtest (con auth opcional). |
+| `POST /api/research/autotune` | Entrena un preset (validación out-of-sample, modo robusto; auth opcional). |
+| `GET /api/research/history` | Sesiones de investigación persistidas (el bot recuerda lo aprendido). |
+| `GET /api/export/report` | Reporte HTML autocontenido para el jurado (español). |
 | `POST /api/scenario` | Inyecta un escenario adverso del Stress Lab (con auth opcional). |
 | `GET /api/narrate` | Explicación consultiva (Claude o determinística) de la decisión actual. |
 | `POST /api/control` | Cambia modo, ejecución, exchanges activos o activa stress de volatilidad. |
