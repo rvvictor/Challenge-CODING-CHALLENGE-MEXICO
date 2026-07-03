@@ -268,6 +268,15 @@ Ruta recomendada de evaluación (modo demo, determinístico):
 
 Para transparencia ante un jurado cuantitativo:
 
+- **Catálogo de comisiones (revisado julio 2026)**: cada venue usa la comisión
+  taker spot del nivel de entrada publicado de su plataforma profesional (Kraken
+  Pro 0.40%, Coinbase Advanced 1.20% en nivel inicial, Gemini ActiveTrader 0.40%,
+  Binance/OKX/Bybit/KuCoin 0.10%, Gate.io/Bitfinex 0.20%, Bitstamp 0.40%), sin
+  descuentos por volumen ni por token. Es deliberadamente conservador: un bot
+  siempre activo alcanzaría niveles con mejores comisiones en días (p. ej.
+  Coinbase baja a 0.40% con ≥$10K de volumen en 30 días), así que el costo real
+  estaría en o por debajo de estos valores.
+
 - **Impacto de mercado**: `book_walk` ya valora la profundidad visible nivel por
   nivel; `sqrt_impact`/`almgren_lite` añaden el costo de empujar el precio más allá del
   libro. Efecto: reduce el edge neto de órdenes grandes; más realista, más conservador.

@@ -49,17 +49,24 @@ PROFILE_LIMITS = {"speed": 5, "demo": 5, "coverage": 10}
 
 
 def exchange_catalog() -> tuple[ExchangeConfig, ...]:
+    # taker_fee_bps policy (reviewed July 2026): the published ENTRY-TIER spot
+    # taker fee of each venue's professional platform (Kraken Pro, Coinbase
+    # Advanced, Gemini ActiveTrader), with no volume or token discounts applied.
+    # Deliberately conservative: an always-on bot would quickly earn better tiers
+    # (e.g. Coinbase Advanced drops to 40 bps at >=$10K 30-day volume), so real
+    # costs would be at or below these numbers. Sources: each venue's public fee
+    # schedule as of July 2026.
     return (
         ExchangeConfig("binance", "Binance", "binance", "BTC/USDT", ("BTC/USDT", "ETH/BTC", "ETH/USDT"), 10, 1.4, 0.0002, 1.5, 0.98),
-        ExchangeConfig("okx", "OKX", "okx", "BTC/USDT", ("BTC/USDT", "ETH/BTC", "ETH/USDT"), 8, 1.7, 0.0001, 1, 0.96),
-        ExchangeConfig("kraken", "Kraken", "kraken", "BTC/USDT", ("BTC/USDT", "ETH/BTC", "ETH/USDT"), 26, 2.2, 0.00015, 2, 0.94, order_book_limit=25),
-        ExchangeConfig("coinbase", "Coinbase", "coinbase", "BTC/USD", ("BTC/USD", "ETH/BTC", "ETH/USD"), 40, 2.5, 0.00012, 3, 0.92),
-        ExchangeConfig("bitstamp", "Bitstamp", "bitstamp", "BTC/USD", ("BTC/USD", "ETH/BTC", "ETH/USD"), 30, 2.0, 0.00018, 2.5, 0.91),
+        ExchangeConfig("okx", "OKX", "okx", "BTC/USDT", ("BTC/USDT", "ETH/BTC", "ETH/USDT"), 10, 1.7, 0.0001, 1, 0.96),
+        ExchangeConfig("kraken", "Kraken", "kraken", "BTC/USDT", ("BTC/USDT", "ETH/BTC", "ETH/USDT"), 40, 2.2, 0.00015, 2, 0.94, order_book_limit=25),
+        ExchangeConfig("coinbase", "Coinbase", "coinbase", "BTC/USD", ("BTC/USD", "ETH/BTC", "ETH/USD"), 120, 2.5, 0.00012, 3, 0.92),
+        ExchangeConfig("bitstamp", "Bitstamp", "bitstamp", "BTC/USD", ("BTC/USD", "ETH/BTC", "ETH/USD"), 40, 2.0, 0.00018, 2.5, 0.91),
         ExchangeConfig("bybit", "Bybit", "bybit", "BTC/USDT", ("BTC/USDT", "ETH/BTC", "ETH/USDT"), 10, 1.8, 0.0002, 1.5, 0.90, order_book_limit=50),
         ExchangeConfig("kucoin", "KuCoin", "kucoin", "BTC/USDT", ("BTC/USDT", "ETH/BTC", "ETH/USDT"), 10, 2.0, 0.0002, 1.5, 0.89, order_book_limit=20),
         ExchangeConfig("gateio", "Gate.io", "gateio", "BTC/USDT", ("BTC/USDT", "ETH/BTC", "ETH/USDT"), 20, 2.4, 0.00025, 2, 0.88),
         ExchangeConfig("bitfinex", "Bitfinex", "bitfinex", "BTC/USDT", ("BTC/USDT", "ETH/BTC", "ETH/USDT"), 20, 2.2, 0.0004, 2.5, 0.87, order_book_limit=25),
-        ExchangeConfig("gemini", "Gemini", "gemini", "BTC/USD", ("BTC/USD", "ETH/BTC", "ETH/USD"), 35, 2.8, 0.0001, 3, 0.86),
+        ExchangeConfig("gemini", "Gemini", "gemini", "BTC/USD", ("BTC/USD", "ETH/BTC", "ETH/USD"), 40, 2.8, 0.0001, 3, 0.86),
     )
 
 
