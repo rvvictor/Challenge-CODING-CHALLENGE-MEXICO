@@ -304,6 +304,32 @@ con dos capacidades:
 - Endpoints: `GET /api/research/spread`, `POST /api/research/autotune` (auth
   opcional), `GET /api/research/history`. Todos corren fuera del loop en vivo.
 
+### Robustez de grado producción: el motor no puede morir
+
+- **Watchdog del tick loop**: toda evaluación pasa por `safe_tick()`. Una
+  excepción dentro del tick se contiene, se cuenta y se registra como evento de
+  riesgo — el motor sigue vivo y el dashboard sigue actualizando. **Tres fallas
+  consecutivas** activan el circuit breaker en pausa fail-safe (mejor no operar
+  que operar sobre un estado posiblemente roto). Estado visible en
+  `snapshot.engineHealth`.
+- **Escenario `engine_fault` en el Stress Lab**: un botón que **crashea el
+  motor a propósito** en el hot path, para ver al watchdog contenerlo en vivo.
+  La demostración de robustez más directa posible.
+- **Feed guard (sanitizador de datos en vivo)**: un exchange real puede enviar
+  libros envenenados — precios NaN/cero, libros cruzados sin sentido, saltos
+  fat-finger de dos dígitos. El guard los rechaza en la frontera del proveedor
+  (nunca llegan a los motores ni al P&L), cuenta los rechazos por venue y razón,
+  y limita su propio logging para que un feed inestable no inunde el ledger.
+  Dos parámetros nuevos en el Control Room (grupo *Venue health*).
+- **Suite de fuzzing**: 250 iteraciones de libros aleatorios (incluyendo
+  envenenados) contra el pipeline completo — invariante verificada: ninguna
+  excepción y ningún NaN en ninguna salida de los motores.
+- **Prueba de caos**: 140 ticks mientras se inyectan escenarios adversos,
+  mutaciones aleatorias de parámetros, vueltas del kill switch y fallas
+  deliberadas del motor — invariante verificada: solo fallan los ticks
+  saboteados a propósito y el snapshot completo queda libre de NaN/infinitos
+  (`json.dumps(..., allow_nan=False)`).
+
 ---
 
 ## Para el jurado
@@ -318,7 +344,9 @@ Ruta recomendada de evaluación (modo demo, determinístico):
 4. **Backtest**: correr un replay y leer hit rate, drawdown y ratio tipo Sharpe de la
    estrategia recién ajustada.
 5. **Stress Lab**: inyectar *Venue outage* o *Liquidity crunch* y observar el circuit
-   breaker; inyectar *Leg failure* y revisar la conciliación en *Executed Trades*.
+   breaker; inyectar *Leg failure* y revisar la conciliación en *Executed Trades*;
+   inyectar *Engine fault* y ver al watchdog contener un crash deliberado del motor
+   sin que el sistema muera (tres seguidos activan la pausa fail-safe).
 6. **AI Co-pilot**: pedir la explicación de la decisión actual.
 7. **Wide-Net Radar**: ver el barrido real de 10 exchanges + XRP/LTC/SOL/AVAX
    (datos públicos en vivo) y comprobar que ningún edge sobrevive las comisiones

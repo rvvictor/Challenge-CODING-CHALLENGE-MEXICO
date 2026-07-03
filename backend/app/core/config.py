@@ -163,6 +163,10 @@ class Settings:
     execution_adverse_bps_per_second: float = number_env("EXECUTION_ADVERSE_BPS_PER_SECOND", 0.9)
     execution_adverse_max_bps: float = number_env("EXECUTION_ADVERSE_MAX_BPS", 1.4)
     risk_budget_hour_usd: float = number_env("RISK_BUDGET_HOUR_USD", 75)
+    # Live-feed sanitizer: rejects poisoned order books (non-finite prices,
+    # crossed books, fat-finger jumps) at the provider boundary.
+    feed_guard_enabled: bool = bool_env("FEED_GUARD_ENABLED", True)
+    feed_max_jump_pct: float = number_env("FEED_MAX_JUMP_PCT", 8.0)
     exchange_demotion_ticks: int = int_env("EXCHANGE_DEMOTION_TICKS", 5)
     exchange_recovery_ticks: int = int_env("EXCHANGE_RECOVERY_TICKS", 8)
     health_slow_latency_ms: int = int_env("HEALTH_SLOW_LATENCY_MS", 650)
@@ -291,6 +295,8 @@ PARAMETER_REGISTRY: tuple[ParameterSpec, ...] = (
     ParameterSpec("exchange_recovery_ticks", "venue", "Recovery ticks", "Healthy ticks required for a venue to recover.", "int", 1, 120, 1, ""),
     ParameterSpec("health_slow_latency_ms", "venue", "Slow latency", "Latency above which a venue is flagged slow.", "int", 100, 5000, 50, "ms"),
     ParameterSpec("health_min_score", "venue", "Min health score", "Health score floor (0-100) below which a venue is demoted.", "float", 0.0, 100.0, 1.0, ""),
+    ParameterSpec("feed_guard_enabled", "venue", "Feed guard", "Reject poisoned live order books (non-finite prices, crossed books, fat-finger jumps) at the provider boundary.", "bool"),
+    ParameterSpec("feed_max_jump_pct", "venue", "Feed jump gate", "Max mid-price move between consecutive updates of one book before the update is rejected as bad data.", "float", 0.5, 50.0, 0.5, "%"),
     # Wide-net discovery
     ParameterSpec("discovery_enabled", "discovery", "Discovery lane", "Background scout that sweeps the full venue universe plus XRP/LTC/SOL/AVAX pairs off the hot loop.", "bool"),
     ParameterSpec("discovery_interval_ms", "discovery", "Sweep interval", "How often the discovery lane sweeps the wide universe.", "int", 10000, 600000, 5000, "ms"),

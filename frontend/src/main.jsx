@@ -879,6 +879,7 @@ const SCENARIO_LABELS = {
   latency_spike: "Latency spike",
   venue_outage: "Venue outage",
   leg_failure: "Leg failure",
+  engine_fault: "Engine fault (watchdog)",
 };
 
 function StressLab({ scenarios = {}, triggerScenario }) {

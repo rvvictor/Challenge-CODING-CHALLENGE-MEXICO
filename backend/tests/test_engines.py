@@ -1500,5 +1500,134 @@ class ResearchLabTests(unittest.TestCase):
         self.assertIn("paper trading", report)
 
 
+class RobustnessTests(unittest.TestCase):
+    """The engine cannot die: watchdog containment, live-feed sanitation,
+    fuzzed inputs and full-service chaos."""
+
+    def test_watchdog_contains_faults_and_fail_safe_pauses_after_three(self):
+        from backend.app.engines.market_service import MarketService
+
+        service = MarketService(Settings(market_mode="demo"))
+        service.safe_tick()
+        self.assertEqual(service.tick_errors, 0)
+        for _ in range(3):
+            service._fault_next_tick = True
+            service.safe_tick()
+        self.assertEqual(service.tick_errors, 3)
+        self.assertEqual(service.consecutive_tick_errors, 3)
+        self.assertIn("Injected engine fault", service.last_tick_error)
+        self.assertTrue(service.risk.snapshot(int(time.time() * 1000))["paused"])
+        # The engine is still alive: the next (paused) tick runs cleanly.
+        service.safe_tick()
+        self.assertEqual(service.consecutive_tick_errors, 0)
+        snapshot = service.snapshot()
+        self.assertEqual(snapshot["engineHealth"]["tickErrors"], 3)
+        self.assertEqual(snapshot["engineHealth"]["watchdog"], "armed")
+        self.assertIn("engine_fault", snapshot["scenarios"]["available"])
+
+    def test_feed_guard_blocks_poisoned_books_from_live_path(self):
+        from backend.app.engines.market_service import MarketService
+
+        service = MarketService(Settings(market_mode="demo"))
+        exchange = service.settings.exchanges[0]
+        symbol = exchange.primary_symbol
+        clean = book(exchange, symbol, [(70010, 1)], [(69990, 1)])
+        service.handle_book(clean)
+        self.assertIs(service.books[clean.key], clean)
+
+        service.handle_book(book(exchange, symbol, [(float("nan"), 1)], [(69990, 1)]))
+        service.handle_book(book(exchange, symbol, [(70010, -5)], [(69990, 1)]))
+        service.handle_book(book(exchange, symbol, [(70000, 1)], [(75000, 1)]))       # crossed
+        service.handle_book(book(exchange, symbol, [(80010, 1)], [(79990, 1)]))       # +14% fat finger
+        guard = service.feed_guard.snapshot()
+        self.assertEqual(guard["rejectedCount"], 4)
+        self.assertIs(service.books[clean.key], clean, "poisoned updates must never replace clean data")
+        reasons = " | ".join(guard["byReason"].keys())
+        self.assertIn("finite", reasons)
+        self.assertIn("quantity", reasons)
+        self.assertIn("crossed", reasons)
+        self.assertIn("jumped", reasons)
+
+        moved = book(exchange, symbol, [(70210, 1)], [(70190, 1)])                     # +0.3%: fine
+        service.handle_book(moved)
+        self.assertIs(service.books[clean.key], moved)
+
+    def test_fuzzed_books_never_break_engines_or_produce_nan(self):
+        import math
+        import random
+
+        from backend.app.engines.market_service import MarketService
+
+        rng = random.Random(4242)
+        service = MarketService(Settings(market_mode="demo"))
+        venues = service.settings.exchanges[:3]
+        poisons = ("nan", "inf", "negative", "crossed", "jump")
+        numeric_keys = ("netBps", "netProfit", "grossProfit", "expectedValue", "evBps", "qtyBtc", "score")
+        for iteration in range(250):
+            for exchange in venues:
+                mid = 70000 * (1 + rng.uniform(-0.03, 0.03))
+                spread = mid * rng.uniform(0.00001, 0.002)
+                depth = rng.randint(1, 20)
+                asks = [(mid + spread / 2 + i * rng.uniform(0.01, 9), rng.uniform(1e-6, 50)) for i in range(depth)]
+                bids = [(mid - spread / 2 - i * rng.uniform(0.01, 9), rng.uniform(1e-6, 50)) for i in range(depth)]
+                if rng.random() < 0.12:
+                    poison = rng.choice(poisons)
+                    if poison == "nan":
+                        asks[0] = (float("nan"), 1.0)
+                    elif poison == "inf":
+                        bids[0] = (float("inf"), 1.0)
+                    elif poison == "negative":
+                        asks[0] = (-abs(asks[0][0]), 1.0)
+                    elif poison == "crossed":
+                        bids[0] = (asks[0][0] * 1.2, 1.0)
+                    else:
+                        asks = [(price * 1.4, qty) for price, qty in asks]
+                        bids = [(price * 1.4, qty) for price, qty in bids]
+                service.handle_book(book(exchange, exchange.primary_symbol, asks, bids))
+            if iteration % 5 == 0:
+                primary = {item.exchange_id: item for item in service.books.values() if item.primary and item.asks and item.bids}
+                opportunities = service.cross_engine.scan(primary) + service.triangular_engine.scan(service.books)
+                for opportunity in opportunities:
+                    payload = opportunity.to_dict() if hasattr(opportunity, "to_dict") else opportunity
+                    for key in numeric_keys:
+                        value = payload.get(key)
+                        if isinstance(value, float):
+                            self.assertTrue(math.isfinite(value), f"{key} must stay finite, got {value}")
+        self.assertGreater(service.feed_guard.rejected_count, 0, "fuzz must have exercised the guard")
+
+    def test_chaos_service_survives_scenarios_params_and_faults(self):
+        import json as json_module
+        import random
+
+        from backend.app.core.config import PARAMETER_REGISTRY, apply_parameter_updates
+        from backend.app.engines.market_service import MarketService
+
+        rng = random.Random(99)
+        service = MarketService(Settings(market_mode="demo"))
+        numeric = [spec for spec in PARAMETER_REGISTRY if spec.kind in ("float", "int") and spec.group in ("execution", "ev", "risk", "triangular", "cadence")]
+        choices = [spec for spec in PARAMETER_REGISTRY if spec.kind == "choice"]
+        injected_faults = 0
+        for i in range(140):
+            if i % 23 == 7:
+                service.simulator.inject_scenario(rng.choice(list(service.simulator.SCENARIOS)), service.settings.exchanges)
+            if i % 31 == 11:
+                service._fault_next_tick = True
+                injected_faults += 1
+            if i % 9 == 4:
+                spec = rng.choice(numeric)
+                apply_parameter_updates(service.settings, {spec.key: rng.uniform(spec.minimum, spec.maximum)})
+            if i % 17 == 6:
+                spec = rng.choice(choices)
+                apply_parameter_updates(service.settings, {spec.key: rng.choice(spec.options)})
+            if i % 13 == 3:
+                service.pre_trade_guard.kill_switch = not service.pre_trade_guard.kill_switch
+            service.safe_tick()
+        self.assertEqual(service.tick_errors, injected_faults, "only the deliberately injected faults may fail ticks")
+        snapshot = service.snapshot()
+        json_module.dumps(snapshot, allow_nan=False)  # no NaN/inf anywhere in the payload
+        self.assertEqual(snapshot["engineHealth"]["watchdog"], "armed")
+        self.assertGreaterEqual(snapshot["engineHealth"]["tickCount"], 140)
+
+
 if __name__ == "__main__":
     unittest.main()

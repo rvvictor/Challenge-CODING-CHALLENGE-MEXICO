@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+import traceback
 from collections.abc import AsyncIterator
 
 from backend.app.core.config import (
@@ -30,6 +31,7 @@ from backend.app.engines.edge_analysis import (
 from backend.app.engines.edge_ledger import EdgeLedger
 from backend.app.engines.event_store import EventStore
 from backend.app.engines.execution import ExecutionSimulator
+from backend.app.engines.feed_guard import FeedGuard
 from backend.app.engines.fills import best
 from backend.app.engines.ledger import WalletLedger
 from backend.app.engines.queue import OpportunityQueue
@@ -96,6 +98,15 @@ class MarketService:
         # risk-gated), in ms. Isolated from network/exchange latency so the
         # dashboard can show "how fast does Aurelion itself decide."
         self.decision_latency_window: list[float] = []
+        # Engine watchdog: the loop routes every tick through safe_tick(), so a
+        # fault inside tick() is contained instead of killing the engine task.
+        self.feed_guard = FeedGuard(cfg)
+        self.tick_count = 0
+        self.tick_errors = 0
+        self.consecutive_tick_errors = 0
+        self.last_tick_error = ""
+        self.last_tick_error_at = 0
+        self._fault_next_tick = False
 
     async def start(self) -> None:
         await self.redis.start()
@@ -127,6 +138,19 @@ class MarketService:
         self.degraded_demo = self.mode == "auto" and not self.stream_provider.available
 
     def handle_book(self, book: OrderBook) -> None:
+        # Live-path sanitizer: a poisoned update (NaN price, garbled crossed
+        # book, fat-finger jump) is rejected at the boundary so it can never
+        # reach the engines, the mids or the P&L. Demo books are generated
+        # internally and do not pass through here.
+        reason = self.feed_guard.inspect(book)
+        if reason:
+            if self.feed_guard.record_rejection(book, reason):
+                self.edge_ledger.append("feed-rejected", {
+                    "exchange": book.exchange_id,
+                    "symbol": book.symbol,
+                    "reason": reason,
+                })
+            return
         self.books[book.key] = book
 
     async def handle_provider_event(self, event: dict) -> None:
@@ -231,6 +255,9 @@ class MarketService:
         if key == "leg_failure":
             self.executor.leg_failure_until = current + 20000
             applied = applied or "leg_failure"
+        if key == "engine_fault":
+            self._fault_next_tick = True
+            applied = "engine_fault"
         event = {
             "id": f"SC-{current}",
             "type": "scenario",
@@ -321,6 +348,13 @@ class MarketService:
         self.pre_trade_guard.kill_switch = False
         self.set_execution_gateway("paper")
         self.decision_latency_window = []
+        self.feed_guard.reset()
+        self.tick_count = 0
+        self.tick_errors = 0
+        self.consecutive_tick_errors = 0
+        self.last_tick_error = ""
+        self.last_tick_error_at = 0
+        self._fault_next_tick = False
         self.started_at = now_ms()
         self.scan_tick = 0
         self.recorded_signal_times.clear()
@@ -350,8 +384,53 @@ class MarketService:
 
     async def loop(self) -> None:
         while True:
-            self.tick()
+            self.safe_tick()
             await asyncio.sleep(self.settings.evaluation_interval_ms / 1000)
+
+    def safe_tick(self) -> None:
+        """Watchdog: the engine cannot die. Any exception inside a tick is
+        contained, counted and surfaced as a risk event; repeated consecutive
+        faults trip the circuit breaker into a fail-safe pause rather than
+        trading on a possibly-broken state. The dashboard keeps updating even
+        on a failed tick, so an operator always sees what happened."""
+        self.tick_count += 1
+        try:
+            self.tick()
+            self.consecutive_tick_errors = 0
+        except Exception as exc:  # noqa: BLE001 - the whole point is to survive anything
+            current = now_ms()
+            self.tick_errors += 1
+            self.consecutive_tick_errors += 1
+            self.last_tick_error = f"{type(exc).__name__}: {exc}"
+            self.last_tick_error_at = current
+            traceback.print_exc()
+            event = {
+                "id": f"EF-{current}-{self.tick_errors}",
+                "type": "engine-error",
+                "time": current,
+                "condition": "engine-fault",
+                "reason": f"Tick contained by watchdog: {self.last_tick_error}",
+                "metadata": {"consecutive": self.consecutive_tick_errors, "totalErrors": self.tick_errors},
+            }
+            self.store.add_event(event)
+            self.edge_ledger.append("engine-error", {
+                "error": self.last_tick_error,
+                "consecutive": self.consecutive_tick_errors,
+            })
+            if self.consecutive_tick_errors >= 3:
+                self.risk.activate(
+                    "engine-fault",
+                    f"Engine fault x{self.consecutive_tick_errors} ({self.last_tick_error}) — fail-safe pause",
+                    current,
+                    {"consecutive": self.consecutive_tick_errors, "watchdog": True},
+                )
+                self.flush_risk_events()
+            try:
+                snapshot = self.snapshot()
+                self.schedule(self.redis.publish("snapshots", snapshot))
+                self.broadcast(snapshot)
+            except Exception:
+                pass
 
     async def discovery_loop(self) -> None:
         """Wide-net lane: sweeps the FULL exchange universe (incl. XRP/LTC/SOL)
@@ -375,6 +454,11 @@ class MarketService:
         return self.discovery.snapshot()
 
     def tick(self) -> None:
+        # Stress Lab "engine_fault": a deliberate crash inside the hot path so
+        # an evaluator can watch the watchdog contain it live.
+        if self._fault_next_tick:
+            self._fault_next_tick = False
+            raise RuntimeError("Injected engine fault (Stress Lab): deliberate tick crash")
         self.scan_tick += 1
         if self.mode == "demo" or self.degraded_demo:
             self.generate_demo_books()
@@ -764,8 +848,17 @@ class MarketService:
             "calibration": self.calibrator.snapshot(),
             "scenarios": {
                 "active": self.simulator.active_scenarios() if (self.mode == "demo" or self.degraded_demo) else [],
-                "available": list(self.simulator.SCENARIOS),
+                "available": [*self.simulator.SCENARIOS, "engine_fault"],
                 "legFailureActive": current < self.executor.leg_failure_until,
+            },
+            "engineHealth": {
+                "watchdog": "armed",
+                "tickCount": self.tick_count,
+                "tickErrors": self.tick_errors,
+                "consecutiveTickErrors": self.consecutive_tick_errors,
+                "lastTickError": self.last_tick_error or None,
+                "lastTickErrorAt": self.last_tick_error_at or None,
+                "feedGuard": self.feed_guard.snapshot(),
             },
             "inventoryAutonomy": self.ledger.inventory_autonomy(self.settings.exchanges, mark_price),
             "discovery": self.discovery.snapshot(),
