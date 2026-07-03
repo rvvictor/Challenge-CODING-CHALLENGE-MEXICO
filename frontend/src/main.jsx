@@ -1041,7 +1041,7 @@ function ExecutionPanel({ execution = {}, control }) {
           <button type="button" className={`crToggle ${guard.killSwitch ? "on" : "off"}`} aria-pressed={!!guard.killSwitch} onClick={() => control({ killSwitch: !guard.killSwitch })}>
             kill switch {guard.killSwitch ? "on" : "off"}
           </button>
-          <small>order cap ${formatNumber(guard.maxOrderNotionalUsd || 0, 0)} · fills remain paper until a live connector is added</small>
+          <small>order cap ${formatNumber(guard.maxOrderNotionalUsd || 0, 0)} · linked to market mode (demo↔paper, auto/live↔read-only-live) · fills remain paper until a live connector is added</small>
         </div>
       </div>
     </section>

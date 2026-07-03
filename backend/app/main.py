@@ -208,7 +208,7 @@ async def control(body: ControlPayload, _: None = Depends(require_control_auth))
     if body.killSwitch is not None:
         market_service.set_kill_switch(bool(body.killSwitch))
     if body.executionGateway is not None:
-        market_service.set_execution_gateway(str(body.executionGateway))
+        await market_service.set_execution_gateway_unified(str(body.executionGateway))
     if body.volatilityShock:
         await market_service.trigger_volatility_stress()
     return market_service.snapshot()

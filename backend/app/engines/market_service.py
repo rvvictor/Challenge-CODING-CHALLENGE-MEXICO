@@ -145,6 +145,21 @@ class MarketService:
             self.stream_provider = None
         if mode != "demo":
             await self.start_streams()
+        # Keep the execution gateway consistent with the data source, so market
+        # mode and gateway read as ONE concept to the user: demo <-> paper,
+        # auto/live <-> read-only-live (real data, paper fills). The "live"
+        # gateway (disabled stub) is only ever selected explicitly.
+        if mode == "demo":
+            self.set_execution_gateway("paper")
+        elif self.gateway_mode == "paper":
+            self.set_execution_gateway("read-only-live")
+
+    async def set_execution_gateway_unified(self, mode: str) -> None:
+        """Gateway switch with the inverse coupling: choosing a live-data gateway
+        from demo also moves the market mode to auto (real data, safe degrade)."""
+        self.set_execution_gateway(mode)
+        if mode in ("read-only-live", "live") and self.mode == "demo":
+            await self.set_mode("auto")
 
     async def set_active_exchanges(self, exchange_ids: list[str]) -> None:
         profile = ",".join(str(exchange_id).strip().lower() for exchange_id in exchange_ids if str(exchange_id).strip())

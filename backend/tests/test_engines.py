@@ -986,6 +986,29 @@ class ExecutionGatewayTests(unittest.TestCase):
         self.assertTrue(caps["readOnly"])
         self.assertEqual(caps["execution"], "paper")
 
+    def test_mode_and_gateway_stay_unified(self):
+        from backend.app.engines.market_service import MarketService
+
+        service = MarketService(Settings(market_mode="demo"))
+
+        async def no_streams():
+            return None
+
+        service.start_streams = no_streams  # avoid real network in tests
+
+        # Choosing a live-data gateway from demo pulls the mode to auto.
+        asyncio.run(service.set_execution_gateway_unified("read-only-live"))
+        self.assertEqual(service.gateway_mode, "read-only-live")
+        self.assertEqual(service.mode, "auto")
+
+        # Returning to demo resets the gateway to paper.
+        asyncio.run(service.set_mode("demo"))
+        self.assertEqual(service.gateway_mode, "paper")
+
+        # Leaving demo upgrades a paper gateway to read-only-live automatically.
+        asyncio.run(service.set_mode("auto"))
+        self.assertEqual(service.gateway_mode, "read-only-live")
+
     def test_api_execution_status_and_killswitch(self):
         try:
             import fastapi  # noqa: F401
