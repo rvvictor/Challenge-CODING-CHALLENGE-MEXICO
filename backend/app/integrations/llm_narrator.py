@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import random
 import time
 
 from backend.app.core.config import Settings
@@ -13,7 +14,8 @@ SYSTEM_PROMPT = (
     "their questions about the live session. You never give financial advice, never "
     "predict prices, and never decide trades — the engine decides; you describe. "
     "Keep answers to 2-4 short sentences, grounded only in the facts provided. Do "
-    "not invent numbers."
+    "not invent numbers. Vary your phrasing naturally between updates so consecutive "
+    "explanations do not sound identical."
 )
 
 ALLOWED_MODELS = (
@@ -50,7 +52,11 @@ class DecisionNarrator:
         self._cache_at = 0
         self._cache_ttl_ms = 8000
         self._prev_decision: dict | None = None
+        self._variety = random.Random()
         self.last_error = ""
+
+    def _pick(self, variants: list[str]) -> str:
+        return variants[self._variety.randrange(len(variants))]
 
     def available(self) -> bool:
         return bool(self.api_key)
@@ -163,41 +169,68 @@ class DecisionNarrator:
         return " ".join(parts)
 
     def _fallback(self, ctx: dict) -> str:
+        # Phrasing rotates between grounded variants so consecutive template
+        # narrations don't read identically; every variant carries the same facts.
         if ctx.get("focusTrade"):
             return self._fallback_focus_trade(ctx["focusTrade"])
         parts: list[str] = []
         if ctx.get("paused"):
-            parts.append(
-                f"Execution is paused by the circuit breaker ({ctx.get('riskReason')}); the bot keeps "
-                "watching the market but opens no new trades until risk clears."
-            )
+            reason = ctx.get("riskReason")
+            parts.append(self._pick([
+                f"Execution is paused by the circuit breaker ({reason}); the bot keeps watching the market but opens no new trades until risk clears.",
+                f"The circuit breaker has execution on hold ({reason}). Monitoring continues, and trading re-arms automatically once conditions clear.",
+                f"Trading is paused — the circuit breaker tripped ({reason}). Every book is still being watched while the engine waits it out.",
+            ]))
         decision = ctx.get("decision")
         if decision:
+            route = decision["route"]
+            net = decision.get("netBps")
+            reason = decision.get("reason")
             confidence_pct = round((decision.get("confidence") or 0) * 100)
             if decision.get("status") == "profitable":
-                parts.append(
-                    f"The top route {decision['route']} clears the gates with a net edge of "
-                    f"{decision.get('netBps')} bps after fees, slippage and latency, at {confidence_pct}% confidence."
-                )
+                parts.append(self._pick([
+                    f"The top route {route} clears the gates with a net edge of {net} bps after fees, slippage and latency, at {confidence_pct}% confidence.",
+                    f"Best opportunity right now: {route}. After fees, slippage and latency it keeps {net} bps of net edge at {confidence_pct}% confidence, so the engine will take it.",
+                    f"{route} leads the queue — {net} bps of edge survives all modeled costs at {confidence_pct}% confidence.",
+                ]))
             elif decision.get("status") == "blocked":
-                parts.append(f"The top candidate {decision['route']} is blocked: {decision.get('reason')}.")
+                parts.append(self._pick([
+                    f"The top candidate {route} is blocked: {reason}.",
+                    f"{route} can't run right now — blocked by {reason}.",
+                ]))
             else:
-                parts.append(
-                    f"The top candidate {decision['route']} is skipped because costs or risk removed the edge "
-                    f"({decision.get('netBps')} bps net): {decision.get('reason')}."
-                )
+                parts.append(self._pick([
+                    f"The top candidate {route} is skipped because costs or risk removed the edge ({net} bps net): {reason}.",
+                    f"The engine is passing on {route}: once real costs are charged the edge is {net} bps net ({reason}).",
+                    f"{route} looked interesting but doesn't survive the math — {net} bps net after costs, so it stays rejected ({reason}).",
+                ]))
             change = self._change_note(decision)
             if change:
                 parts.append(change)
         else:
-            parts.append("No actionable opportunity right now — visible spreads do not survive costs.")
+            parts.append(self._pick([
+                "No actionable opportunity right now — visible spreads do not survive costs.",
+                "Nothing actionable at the moment: every visible spread dies once real costs are applied.",
+                "The scanners are running, but no route currently beats its own costs — standing by.",
+            ]))
         if ctx.get("scenarios"):
-            parts.append(f"Active stress scenarios: {', '.join(ctx['scenarios'])}.")
+            names = ", ".join(ctx["scenarios"])
+            parts.append(self._pick([
+                f"Active stress scenarios: {names}.",
+                f"Stress injected right now ({names}) — watch the defenses react.",
+            ]))
+        # Occasional grounded color so repeated updates feel alive, never invented.
+        pnl = ctx.get("realizedPnl")
+        autonomy = ctx.get("autonomy")
+        if pnl and self._variety.random() < 0.35:
+            parts.append(f"Session P&L stands at {round(float(pnl), 2)}.")
+        elif autonomy and self._variety.random() < 0.3:
+            parts.append(f"Inventory can still fund roughly {autonomy} trades before a rebalance matters.")
         models = ctx.get("models", {})
-        parts.append(
-            f"Models in use: {models.get('cycleAlgo')} cycle detection, {models.get('slippageModel')} slippage, "
-            f"{models.get('sizingMode')} sizing."
-        )
+        parts.append(self._pick([
+            f"Models in use: {models.get('cycleAlgo')} cycle detection, {models.get('slippageModel')} slippage, {models.get('sizingMode')} sizing.",
+            f"Strategy stack: {models.get('cycleAlgo')} cycles, {models.get('slippageModel')} slippage, {models.get('sizingMode')} sizing.",
+        ]))
         return " ".join(part for part in parts if part)
 
     def _answer_or_fallback(self, ctx: dict, question: str | None) -> str:

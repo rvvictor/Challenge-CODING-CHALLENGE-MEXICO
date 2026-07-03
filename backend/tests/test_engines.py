@@ -843,6 +843,26 @@ class CoPilotTests(unittest.TestCase):
         second = narrator.narrate(snapshot)
         self.assertTrue(second["cached"])
 
+    def test_fallback_phrasing_varies_between_narrations(self):
+        narrator = self._narrator()
+        narrator._variety.seed(7)
+        ctx = narrator._build_context({
+            "mode": "demo",
+            "risk": {"paused": False, "reason": "Healthy"},
+            "models": {"cycleAlgo": "dfs", "slippageModel": "book_walk", "sizingMode": "fixed"},
+            "scenarios": {"active": []},
+            "metrics": {"cumulativePnl": 12.5},
+            "queuedOpportunities": [{
+                "strategy": "simple", "status": "profitable", "buyExchange": "OKX", "sellExchange": "Kraken",
+                "netBps": 1.4, "confidence": 0.8, "reason": "Net edge cleared risk gates",
+            }],
+        })
+        texts = {narrator._fallback(ctx) for _ in range(8)}
+        self.assertGreater(len(texts), 1, "fallback should rotate phrasing, not repeat one template")
+        for text in texts:
+            self.assertIn("OKX -> Kraken", text)  # facts stay grounded in every variant
+            self.assertIn("bps", text)
+
     def test_narrator_explains_a_specific_trade_deterministically(self):
         narrator = self._narrator()
         snapshot = {

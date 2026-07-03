@@ -1368,7 +1368,8 @@ function coPilotContextKey(snapshot) {
     ? (top.strategy === "triangular" ? (top.cyclePath || []).join(">") : `${top.buyExchange}>${top.sellExchange}`)
     : "none";
   const scenarios = (snapshot?.scenarios?.active || []).join(",");
-  return `${snapshot?.risk?.paused}|${route}|${top?.status}|${Math.round((top?.netBps || 0) * 10) / 10}|${scenarios}`;
+  // executedCount makes a fresh fill re-trigger narration automatically.
+  return `${snapshot?.risk?.paused}|${route}|${top?.status}|${Math.round((top?.netBps || 0) * 10) / 10}|${scenarios}|${snapshot?.metrics?.executedCount || 0}`;
 }
 
 function modelLabel(id) {
@@ -1432,13 +1433,25 @@ function CoPilot({ snapshot, focusTrade }) {
     if (contextKey === lastKeyRef.current) return undefined;
     const first = !lastKeyRef.current;
     const elapsed = Date.now() - lastRunRef.current;
-    const delay = first ? 300 : Math.max(1200, 9000 - elapsed);
+    const delay = first ? 300 : Math.max(1000, 5000 - elapsed);
     const timer = setTimeout(() => {
       lastKeyRef.current = contextKey;
       startStream("");
     }, delay);
     return () => clearTimeout(timer);
   }, [contextKey, auto, startStream]);
+
+  // Heartbeat: even with a stable market, refresh the narration every ~20s so
+  // the panel always reads as live (phrasing varies server-side).
+  React.useEffect(() => {
+    if (!auto) return undefined;
+    const beat = setInterval(() => {
+      if (!esRef.current && Date.now() - lastRunRef.current > 18000) {
+        startStream("");
+      }
+    }, 20000);
+    return () => clearInterval(beat);
+  }, [auto, startStream]);
 
   React.useEffect(() => {
     if (!focusTrade?.nonce || focusTrade.nonce === lastFocusNonceRef.current) return;
