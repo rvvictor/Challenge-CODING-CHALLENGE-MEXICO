@@ -189,6 +189,11 @@ function useAurelion() {
     return response.json();
   }, []);
 
+  const loadResearchHistory = React.useCallback(async () => {
+    const response = await fetch(`${API_BASE}/api/research/history`);
+    return response.json();
+  }, []);
+
   const triggerScenario = React.useCallback(async (scenario) => {
     const response = await fetch(`${API_BASE}/api/scenario`, {
       method: "POST",
@@ -205,7 +210,7 @@ function useAurelion() {
     return response.json();
   }, []);
 
-  return { snapshot, connected, control, reset, exportSession, loadParams, applyParams, runBacktest, triggerScenario, sweepDiscovery, runSpreadStudy, runAutotune, narrate };
+  return { snapshot, connected, control, reset, exportSession, loadParams, applyParams, runBacktest, triggerScenario, sweepDiscovery, runSpreadStudy, runAutotune, loadResearchHistory, narrate };
 }
 
 function Metric({ icon: Icon, label, value, note, tone = "neutral" }) {
@@ -259,6 +264,7 @@ function Header({ snapshot, connected, control, reset, exportSession }) {
           {risk?.paused ? "risk active" : "volatility"}
         </button>
         <button type="button" className="iconButton" title="Export audit session" aria-label="Export audit session" onClick={exportSession}><FileDown size={17} /></button>
+        <a className="iconButton" title="Judge report (HTML)" aria-label="Open judge report" href={`${API_BASE}/api/export/report`} target="_blank" rel="noreferrer"><ListChecks size={17} /></a>
         <button type="button" className="iconButton" title="Reset session" aria-label="Reset session" onClick={reset}><RefreshCw size={17} /></button>
       </div>
     </header>
@@ -1366,7 +1372,7 @@ function prettyMs(ms) {
 // by replaying the market through the same engines many times (hyperopt
 // pattern). Everything learned is applied through the ordinary parameter
 // registry — visible, auditable, reversible.
-function ResearchLab({ runSpreadStudy, runAutotune, applyParams }) {
+function ResearchLab({ runSpreadStudy, runAutotune, applyParams, loadResearchHistory }) {
   const [study, setStudy] = React.useState(null);
   const [studyBusy, setStudyBusy] = React.useState(false);
   const [training, setTraining] = React.useState(null);
@@ -1374,21 +1380,47 @@ function ResearchLab({ runSpreadStudy, runAutotune, applyParams }) {
   const [trials, setTrials] = React.useState(24);
   const [regime, setRegime] = React.useState("normal");
   const [source, setSource] = React.useState("simulated");
+  const [robust, setRobust] = React.useState(false);
   const [applied, setApplied] = React.useState(false);
+  const [halfLifeApplied, setHalfLifeApplied] = React.useState(false);
+  const [history, setHistory] = React.useState([]);
+  const [historyApplied, setHistoryApplied] = React.useState("");
+
+  const refreshHistory = React.useCallback(async () => {
+    try {
+      const payload = await loadResearchHistory();
+      setHistory(payload.sessions || []);
+    } catch { /* offline history is non-critical */ }
+  }, [loadResearchHistory]);
+  React.useEffect(() => { refreshHistory(); }, [refreshHistory]);
 
   const fitModels = async () => {
     setStudyBusy(true);
-    try { setStudy(await runSpreadStudy()); } finally { setStudyBusy(false); }
+    setHalfLifeApplied(false);
+    try { setStudy(await runSpreadStudy()); await refreshHistory(); } finally { setStudyBusy(false); }
   };
   const train = async () => {
     setTrainBusy(true);
     setApplied(false);
-    try { setTraining(await runAutotune({ trials, regime, source })); } finally { setTrainBusy(false); }
+    try { setTraining(await runAutotune({ trials, regime, source, robust })); await refreshHistory(); } finally { setTrainBusy(false); }
   };
   const applyLearned = async () => {
     if (!training?.best?.params) return;
     await applyParams({ updates: training.best.params });
     setApplied(true);
+  };
+  const applyMeasuredHalfLife = async () => {
+    const measured = study?.summary?.medianHalfLifeMs;
+    if (!measured) return;
+    // Clamped to the registry range like any Control Room edit.
+    await applyParams({ updates: { latency_half_life_ms: Math.min(5000, Math.max(100, Math.round(measured))) } });
+    setHalfLifeApplied(true);
+  };
+  const applySaved = async (entry) => {
+    const params = entry?.payload?.best?.params;
+    if (!params) return;
+    await applyParams({ updates: params });
+    setHistoryApplied(entry.file);
   };
 
   return (
@@ -1404,6 +1436,11 @@ function ResearchLab({ runSpreadStudy, runAutotune, applyParams }) {
           <button type="button" className="iconButton" onClick={fitModels} disabled={studyBusy}>
             <Activity size={12} /> {studyBusy ? "fitting on real history..." : "fit models on real history"}
           </button>
+          {study?.summary?.medianHalfLifeMs != null && (
+            <button type="button" className="iconButton" onClick={applyMeasuredHalfLife} disabled={halfLifeApplied}>
+              <Zap size={12} /> {halfLifeApplied ? "measured half-life applied ✓" : "apply measured half-life (clamped)"}
+            </button>
+          )}
           {study?.summary && (
             <small>
               median half-life {prettyMs(study.summary.medianHalfLifeMs)} ·{" "}
@@ -1444,7 +1481,8 @@ function ResearchLab({ runSpreadStudy, runAutotune, applyParams }) {
         <p className="radarNote">
           Trains a preset by replaying the market through the <b>same engines</b> many times with different Control Room
           parameters (the approach freqtrade calls hyperopt). Objective: <code>{training?.objective || "totalPnl - 0.5 * maxDrawdown"}</code>.
-          Trial 0 is always the current configuration, so improvement is like-for-like.
+          Top candidates are re-scored on an <b>independent market realization</b> and the winner is chosen by
+          validation score — an overfit preset shows up as a large train/validation gap.
         </p>
         <div className="radarActions">
           <label className="researchControl">trials
@@ -1453,7 +1491,7 @@ function ResearchLab({ runSpreadStudy, runAutotune, applyParams }) {
             </select>
           </label>
           <label className="researchControl">regime
-            <select value={regime} onChange={(event) => setRegime(event.target.value)}>
+            <select value={regime} onChange={(event) => setRegime(event.target.value)} disabled={robust}>
               {["calm", "normal", "volatile", "stressed"].map((name) => <option key={name} value={name}>{name}</option>)}
             </select>
           </label>
@@ -1463,17 +1501,21 @@ function ResearchLab({ runSpreadStudy, runAutotune, applyParams }) {
               <option value="historical">real history</option>
             </select>
           </label>
+          <label className="researchControl">
+            <input type="checkbox" checked={robust} onChange={(event) => setRobust(event.target.checked)} />
+            robust (all regimes)
+          </label>
           <button type="button" className="iconButton" onClick={train} disabled={trainBusy}>
-            <Brain size={12} /> {trainBusy ? "training..." : "train parameters"}
+            <Brain size={12} /> {trainBusy ? (robust ? "training across regimes..." : "training...") : "train parameters"}
           </button>
         </div>
         {training && (
           <>
             <div className="radarStats">
-              <span>Baseline score<b>{formatNumber(training.baseline?.score, 2)}</b></span>
-              <span>Best score<b className={training.improvedVsBaseline ? "green" : ""}>{formatNumber(training.best?.score, 2)}</b></span>
-              <span>Best hit rate<b>{formatPercent(training.best?.hitRate || 0)}</b></span>
-              <span>Best drawdown<b>{formatNumber(training.best?.maxDrawdown, 2)}</b></span>
+              <span>Baseline (validation)<b>{formatNumber(training.baseline?.validationScore, 2)}</b></span>
+              <span>Best (train)<b>{formatNumber(training.best?.score, 2)}</b></span>
+              <span>Best (validation)<b className={training.improvedVsBaseline ? "green" : ""}>{formatNumber(training.best?.validationScore, 2)}</b></span>
+              <span>Overfit gap<b className={(training.best?.overfitGap || 0) > (training.best?.validationScore || 0) * 0.5 ? "red" : ""}>{formatNumber(training.best?.overfitGap, 2)}</b></span>
               <span>Improved<b className={training.improvedVsBaseline ? "green" : "red"}>{training.improvedVsBaseline ? "yes" : "no"}</b></span>
               <span>Took<b>{prettyMs(training.durationMs)}</b></span>
             </div>
@@ -1481,8 +1523,8 @@ function ResearchLab({ runSpreadStudy, runAutotune, applyParams }) {
               {(training.leaderboard || []).slice(0, 5).map((row, index) => (
                 <article key={row.trial} className={index === 0 ? "radarPositive" : ""}>
                   <div className="radarRouteTop">
-                    <b>#{index + 1} · score {formatNumber(row.score, 2)}</b>
-                    <em className="badge filled">P&L {formatNumber(row.totalPnl, 2)} · dd {formatNumber(row.maxDrawdown, 2)} · {row.executed} trades</em>
+                    <b>#{index + 1} · train {formatNumber(row.score, 2)}{row.validationScore != null ? ` · validation ${formatNumber(row.validationScore, 2)}` : ""}</b>
+                    <em className="badge filled">P&L {formatNumber(row.totalPnl, 2)} · dd {formatNumber(row.maxDrawdown, 2)} · {row.executed} trades{training.robust ? " · avg of 3 regimes" : ""}</em>
                   </div>
                   <div className="radarRouteNums">
                     {Object.entries(row.changedVsCurrent || {}).slice(0, 6).map(([key, change]) => (
@@ -1500,6 +1542,30 @@ function ResearchLab({ runSpreadStudy, runAutotune, applyParams }) {
             </div>
           </>
         )}
+      </section>
+
+      <section className="surface radarPanel">
+        <PanelTitle icon={History} title="Learned sessions (persisted)" pill={`${history.length} saved`} />
+        <p className="radarNote">
+          Every study and training run is saved to disk — the bot keeps what it learned across restarts.
+          A previously trained preset can be re-applied in one click.
+        </p>
+        <div className="radarRoutes">
+          {history.slice(0, 8).map((entry) => (
+            <article key={entry.file}>
+              <div className="radarRouteTop">
+                <b>{entry.kind === "autotune" ? "Training" : "Spread study"} · {entry.generatedAt ? new Date(entry.generatedAt).toLocaleString() : "—"}</b>
+                {entry.kind === "autotune" && entry.payload?.best?.params && (
+                  <button type="button" className="explainTradeBtn" onClick={() => applySaved(entry)} disabled={historyApplied === entry.file}>
+                    {historyApplied === entry.file ? "applied ✓" : "re-apply preset"}
+                  </button>
+                )}
+              </div>
+              <div className="radarRouteNums"><small>{entry.headline}</small></div>
+            </article>
+          ))}
+          {!history.length && <div className="empty">No persisted research yet — run a fit or a training above</div>}
+        </div>
       </section>
     </div>
   );
@@ -1566,7 +1632,7 @@ function WideNetRadarPanel({ discovery = {}, sweepDiscovery }) {
   );
 }
 
-function ResultsWorkbench({ snapshot, loadParams, applyParams, runBacktest, control, sweepDiscovery, runSpreadStudy, runAutotune, onExplainTrade }) {
+function ResultsWorkbench({ snapshot, loadParams, applyParams, runBacktest, control, sweepDiscovery, runSpreadStudy, runAutotune, loadResearchHistory, onExplainTrade }) {
   const [tab, setTab] = React.useState("opportunities");
   const radarPositive = snapshot.discovery?.lastSweep?.positiveCount;
   const tabs = [
@@ -1593,7 +1659,7 @@ function ResultsWorkbench({ snapshot, loadParams, applyParams, runBacktest, cont
       {tab === "signals" && <OpportunityHistory opportunities={snapshot.opportunityHistory || snapshot.opportunities} metrics={snapshot.metrics} now={snapshot.now} />}
       {tab === "control" && <ControlRoom loadParams={loadParams} applyParams={applyParams} />}
       {tab === "radar" && <WideNetRadarPanel discovery={snapshot.discovery} sweepDiscovery={sweepDiscovery} />}
-      {tab === "research" && <ResearchLab runSpreadStudy={runSpreadStudy} runAutotune={runAutotune} applyParams={applyParams} />}
+      {tab === "research" && <ResearchLab runSpreadStudy={runSpreadStudy} runAutotune={runAutotune} applyParams={applyParams} loadResearchHistory={loadResearchHistory} />}
       {tab === "backtest" && <Backtest runBacktest={runBacktest} />}
       {tab === "infra" && <InfrastructurePanel snapshot={snapshot} control={control} />}
     </section>
@@ -1743,7 +1809,7 @@ function CoPilot({ snapshot, focusTrade }) {
 }
 
 function App() {
-  const { snapshot, connected, control, reset, exportSession, loadParams, applyParams, runBacktest, triggerScenario, sweepDiscovery, runSpreadStudy, runAutotune } = useAurelion();
+  const { snapshot, connected, control, reset, exportSession, loadParams, applyParams, runBacktest, triggerScenario, sweepDiscovery, runSpreadStudy, runAutotune, loadResearchHistory } = useAurelion();
   const [explainTrade, setExplainTrade] = React.useState(null);
   if (!snapshot) {
     return <main className="loading"><div className="sigil"><Sparkles size={24} /></div><span>Starting Aurelion</span></main>;
@@ -1770,6 +1836,7 @@ function App() {
               sweepDiscovery={sweepDiscovery}
               runSpreadStudy={runSpreadStudy}
               runAutotune={runAutotune}
+              loadResearchHistory={loadResearchHistory}
               onExplainTrade={(id) => setExplainTrade({ id, nonce: Date.now() })}
             />
           </div>
