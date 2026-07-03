@@ -140,6 +140,18 @@ async def replay(limit: int = 120) -> dict:
     return market_service.replay_feed(limit)
 
 
+@app.get("/api/discovery")
+async def discovery() -> dict:
+    return market_service.discovery.snapshot()
+
+
+@app.post("/api/discovery/sweep")
+async def discovery_sweep(_: None = Depends(require_control_auth)) -> dict:
+    # Manual wide-net sweep. Off-loaded to a thread like the scheduled lane so a
+    # slow venue can never block the live loop or SSE delivery.
+    return await market_service.sweep_discovery()
+
+
 @app.get("/api/backtest")
 async def backtest(ticks: int = 250, regime: str = "normal", source: str = "simulated") -> dict:
     # Runs the engines over a replay (simulated or real-exchange OHLCV history)

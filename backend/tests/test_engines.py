@@ -1173,5 +1173,135 @@ class DecisionLatencyTests(unittest.TestCase):
         self.assertEqual(service.decision_latency_window, [])
 
 
+class WideNetRadarTests(unittest.TestCase):
+    """Discovery lane: wide-universe scouting priced off batched tickers."""
+
+    @staticmethod
+    def _exchange(exchange_id, name, quote="USDT", fee_bps=10.0):
+        from backend.app.core.config import ExchangeConfig
+
+        return ExchangeConfig(
+            exchange_id, name, exchange_id, f"BTC/{quote}",
+            (f"BTC/{quote}", "ETH/BTC", f"ETH/{quote}"),
+            fee_bps, 0.0, 0.0001, 1.0, 0.95,
+        )
+
+    @staticmethod
+    def _ticker(exchange_id, symbol, bid, ask):
+        from backend.app.integrations.market_scout import TickerQuote
+
+        return TickerQuote(exchange_id, symbol, bid, ask, int(time.time() * 1000))
+
+    def _settings(self, **overrides):
+        alpha = self._exchange("alpha", "Alpha")
+        beta = self._exchange("beta", "Beta")
+        return Settings(exchange_universe=(alpha, beta), active_exchanges="alpha,beta", **overrides)
+
+    def test_radar_finds_cross_exchange_dislocation_after_fees(self):
+        from backend.app.engines.discovery import WideNetRadar
+
+        def scout(exchanges):
+            return {
+                "quotes": {
+                    "alpha": {"LTC/USDT": self._ticker("alpha", "LTC/USDT", 99.9, 100.0)},
+                    "beta": {"LTC/USDT": self._ticker("beta", "LTC/USDT", 101.5, 101.6)},
+                },
+                "statuses": {"alpha": "live", "beta": "live"},
+                "durationMs": 1.0,
+            }
+
+        radar = WideNetRadar(self._settings(), scout=scout)
+        result = radar.sweep()
+        top = result["topRoutes"][0]
+        self.assertEqual(top["kind"], "cross")
+        self.assertEqual(top["id"], "cross:LTC:alpha>beta")
+        # gross = (101.5/100 - 1) * 1e4 = 150 bps; taker 10 bps per side -> net 130.
+        self.assertAlmostEqual(top["netBps"], 130.0, delta=0.5)
+        self.assertEqual(result["venuesLive"], 2)
+
+    def test_radar_prices_ticker_triangular_cycle(self):
+        from backend.app.engines.discovery import WideNetRadar
+
+        def scout(exchanges):
+            return {
+                "quotes": {
+                    "alpha": {
+                        "BTC/USDT": self._ticker("alpha", "BTC/USDT", 50000.0, 50010.0),
+                        "XRP/USDT": self._ticker("alpha", "XRP/USDT", 0.499, 0.50),
+                        "XRP/BTC": self._ticker("alpha", "XRP/BTC", 0.0000102, 0.0000103),
+                    },
+                },
+                "statuses": {"alpha": "live", "beta": "unavailable"},
+                "durationMs": 1.0,
+            }
+
+        radar = WideNetRadar(self._settings(), scout=scout)
+        result = radar.sweep()
+        tri = [route for route in result["topRoutes"] if route["kind"] == "triangular"]
+        self.assertTrue(tri, "expected a ticker-triangular route")
+        forward = next(route for route in tri if route["id"] == "tri:alpha:USDT>XRP>BTC>USDT")
+        # 1/0.50 * 0.0000102 * 50000 = 1.02 gross; 3 legs at 10 bps -> ~169 bps net.
+        self.assertGreater(forward["netBps"], 150)
+        self.assertLess(forward["netBps"], 200)
+
+    def test_radar_persistence_streak_flags_promotable_and_resets(self):
+        from backend.app.engines.discovery import WideNetRadar
+
+        market = {"betaBid": 101.5}
+
+        def scout(exchanges):
+            return {
+                "quotes": {
+                    "alpha": {"LTC/USDT": self._ticker("alpha", "LTC/USDT", 99.9, 100.0)},
+                    "beta": {"LTC/USDT": self._ticker("beta", "LTC/USDT", market["betaBid"], market["betaBid"] + 0.1)},
+                },
+                "statuses": {"alpha": "live", "beta": "live"},
+                "durationMs": 1.0,
+            }
+
+        radar = WideNetRadar(self._settings(discovery_min_persistence=3), scout=scout)
+        first = radar.sweep()["topRoutes"][0]
+        self.assertEqual(first["streak"], 1)
+        self.assertFalse(first["promotable"])
+        radar.sweep()
+        third = radar.sweep()["topRoutes"][0]
+        self.assertEqual(third["streak"], 3)
+        self.assertTrue(third["promotable"])
+        # Edge disappears -> the streak breaks; when it returns it starts over.
+        market["betaBid"] = 100.0
+        radar.sweep()
+        market["betaBid"] = 101.5
+        again = radar.sweep()["topRoutes"][0]
+        self.assertEqual(again["streak"], 1)
+        self.assertFalse(again["promotable"])
+
+    def test_radar_survives_empty_scout_and_reports_status(self):
+        from backend.app.engines.discovery import WideNetRadar
+
+        def scout(exchanges):
+            return {"quotes": {}, "statuses": {"alpha": "unavailable", "beta": "unavailable"}, "durationMs": 5.0}
+
+        radar = WideNetRadar(self._settings(), scout=scout)
+        result = radar.sweep()
+        self.assertEqual(result["venuesLive"], 0)
+        self.assertEqual(result["topRoutes"], [])
+        snapshot = radar.snapshot()
+        self.assertEqual(snapshot["sweepCount"], 1)
+        self.assertEqual(snapshot["promotableCount"], 0)
+
+    def test_discovery_parameters_registered_and_snapshot_wired(self):
+        from backend.app.core.config import PARAMETER_REGISTRY
+        from backend.app.engines.market_service import MarketService
+
+        keys = {spec.key for spec in PARAMETER_REGISTRY}
+        self.assertTrue({"discovery_enabled", "discovery_interval_ms", "discovery_min_persistence", "discovery_min_net_bps"} <= keys)
+        service = MarketService(Settings(market_mode="demo"))
+        service.tick()
+        snapshot = service.snapshot()
+        self.assertIn("discovery", snapshot)
+        self.assertEqual(snapshot["discovery"]["sweepCount"], 0)
+        self.assertEqual(snapshot["discovery"]["universeCount"], 10)
+
+
 if __name__ == "__main__":
     unittest.main()

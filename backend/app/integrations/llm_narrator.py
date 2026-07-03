@@ -108,6 +108,16 @@ class DecisionNarrator:
                 "confidence": top.get("confidence"),
                 "reason": top.get("reason"),
             }
+        last_sweep = (snapshot.get("discovery") or {}).get("lastSweep") or {}
+        radar_top = (last_sweep.get("topRoutes") or [None])[0]
+        radar = None
+        if radar_top:
+            radar = {
+                "venuesLive": last_sweep.get("venuesLive"),
+                "bestRoute": radar_top.get("route"),
+                "bestNetBps": radar_top.get("netBps"),
+                "promotableCount": sum(1 for route in last_sweep.get("topRoutes") or [] if route.get("promotable")),
+            }
         return {
             "mode": snapshot.get("mode"),
             "paused": risk.get("paused"),
@@ -119,6 +129,7 @@ class DecisionNarrator:
             "detected": metrics.get("detectedCount"),
             "bestNetBps": metrics.get("bestNetBps"),
             "autonomy": (snapshot.get("inventoryAutonomy") or {}).get("sessionAutonomy"),
+            "radar": radar,
             "decision": decision,
             "focusTrade": self._focus_trade(snapshot, trade_id),
         }
@@ -226,6 +237,12 @@ class DecisionNarrator:
             parts.append(f"Session P&L stands at {round(float(pnl), 2)}.")
         elif autonomy and self._variety.random() < 0.3:
             parts.append(f"Inventory can still fund roughly {autonomy} trades before a rebalance matters.")
+        radar = ctx.get("radar")
+        if radar and radar.get("bestRoute") and self._variety.random() < 0.3:
+            parts.append(self._pick([
+                f"On the wide net, the best find across {radar.get('venuesLive')} venues is {radar['bestRoute']} at {radar['bestNetBps']} bps net.",
+                f"The discovery radar is sweeping {radar.get('venuesLive')} venues in the background; {radar['bestRoute']} currently leads at {radar['bestNetBps']} bps net.",
+            ]))
         models = ctx.get("models", {})
         parts.append(self._pick([
             f"Models in use: {models.get('cycleAlgo')} cycle detection, {models.get('slippageModel')} slippage, {models.get('sizingMode')} sizing.",

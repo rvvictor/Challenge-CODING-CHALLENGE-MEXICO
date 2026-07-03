@@ -18,6 +18,7 @@ from backend.app.core.config import (
 from backend.app.core.models import OrderBook
 from backend.app.engines.arbitrage import CrossExchangeArbitrageEngine
 from backend.app.engines.calibration import SuccessCalibrator
+from backend.app.engines.discovery import WideNetRadar
 from backend.app.engines.edge_analysis import (
     compact_opportunity_record,
     demo_quality,
@@ -78,8 +79,10 @@ class MarketService:
         self.gateway_mode = "paper"
         self.gateway = PaperExecutionGateway(self.pre_trade_guard)
         self.stream_provider: CcxtStreamProvider | None = None
+        self.discovery = WideNetRadar(cfg)
         self.started_at = now_ms()
         self.task: asyncio.Task | None = None
+        self.discovery_task: asyncio.Task | None = None
         self.subscribers: set[asyncio.Queue] = set()
         self.last_scan: list[dict] = []
         self.last_executions: list[dict] = []
@@ -101,11 +104,16 @@ class MarketService:
             await self.start_streams()
         if not self.task:
             self.task = asyncio.create_task(self.loop())
+        if not self.discovery_task:
+            self.discovery_task = asyncio.create_task(self.discovery_loop())
 
     async def stop(self) -> None:
         if self.task:
             self.task.cancel()
             self.task = None
+        if self.discovery_task:
+            self.discovery_task.cancel()
+            self.discovery_task = None
         if self.stream_provider:
             await self.stream_provider.stop()
         await self.global_market.stop()
@@ -344,6 +352,27 @@ class MarketService:
         while True:
             self.tick()
             await asyncio.sleep(self.settings.evaluation_interval_ms / 1000)
+
+    async def discovery_loop(self) -> None:
+        """Wide-net lane: sweeps the FULL exchange universe (incl. XRP/LTC/SOL)
+        in a worker thread on its own slow cadence. Fully isolated from tick():
+        a slow or failing sweep can never add a millisecond to decision latency."""
+        await asyncio.sleep(2.0)
+        while True:
+            if self.settings.discovery_enabled:
+                try:
+                    await asyncio.to_thread(self.discovery.sweep)
+                except Exception:
+                    pass
+            await asyncio.sleep(max(5.0, self.settings.discovery_interval_ms / 1000))
+
+    async def sweep_discovery(self) -> dict:
+        """Manual 'sweep now' for the dashboard; runs off-thread like the loop."""
+        try:
+            await asyncio.to_thread(self.discovery.sweep)
+        except Exception:
+            pass
+        return self.discovery.snapshot()
 
     def tick(self) -> None:
         self.scan_tick += 1
@@ -693,6 +722,7 @@ class MarketService:
                 "legFailureActive": current < self.executor.leg_failure_until,
             },
             "inventoryAutonomy": self.ledger.inventory_autonomy(self.settings.exchanges, mark_price),
+            "discovery": self.discovery.snapshot(),
             "models": {
                 "cycleAlgo": self.settings.cycle_algo,
                 "slippageModel": self.settings.slippage_model,
