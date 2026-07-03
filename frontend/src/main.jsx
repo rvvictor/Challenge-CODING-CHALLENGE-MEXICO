@@ -175,6 +175,20 @@ function useAurelion() {
     return response.json();
   }, []);
 
+  const runSpreadStudy = React.useCallback(async (timeframe = "1m", limit = 300) => {
+    const response = await fetch(`${API_BASE}/api/research/spread?timeframe=${timeframe}&limit=${limit}`);
+    return response.json();
+  }, []);
+
+  const runAutotune = React.useCallback(async (payload) => {
+    const response = await fetch(`${API_BASE}/api/research/autotune`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify(payload),
+    });
+    return response.json();
+  }, []);
+
   const triggerScenario = React.useCallback(async (scenario) => {
     const response = await fetch(`${API_BASE}/api/scenario`, {
       method: "POST",
@@ -191,7 +205,7 @@ function useAurelion() {
     return response.json();
   }, []);
 
-  return { snapshot, connected, control, reset, exportSession, loadParams, applyParams, runBacktest, triggerScenario, sweepDiscovery, narrate };
+  return { snapshot, connected, control, reset, exportSession, loadParams, applyParams, runBacktest, triggerScenario, sweepDiscovery, runSpreadStudy, runAutotune, narrate };
 }
 
 function Metric({ icon: Icon, label, value, note, tone = "neutral" }) {
@@ -1338,9 +1352,162 @@ function CalibrationPanel({ calibration, enabled }) {
   );
 }
 
+function prettyMs(ms) {
+  if (ms == null) return "—";
+  if (ms >= 3600000) return `${formatNumber(ms / 3600000, 1)} h`;
+  if (ms >= 60000) return `${formatNumber(ms / 60000, 1)} min`;
+  if (ms >= 1000) return `${formatNumber(ms / 1000, 1)} s`;
+  return `${formatNumber(ms, 0)} ms`;
+}
+
+// Research & Training Lab: (1) fits mean-reversion (OU) models to real
+// cross-venue spread history — how long dislocations last, how often they
+// appear, what fraction vanish before execution; (2) trains a parameter preset
+// by replaying the market through the same engines many times (hyperopt
+// pattern). Everything learned is applied through the ordinary parameter
+// registry — visible, auditable, reversible.
+function ResearchLab({ runSpreadStudy, runAutotune, applyParams }) {
+  const [study, setStudy] = React.useState(null);
+  const [studyBusy, setStudyBusy] = React.useState(false);
+  const [training, setTraining] = React.useState(null);
+  const [trainBusy, setTrainBusy] = React.useState(false);
+  const [trials, setTrials] = React.useState(24);
+  const [regime, setRegime] = React.useState("normal");
+  const [source, setSource] = React.useState("simulated");
+  const [applied, setApplied] = React.useState(false);
+
+  const fitModels = async () => {
+    setStudyBusy(true);
+    try { setStudy(await runSpreadStudy()); } finally { setStudyBusy(false); }
+  };
+  const train = async () => {
+    setTrainBusy(true);
+    setApplied(false);
+    try { setTraining(await runAutotune({ trials, regime, source })); } finally { setTrainBusy(false); }
+  };
+  const applyLearned = async () => {
+    if (!training?.best?.params) return;
+    await applyParams({ updates: training.best.params });
+    setApplied(true);
+  };
+
+  return (
+    <div className="researchLab">
+      <section className="surface radarPanel">
+        <PanelTitle icon={Activity} title="Spread dynamics (fitted on real data)" pill={study ? `${study.pairsFitted}/${study.pairsTotal} pairs` : "OU model"} />
+        <p className="radarNote">
+          Fits a mean-reversion (Ornstein-Uhlenbeck) model to each venue pair's real spread history and measures
+          the three questions from the observation plan: <b>how long dislocations last</b> (half-life, episode duration),
+          <b> how often they appear</b>, and <b>what fraction disappears before it could be executed</b>.
+        </p>
+        <div className="radarActions">
+          <button type="button" className="iconButton" onClick={fitModels} disabled={studyBusy}>
+            <Activity size={12} /> {studyBusy ? "fitting on real history..." : "fit models on real history"}
+          </button>
+          {study?.summary && (
+            <small>
+              median half-life {prettyMs(study.summary.medianHalfLifeMs)} ·{" "}
+              {study.summary.capturableNow ? `${study.summary.executableEpisodes} episode(s) beat the fee wall` : "no episode beat the fee wall"}
+            </small>
+          )}
+        </div>
+        <div className="radarRoutes">
+          {(study?.pairs || []).map((pair) => (
+            <article key={`${pair.base}-${pair.venueA}-${pair.venueB}`} className={pair.executable?.count ? "radarPositive" : ""}>
+              <div className="radarRouteTop">
+                <b>{pair.venueA} ↔ {pair.venueB} · {pair.base}</b>
+                <em className="badge triangular">{pair.fitted ? `half-life ${prettyMs(pair.halfLifeMs)}` : "no fit"}</em>
+              </div>
+              <div className="radarRouteNums">
+                {pair.fitted ? (
+                  <>
+                    <small>σ {formatNumber(pair.sigmaBps, 1)} bps</small>
+                    <small>fee wall {formatNumber(pair.costsBps, 1)} bps</small>
+                    <small>{formatNumber(pair.dislocations.perHour, 1)} dislocations/h</small>
+                    <small>median {prettyMs(pair.dislocations.medianDurationMs)}</small>
+                    <small>{formatNumber(pair.dislocations.vanishedWithinOneSamplePct, 0)}% gone within 1 candle</small>
+                    <b className={pair.executable.count ? "green" : "red"}>{pair.verdict}</b>
+                  </>
+                ) : (
+                  <small>{pair.verdict} ({pair.points} points)</small>
+                )}
+              </div>
+            </article>
+          ))}
+          {!study && <div className="empty">Run a fit to measure real dislocation dynamics per venue pair</div>}
+        </div>
+        {study?.summary?.note && <div className="radarActions"><small>{study.summary.note}</small></div>}
+      </section>
+
+      <section className="surface radarPanel">
+        <PanelTitle icon={Brain} title="Parameter trainer" pill={training ? `${training.trials} trials` : "hyperopt-style"} />
+        <p className="radarNote">
+          Trains a preset by replaying the market through the <b>same engines</b> many times with different Control Room
+          parameters (the approach freqtrade calls hyperopt). Objective: <code>{training?.objective || "totalPnl - 0.5 * maxDrawdown"}</code>.
+          Trial 0 is always the current configuration, so improvement is like-for-like.
+        </p>
+        <div className="radarActions">
+          <label className="researchControl">trials
+            <select value={trials} onChange={(event) => setTrials(Number(event.target.value))}>
+              {[16, 24, 32, 48].map((count) => <option key={count} value={count}>{count}</option>)}
+            </select>
+          </label>
+          <label className="researchControl">regime
+            <select value={regime} onChange={(event) => setRegime(event.target.value)}>
+              {["calm", "normal", "volatile", "stressed"].map((name) => <option key={name} value={name}>{name}</option>)}
+            </select>
+          </label>
+          <label className="researchControl">data
+            <select value={source} onChange={(event) => setSource(event.target.value)}>
+              <option value="simulated">simulated</option>
+              <option value="historical">real history</option>
+            </select>
+          </label>
+          <button type="button" className="iconButton" onClick={train} disabled={trainBusy}>
+            <Brain size={12} /> {trainBusy ? "training..." : "train parameters"}
+          </button>
+        </div>
+        {training && (
+          <>
+            <div className="radarStats">
+              <span>Baseline score<b>{formatNumber(training.baseline?.score, 2)}</b></span>
+              <span>Best score<b className={training.improvedVsBaseline ? "green" : ""}>{formatNumber(training.best?.score, 2)}</b></span>
+              <span>Best hit rate<b>{formatPercent(training.best?.hitRate || 0)}</b></span>
+              <span>Best drawdown<b>{formatNumber(training.best?.maxDrawdown, 2)}</b></span>
+              <span>Improved<b className={training.improvedVsBaseline ? "green" : "red"}>{training.improvedVsBaseline ? "yes" : "no"}</b></span>
+              <span>Took<b>{prettyMs(training.durationMs)}</b></span>
+            </div>
+            <div className="radarRoutes">
+              {(training.leaderboard || []).slice(0, 5).map((row, index) => (
+                <article key={row.trial} className={index === 0 ? "radarPositive" : ""}>
+                  <div className="radarRouteTop">
+                    <b>#{index + 1} · score {formatNumber(row.score, 2)}</b>
+                    <em className="badge filled">P&L {formatNumber(row.totalPnl, 2)} · dd {formatNumber(row.maxDrawdown, 2)} · {row.executed} trades</em>
+                  </div>
+                  <div className="radarRouteNums">
+                    {Object.entries(row.changedVsCurrent || {}).slice(0, 6).map(([key, change]) => (
+                      <small key={key}>{key}: {String(change.from)} → <b>{String(change.to)}</b></small>
+                    ))}
+                  </div>
+                </article>
+              ))}
+            </div>
+            <div className="radarActions">
+              <button type="button" className="iconButton" onClick={applyLearned} disabled={!training.best || applied}>
+                <Zap size={12} /> {applied ? "learned preset applied ✓" : "apply learned preset"}
+              </button>
+              <small>applies through the same registry as any manual change — visible in the Control Room, reversible with reset</small>
+            </div>
+          </>
+        )}
+      </section>
+    </div>
+  );
+}
+
 // Wide-net discovery lane: real read-only ticker sweeps over the FULL venue
-// universe (incl. XRP/LTC/SOL), completely off the hot loop. Shows every route
-// priced with the same entry-tier fee catalog and how long each edge persists.
+// universe (incl. XRP/LTC/SOL/AVAX), completely off the hot loop. Shows every
+// route priced with the same entry-tier fee catalog and how long each edge persists.
 function WideNetRadarPanel({ discovery = {}, sweepDiscovery }) {
   const [busy, setBusy] = React.useState(false);
   const sweep = discovery.lastSweep || {};
@@ -1399,7 +1566,7 @@ function WideNetRadarPanel({ discovery = {}, sweepDiscovery }) {
   );
 }
 
-function ResultsWorkbench({ snapshot, loadParams, applyParams, runBacktest, control, sweepDiscovery, onExplainTrade }) {
+function ResultsWorkbench({ snapshot, loadParams, applyParams, runBacktest, control, sweepDiscovery, runSpreadStudy, runAutotune, onExplainTrade }) {
   const [tab, setTab] = React.useState("opportunities");
   const radarPositive = snapshot.discovery?.lastSweep?.positiveCount;
   const tabs = [
@@ -1408,6 +1575,7 @@ function ResultsWorkbench({ snapshot, loadParams, applyParams, runBacktest, cont
     ["signals", "Signals", snapshot.opportunityHistory?.length || snapshot.opportunities?.length || 0],
     ["control", "Control Room", "live"],
     ["radar", "Wide-Net Radar", radarPositive != null ? radarPositive : "scout"],
+    ["research", "Research Lab", "learn"],
     ["backtest", "Backtest", "replay"],
     ["infra", "Diagnostics", snapshot.streams?.streams?.length || snapshot.books?.length || 0],
   ];
@@ -1425,6 +1593,7 @@ function ResultsWorkbench({ snapshot, loadParams, applyParams, runBacktest, cont
       {tab === "signals" && <OpportunityHistory opportunities={snapshot.opportunityHistory || snapshot.opportunities} metrics={snapshot.metrics} now={snapshot.now} />}
       {tab === "control" && <ControlRoom loadParams={loadParams} applyParams={applyParams} />}
       {tab === "radar" && <WideNetRadarPanel discovery={snapshot.discovery} sweepDiscovery={sweepDiscovery} />}
+      {tab === "research" && <ResearchLab runSpreadStudy={runSpreadStudy} runAutotune={runAutotune} applyParams={applyParams} />}
       {tab === "backtest" && <Backtest runBacktest={runBacktest} />}
       {tab === "infra" && <InfrastructurePanel snapshot={snapshot} control={control} />}
     </section>
@@ -1574,7 +1743,7 @@ function CoPilot({ snapshot, focusTrade }) {
 }
 
 function App() {
-  const { snapshot, connected, control, reset, exportSession, loadParams, applyParams, runBacktest, triggerScenario, sweepDiscovery } = useAurelion();
+  const { snapshot, connected, control, reset, exportSession, loadParams, applyParams, runBacktest, triggerScenario, sweepDiscovery, runSpreadStudy, runAutotune } = useAurelion();
   const [explainTrade, setExplainTrade] = React.useState(null);
   if (!snapshot) {
     return <main className="loading"><div className="sigil"><Sparkles size={24} /></div><span>Starting Aurelion</span></main>;
@@ -1599,6 +1768,8 @@ function App() {
               runBacktest={runBacktest}
               control={control}
               sweepDiscovery={sweepDiscovery}
+              runSpreadStudy={runSpreadStudy}
+              runAutotune={runAutotune}
               onExplainTrade={(id) => setExplainTrade({ id, nonce: Date.now() })}
             />
           </div>

@@ -2055,3 +2055,37 @@ input:focus-visible,
 .radarActions small {
   color: var(--muted);
 }
+
+/* --- Research & Training Lab ---------------------------------------------- */
+.researchLab {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.researchControl {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 800;
+}
+
+.researchControl select {
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.radarNote code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  font-size: 11px;
+}
