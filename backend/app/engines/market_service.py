@@ -109,6 +109,9 @@ class MarketService:
         # fault inside tick() is contained instead of killing the engine task.
         self.feed_guard = FeedGuard(cfg)
         self.observation = ObservationRecorder(cfg)
+        self.open_exposure_usd = 0.0
+        self.exposure_halt = False
+        self._exposure_halt_logged = False
         self.tick_count = 0
         self.tick_errors = 0
         self.consecutive_tick_errors = 0
@@ -387,6 +390,9 @@ class MarketService:
         self.stage_windows = {}
         self.feed_guard.reset()
         self.observation.reset()
+        self.open_exposure_usd = 0.0
+        self.exposure_halt = False
+        self._exposure_halt_logged = False
         self.tick_count = 0
         self.tick_errors = 0
         self.consecutive_tick_errors = 0
@@ -559,9 +565,19 @@ class MarketService:
             self.record_edge_decisions(curated)
         stage_mark = self._record_stage("rank", stage_mark)
 
-        if self.pre_trade_guard.kill_switch:
+        # Live safety: halt opening new positions when net base-asset exposure
+        # exceeds the cap. Hedged trades keep exposure ~0, so demo never trips it.
+        self.open_exposure_usd = self.ledger.open_exposure_usd(self.live_alt_prices())
+        self.exposure_halt = self.settings.max_open_exposure_usd > 0 and self.open_exposure_usd > self.settings.max_open_exposure_usd
+        if self.pre_trade_guard.kill_switch or self.exposure_halt:
             self.last_executions = []
+            if self.exposure_halt and not self._exposure_halt_logged:
+                self._exposure_halt_logged = True
+                self.edge_ledger.append("exposure-halt", {"openExposureUsd": self.open_exposure_usd, "cap": self.settings.max_open_exposure_usd})
+            elif not self.exposure_halt:
+                self._exposure_halt_logged = False
         else:
+            self._exposure_halt_logged = False
             # Give the executor the live book map so the gateway can settle
             # (paper: passthrough; testnet: place real sandbox orders).
             self.executor.book_map = adjusted_books
@@ -990,6 +1006,9 @@ class MarketService:
                 "lastTickError": self.last_tick_error or None,
                 "lastTickErrorAt": self.last_tick_error_at or None,
                 "feedGuard": self.feed_guard.snapshot(),
+                "openExposureUsd": round(self.open_exposure_usd, 2),
+                "maxOpenExposureUsd": self.settings.max_open_exposure_usd,
+                "exposureHalt": self.exposure_halt,
             },
             "inventoryAutonomy": self.ledger.inventory_autonomy(self.settings.exchanges, mark_price),
             "continuity": self._continuity,

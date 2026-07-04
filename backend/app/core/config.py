@@ -244,6 +244,10 @@ class Settings:
     # present. Mainnet real-money trading is NOT implemented (see the live stub).
     enable_live: bool = bool_env("AURELION_ENABLE_LIVE", False)
     testnet_max_order_usd: float = number_env("TESTNET_MAX_ORDER_USD", 500.0)
+    # Live safety: halt opening new positions when net base-asset exposure (the
+    # deviation of holdings from the hedged baseline) exceeds this USD cap. 0
+    # disables. Hedged demo trades never trip it (base is conserved).
+    max_open_exposure_usd: float = number_env("MAX_OPEN_EXPOSURE_USD", 2500.0)
     allowed_origins: str = os.getenv("ALLOWED_ORIGINS", "*")
     redis_url: str = os.getenv("REDIS_URL", "")
     redis_enabled: bool = bool_env("REDIS_ENABLED", bool(os.getenv("REDIS_URL")))

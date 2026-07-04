@@ -159,6 +159,24 @@ class WalletLedger:
         sell["USDT"] = float(sell["USDT"]) + sell_credit
         self.realized_pnl += trade["netProfit"]
 
+    def open_exposure_usd(self, prices: dict | None = None) -> float:
+        """Net open exposure in USD: how far the bot's base-asset holdings deviate
+        from their hedged baseline (starting balances). A perfectly hedged
+        arbitrage keeps total base holdings constant, so this stays ~0; a real
+        unhedged/partial position shows up here and can trip the exposure halt."""
+        prices = prices or {}
+        n = len(self.balances) or 1
+        total = 0.0
+        for asset in LEDGER_ASSETS:
+            spec = ASSET_BY_SYMBOL.get(asset)
+            if not spec or spec.kind != "base":
+                continue
+            held = sum(float(wallet[asset]) for wallet in self.balances.values())
+            baseline = self._starting_balance(asset) * n
+            price = float(prices.get(asset) or spec.price_hint)
+            total += abs(held - baseline) * price
+        return round(total, 2)
+
     def inventory_autonomy(self, exchanges, mark_price: float) -> dict:
         """How many more typical trades each venue can fund before running dry.
 

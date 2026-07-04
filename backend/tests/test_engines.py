@@ -2050,5 +2050,58 @@ class TestnetGatewayTests(unittest.TestCase):
         self.assertFalse(gw.supports_withdrawal())
 
 
+class LiveSafetyHardeningTests(unittest.TestCase):
+    """Max-open-exposure halt + testnet settlement never breaks the loop."""
+
+    def test_open_exposure_zero_for_hedged_book(self):
+        service = WalletLedger(Settings(market_mode="demo"))
+        self.assertEqual(service.open_exposure_usd(), 0.0)
+
+    def test_exposure_halt_blocks_execution_when_over_cap(self):
+        from backend.app.engines.market_service import MarketService
+
+        service = MarketService(Settings(market_mode="demo", max_open_exposure_usd=1000.0))
+        # Force a large unhedged BTC position on one venue (deviation from baseline).
+        first = service.settings.exchanges[0].id
+        service.ledger.get(first)["BTC"] = float(service.ledger.get(first)["BTC"]) + 5.0
+        exposure = service.ledger.open_exposure_usd()
+        self.assertGreater(exposure, 1000.0)
+        before = service.store.executed_count
+        for _ in range(60):
+            service.safe_tick()
+        self.assertTrue(service.exposure_halt)
+        self.assertEqual(service.store.executed_count, before, "no new trades may open while exposure-halted")
+        health = service.snapshot()["engineHealth"]
+        self.assertTrue(health["exposureHalt"])
+        self.assertGreater(health["openExposureUsd"], 1000.0)
+
+    def test_demo_never_exposure_halts_in_normal_trading(self):
+        from backend.app.engines.market_service import MarketService
+
+        service = MarketService(Settings(market_mode="demo"))
+        for _ in range(200):
+            service.safe_tick()
+        self.assertFalse(service.exposure_halt)
+        self.assertLess(service.open_exposure_usd, 1.0)
+
+    def test_testnet_client_exception_returns_none_not_raise(self):
+        import os
+        from backend.app.integrations.gateways import PreTradeGuard, TestnetExecutionGateway
+
+        os.environ["AURELION_ENABLE_LIVE"] = "1"
+        try:
+            class Boom:
+                def create_order(self, *a, **k):
+                    raise TimeoutError("venue timeout")
+            gw = TestnetExecutionGateway(PreTradeGuard(max_order_notional_usd=1e9), client_factory=lambda x: Boom())
+            trade = {"id": "T-1", "strategy": "simple", "baseAsset": "XRP",
+                     "buyExchangeId": "okx", "sellExchangeId": "bybit",
+                     "qtyBtc": 100.0, "buyPrice": 0.50, "sellPrice": 0.51, "netProfit": 1.0}
+            self.assertIsNone(gw.settle_trade(trade, {}, {}))
+            self.assertIn("error", gw.last_error)
+        finally:
+            os.environ.pop("AURELION_ENABLE_LIVE", None)
+
+
 if __name__ == "__main__":
     unittest.main()
