@@ -891,8 +891,55 @@ function ResiliencePanel({ engineHealth = {}, continuity = {} }) {
           <b>{continuity.priorSessions || 0} prior</b>
           <small>{continuity.lastSessionFinalPnl != null ? `last session P&L ${formatMoney(continuity.lastSessionFinalPnl)}` : `${continuity.driver || "durable"} store`}</small>
         </article>
+        <article>
+          <span>Open exposure</span>
+          <b className={engineHealth.exposureHalt ? "red" : ""}>{formatMoney(engineHealth.openExposureUsd || 0)}</b>
+          <small className={engineHealth.exposureHalt ? "amberTone" : ""}>{engineHealth.exposureHalt ? "HALT: new positions blocked" : `cap ${formatMoney(engineHealth.maxOpenExposureUsd || 0)}`}</small>
+        </article>
       </div>
       <small className="resilienceNote">Every tick runs under a watchdog; three consecutive faults trigger a fail-safe pause. Try the <b>Engine fault</b> button in the Stress Lab.</small>
+    </section>
+  );
+}
+
+// Live observation recorder (committee's observation phase): per-route
+// frequency, capturable-after-fees rate and episode persistence on real data.
+// Records only in live modes, so demo shows the explanation.
+function LiveObservationPanel({ observation = {}, mode }) {
+  const routes = observation.topRoutes || [];
+  return (
+    <section className="surface radarPanel">
+      <PanelTitle icon={History} title="Live Observation" pill={observation.recording ? `${observation.samples} samples` : "live only"} />
+      <p className="radarNote">
+        On real books and real costs, per route: how often it appears, what fraction clears the fee wall, and the
+        longest run of consecutive samples it stayed profitable — the committee's observation phase, measured.
+        {mode === "demo" && " Switch to auto/live to record real markets."}
+      </p>
+      {observation.recording && (
+        <div className="radarStats">
+          <span>Routes observed<b>{observation.routesObserved ?? 0}</b></span>
+          <span>Ever capturable<b className={observation.capturableRoutes ? "green" : ""}>{observation.capturableRoutes ?? 0}</b></span>
+          <span>Samples<b>{observation.samples ?? 0}</b></span>
+        </div>
+      )}
+      <div className="radarRoutes">
+        {routes.map((route) => (
+          <article key={route.id} className={route.capturable > 0 ? "radarPositive" : ""}>
+            <div className="radarRouteTop">
+              <b>{route.route}</b>
+              <em className={`badge ${route.kind === "cross" ? "filled" : "triangular"}`}>{route.kind}{route.base ? ` · ${route.base}` : ""}</em>
+            </div>
+            <div className="radarRouteNums">
+              <small>{formatNumber(route.frequencyPerHour, 1)}/h</small>
+              <small>capturable {formatPercent(route.capturableRate)}</small>
+              <small>avg {formatNumber(route.avgNetBps, 1)} bps</small>
+              <b className={route.bestNetBps > 0 ? "green" : "red"}>best {formatNumber(route.bestNetBps, 1)} bps</b>
+              {route.maxEpisodeSamples > 1 && <small className="radarStreak">episode ×{route.maxEpisodeSamples}</small>}
+            </div>
+          </article>
+        ))}
+        {!routes.length && <div className="empty">{observation.recording ? "No routes cleared the fee wall yet" : "Observation records in auto/live mode"}</div>}
+      </div>
     </section>
   );
 }
@@ -1115,7 +1162,7 @@ function ExecutionPanel({ execution = {}, control }) {
           <button type="button" className={`crToggle ${guard.killSwitch ? "on" : "off"}`} aria-pressed={!!guard.killSwitch} onClick={() => control({ killSwitch: !guard.killSwitch })}>
             kill switch {guard.killSwitch ? "on" : "off"}
           </button>
-          <small>order cap ${formatNumber(guard.maxOrderNotionalUsd || 0, 0)} · linked to market mode (demo↔paper, auto/live↔read-only-live) · fills remain paper until a live connector is added</small>
+          <small>order cap ${formatNumber(guard.maxOrderNotionalUsd || 0, 0)} · demo↔paper, auto/live↔read-only-live · testnet places real sandbox orders (fake money, needs AURELION_ENABLE_LIVE + testnet keys)</small>
         </div>
       </div>
     </section>
@@ -1129,6 +1176,7 @@ function InfrastructurePanel({ snapshot, control }) {
       <SystemStatus snapshot={snapshot} />
       <ResiliencePanel engineHealth={snapshot.engineHealth} continuity={snapshot.continuity} />
       <LatencySloPanel slo={snapshot.latencySlo} />
+      <LiveObservationPanel observation={snapshot.observation} mode={snapshot.mode} />
       <DemoQualityPanel quality={snapshot.demoQuality} mode={snapshot.mode} />
       <GlobalMarket globalMarket={snapshot.globalMarket || {}} />
       <Streams streams={snapshot.streams} redis={snapshot.redis} />
