@@ -861,6 +861,15 @@ class MarketService:
         eth_mark_price = self.eth_mark_price(mark_price)
         trades = self.store.latest_trades(self.store.trades_limit)
         wins = sum(1 for trade in trades if trade["netProfit"] >= 0)
+        # Realized-vs-detected edge capture: how much of the edge Aurelion detects
+        # actually survives execution (adverse move, cover costs, partials). A
+        # credibility metric — "we detect X bps, we capture Y" — computed from the
+        # executed trades' detected netBps vs their realized edgeCaptureBps.
+        detected_edges = [float(trade.get("netBps") or 0) for trade in trades]
+        realized_edges = [float((trade.get("executionQuality") or {}).get("edgeCaptureBps") or trade.get("netBps") or 0) for trade in trades]
+        detected_edge_avg = sum(detected_edges) / len(detected_edges) if detected_edges else 0.0
+        realized_edge_avg = sum(realized_edges) / len(realized_edges) if realized_edges else 0.0
+        edge_capture_ratio = (realized_edge_avg / detected_edge_avg) if detected_edge_avg else 0.0
         avg_latency = sum(book["latencyMs"] for book in books) / len(books) if books else 0
         book_ages = sorted(book["ageMs"] for book in books)
         avg_freshness = sum(book_ages) / len(book_ages) if book_ages else 0
@@ -886,6 +895,9 @@ class MarketService:
             "executedTriangularCount": self.store.executed_triangular_count,
             "cumulativePnl": self.ledger.realized_pnl,
             "winRate": wins / len(trades) if trades else 0,
+            "detectedEdgeBps": round(detected_edge_avg, 3),
+            "realizedEdgeBps": round(realized_edge_avg, 3),
+            "edgeCaptureRatio": round(edge_capture_ratio, 4),
             "avgLatencyMs": avg_latency,
             "avgFreshnessMs": avg_freshness,
             "p95FreshnessMs": p95_freshness,

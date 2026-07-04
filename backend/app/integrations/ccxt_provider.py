@@ -96,8 +96,17 @@ class CcxtStreamProvider:
                 "healthScore": 100,
                 "healthStatus": "warming",
                 "lastLatencyMs": 0,
+                "latencyWindow": [],
             }
         return self.states[key]
+
+    @staticmethod
+    def _percentile(values: list[float], q: float) -> float:
+        if not values:
+            return 0.0
+        ordered = sorted(values)
+        idx = min(len(ordered) - 1, int(len(ordered) * q))
+        return ordered[idx]
 
     def client(self, exchange: ExchangeConfig):
         if exchange.id in self.clients:
@@ -209,6 +218,10 @@ class CcxtStreamProvider:
 
     def mark_success(self, state: dict, latency_ms: float, status: str) -> None:
         state["lastLatencyMs"] = latency_ms
+        window = state.setdefault("latencyWindow", [])
+        window.append(latency_ms)
+        if len(window) > 100:
+            del window[: len(window) - 100]
         recovery = 3 if status == "healthy" else 1
         state["healthScore"] = min(100, state.get("healthScore", 100) + recovery)
         if latency_ms > self.settings.health_slow_latency_ms:
@@ -247,6 +260,8 @@ class CcxtStreamProvider:
                     "healthScore": state["healthScore"],
                     "healthStatus": state["healthStatus"],
                     "lastLatencyMs": state["lastLatencyMs"],
+                    "latencyP50Ms": round(self._percentile(state.get("latencyWindow", []), 0.5)),
+                    "latencyP95Ms": round(self._percentile(state.get("latencyWindow", []), 0.95)),
                 }
                 for state in self.states.values()
             ],

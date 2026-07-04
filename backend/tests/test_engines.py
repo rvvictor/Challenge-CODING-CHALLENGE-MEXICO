@@ -1870,5 +1870,37 @@ class LiveAltUniverseTests(unittest.TestCase):
         self.assertEqual(bases, {"BTC"}, "demo cross scan must remain BTC-only")
 
 
+class LiveExecutionRealismTests(unittest.TestCase):
+    """Realized-vs-detected edge capture + per-venue latency percentiles."""
+
+    def test_edge_capture_metric_reported_and_finite(self):
+        from backend.app.engines.market_service import MarketService
+
+        service = MarketService(Settings(market_mode="demo"))
+        for _ in range(200):
+            service.safe_tick()
+        metrics = service.snapshot()["metrics"]
+        for key in ("detectedEdgeBps", "realizedEdgeBps", "edgeCaptureRatio"):
+            self.assertIn(key, metrics)
+            self.assertEqual(metrics[key], metrics[key])  # not NaN
+        if service.store.executed_count:
+            # Realized edge cannot exceed detected edge (costs only subtract).
+            self.assertLessEqual(metrics["realizedEdgeBps"], metrics["detectedEdgeBps"] + 1e-6)
+
+    def test_provider_reports_per_stream_latency_percentiles(self):
+        from backend.app.integrations.ccxt_provider import CcxtStreamProvider
+
+        provider = CcxtStreamProvider(Settings(market_mode="auto"), lambda b: None, None)
+        exchange = Settings(market_mode="auto").exchanges[0]
+        state = provider.state(exchange, exchange.primary_symbol)
+        for latency in (10, 20, 30, 40, 200):
+            provider.mark_success(state, latency, "healthy")
+        snap = provider.snapshot()
+        stream = snap["streams"][0]
+        self.assertIn("latencyP50Ms", stream)
+        self.assertIn("latencyP95Ms", stream)
+        self.assertGreaterEqual(stream["latencyP95Ms"], stream["latencyP50Ms"])
+
+
 if __name__ == "__main__":
     unittest.main()
