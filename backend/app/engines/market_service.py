@@ -222,7 +222,7 @@ class MarketService:
         """Gateway switch with the inverse coupling: choosing a live-data gateway
         from demo also moves the market mode to auto (real data, safe degrade)."""
         self.set_execution_gateway(mode)
-        if mode in ("read-only-live", "live") and self.mode == "demo":
+        if mode in ("read-only-live", "testnet", "live") and self.mode == "demo":
             await self.set_mode("auto")
 
     async def set_active_exchanges(self, exchange_ids: list[str]) -> None:
@@ -324,6 +324,9 @@ class MarketService:
     def set_execution_gateway(self, mode: str) -> None:
         if mode in GATEWAY_MODES:
             self.gateway_mode = mode
+            if mode == "testnet":
+                # Tighten the notional cap for real (sandbox) order placement.
+                self.pre_trade_guard.max_order_notional_usd = self.settings.testnet_max_order_usd
             self.gateway = build_gateway(mode, self.pre_trade_guard)
             self.executor.gateway = self.gateway
 

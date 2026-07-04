@@ -1948,5 +1948,107 @@ class ObservationRecorderTests(unittest.TestCase):
         self.assertIn("observation", service.snapshot())
 
 
+class TestnetGatewayTests(unittest.TestCase):
+    """Real order lifecycle on a MOCK sandbox exchange: fills, partials, rejects,
+    safety caps, and the withdrawal-scope refusal — all without real keys."""
+
+    def setUp(self):
+        import os
+
+        self._prev_enable = os.environ.get("AURELION_ENABLE_LIVE")
+
+    def tearDown(self):
+        import os
+
+        if self._prev_enable is None:
+            os.environ.pop("AURELION_ENABLE_LIVE", None)
+        else:
+            os.environ["AURELION_ENABLE_LIVE"] = self._prev_enable
+
+    class _MockClient:
+        def __init__(self, fill_ratio=1.0, reject=False):
+            self.fill_ratio = fill_ratio
+            self.reject = reject
+            self.orders = []
+            self.sandbox = False
+        def set_sandbox_mode(self, on):
+            self.sandbox = on
+        def create_order(self, symbol, type_, side, amount, price, params):
+            self.orders.append((symbol, side, amount, price, params))
+            filled = 0.0 if self.reject else amount * self.fill_ratio
+            return {"id": f"OID-{len(self.orders)}", "filled": filled, "average": price, "status": "closed"}
+
+    def _gateway(self, **kw):
+        import os
+        from backend.app.integrations.gateways import PreTradeGuard, TestnetExecutionGateway
+
+        os.environ["AURELION_ENABLE_LIVE"] = "1"
+        clients = {}
+        def factory(ccxt_id):
+            return clients.setdefault(ccxt_id, self._MockClient(**kw))
+        gw = TestnetExecutionGateway(PreTradeGuard(max_order_notional_usd=1e9), client_factory=factory)
+        return gw
+
+    def _trade(self, qty=100.0):
+        return {"id": "T-1", "strategy": "simple", "baseAsset": "XRP",
+                "buyExchangeId": "okx", "sellExchangeId": "bybit",
+                "qtyBtc": qty, "buyPrice": 0.50, "sellPrice": 0.51, "netProfit": 1.0,
+                "filledRatio": 1.0, "partial": False, "status": "filled"}
+
+    def test_full_fill_places_real_orders_and_records_ids(self):
+        gw = self._gateway(fill_ratio=1.0)
+        settled = gw.settle_trade(self._trade(), {}, {})
+        self.assertIsNotNone(settled)
+        self.assertEqual(settled["gateway"], "testnet")
+        self.assertEqual(settled["execution"], "testnet-sandbox")
+        self.assertEqual(len(settled["orders"]), 2)
+        self.assertTrue(all(o["venueOrderId"] for o in settled["orders"]))
+        self.assertEqual(gw.orders_placed, 2)
+
+    def test_partial_fill_scales_qty_and_pnl(self):
+        gw = self._gateway(fill_ratio=0.5)
+        settled = gw.settle_trade(self._trade(qty=100.0), {}, {})
+        self.assertAlmostEqual(settled["qtyBtc"], 50.0, places=6)
+        self.assertAlmostEqual(settled["filledRatio"], 0.5, places=4)
+        self.assertTrue(settled["partial"])
+        self.assertAlmostEqual(settled["netProfit"], 0.5, places=6)  # 1.0 * 0.5
+
+    def test_rejected_leg_books_no_trade(self):
+        gw = self._gateway(reject=True)
+        self.assertIsNone(gw.settle_trade(self._trade(), {}, {}))
+        self.assertIn("rejected", gw.last_error)
+
+    def test_disabled_without_enable_flag(self):
+        import os
+        from backend.app.integrations.gateways import TestnetExecutionGateway
+
+        os.environ.pop("AURELION_ENABLE_LIVE", None)
+        gw = TestnetExecutionGateway(client_factory=lambda x: self._MockClient())
+        self.assertFalse(gw.enabled)
+        self.assertIsNone(gw.settle_trade(self._trade(), {}, {}))
+
+    def test_notional_cap_blocks_oversized_order(self):
+        from backend.app.integrations.gateways import ClientOrder, PreTradeGuard
+
+        guard = PreTradeGuard(max_order_notional_usd=100.0, asset_caps={"XRP": 20.0})
+        # 100 XRP * $0.50 = $50 notional, but the XRP asset cap is $20.
+        order = ClientOrder("c1", "okx", "XRP/USDT", "buy", 100.0, 0.50)
+        allowed, reason = guard.check(order, 0.50)
+        self.assertFalse(allowed)
+        self.assertIn("cap", reason)
+
+    def test_testnet_gateway_never_supports_withdrawal(self):
+        gw = self._gateway()
+        self.assertFalse(gw.supports_withdrawal())
+
+    def test_gateway_modes_include_testnet_and_build(self):
+        from backend.app.integrations.gateways import GATEWAY_MODES, PreTradeGuard, build_gateway
+
+        self.assertIn("testnet", GATEWAY_MODES)
+        gw = build_gateway("testnet", PreTradeGuard())
+        self.assertEqual(gw.name, "testnet")
+        self.assertFalse(gw.supports_withdrawal())
+
+
 if __name__ == "__main__":
     unittest.main()

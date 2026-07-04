@@ -239,6 +239,11 @@ class Settings:
     # Mutating-endpoint rate limit (requests per 10 s sliding window per client;
     # 0 disables). Env-only, like control_token: a security knob, not a tunable.
     control_rate_limit: int = int_env("CONTROL_RATE_LIMIT", 60)
+    # Testnet execution (sandbox, fake money). Real orders only fire when
+    # AURELION_ENABLE_LIVE=1 AND trading-only (never withdrawal) testnet keys are
+    # present. Mainnet real-money trading is NOT implemented (see the live stub).
+    enable_live: bool = bool_env("AURELION_ENABLE_LIVE", False)
+    testnet_max_order_usd: float = number_env("TESTNET_MAX_ORDER_USD", 500.0)
     allowed_origins: str = os.getenv("ALLOWED_ORIGINS", "*")
     redis_url: str = os.getenv("REDIS_URL", "")
     redis_enabled: bool = bool_env("REDIS_ENABLED", bool(os.getenv("REDIS_URL")))
