@@ -350,6 +350,33 @@ con dos capacidades:
   `CONTROL_RATE_LIMIT`, por defecto 60) — una inundación accidental u hostil
   recibe HTTP 429 sin tocar el motor.
 
+### Camino a operación real (modo auto/live)
+
+El modo `auto/live` es una ruta de investigación y ejecución **progresiva**, con
+techo en **testnet** (sandbox, dinero falso). Sigue exactamente la ruta que
+describí al comité: observar → paper-live → testnet → (a futuro) capital pequeño.
+
+- **Universo de activos multi-asset**: el motor cross-exchange opera XRP/LTC/SOL/AVAX
+  (donde el radar y el modelo OU encontraron edges reales), no solo BTC. El demo
+  sigue siendo BTC exclusivamente, sin cambios.
+- **Seam de ejecución unificado**: el loop liquida **a través del gateway**
+  (paper / read-only-live / testnet / live). El gateway de testnet coloca órdenes
+  IOC reales en sandboxes con llaves *solo de trading*, reconcilia el trade con los
+  fills reales (cantidad, parcial, IDs de orden, P&L proporcional) y **rechaza
+  retiros por construcción**. El gateway mainnet queda como stub deshabilitado.
+- **Recorder de observación** (`GET /api/observation`): mide por ruta frecuencia,
+  tasa de captura tras comisiones, edge promedio/mejor y persistencia de episodios
+  sobre datos reales — la fase de observación del comité, medida.
+- **Captura de edge** (`metrics.edgeCaptureRatio`): cuánto del edge detectado
+  sobrevive la ejecución. **Latencia por venue** (`latencyP50Ms/latencyP95Ms`).
+- **Controles de riesgo**: `PreTradeGuard` con cap global + por venue + por activo,
+  kill switch, y cap de testnet (`TESTNET_MAX_ORDER_USD`, por defecto 500).
+- **Seguridad**: real solo con `AURELION_ENABLE_LIVE=1` + llaves de testnet;
+  nunca llaves con permiso de retiro; `.env*` en gitignore. El checklist completo
+  para graduar testnet → capital real está en
+  [`docs/SECURITY-live-readiness.md`](docs/SECURITY-live-readiness.md) — dinero
+  real **no está implementado ni habilitado**.
+
 ---
 
 ## Para el jurado
