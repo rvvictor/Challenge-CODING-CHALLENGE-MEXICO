@@ -183,6 +183,9 @@ class Settings:
     active_exchanges: str = os.getenv("ACTIVE_EXCHANGES", "")
     max_active_exchanges: int = int_env("MAX_ACTIVE_EXCHANGES", 0)
     control_token: str = os.getenv("CONTROL_TOKEN", "")
+    # Mutating-endpoint rate limit (requests per 10 s sliding window per client;
+    # 0 disables). Env-only, like control_token: a security knob, not a tunable.
+    control_rate_limit: int = int_env("CONTROL_RATE_LIMIT", 60)
     allowed_origins: str = os.getenv("ALLOWED_ORIGINS", "*")
     redis_url: str = os.getenv("REDIS_URL", "")
     redis_enabled: bool = bool_env("REDIS_ENABLED", bool(os.getenv("REDIS_URL")))

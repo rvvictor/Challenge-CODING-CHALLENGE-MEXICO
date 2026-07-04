@@ -341,6 +341,14 @@ con dos capacidades:
 - **Prometheus ampliado** (`GET /metrics`): cuantiles de decisión, latencia p95
   por etapa, ticks/fallas del watchdog, rechazos del feed guard y el mejor edge
   del radar.
+- **Continuidad entre sesiones** (`GET /api/continuity`): el almacén durable
+  conserva las sesiones previas — al reiniciar, Aurelion reporta cuántas hubo,
+  cuántas operaciones cerraron y su P&L final. Un reinicio ya no borra la
+  sesión auditable; el linaje aparece en el snapshot y en el reporte del jurado.
+- **Rate limiting en la superficie de control**: todos los endpoints que mutan
+  estado comparten un límite por cliente (ventana deslizante de 10 s,
+  `CONTROL_RATE_LIMIT`, por defecto 60) — una inundación accidental u hostil
+  recibe HTTP 429 sin tocar el motor.
 
 ---
 
@@ -604,6 +612,7 @@ Binance, OKX, Kraken, Coinbase, Bitstamp, Bybit, KuCoin, Gate.io, Bitfinex, Gemi
 | `POST /api/params` | Aplica updates, un preset o reset de parámetros (con auth opcional). |
 | `GET /api/export/session` | Exportación completa de sesión para revisión. |
 | `GET /api/replay` | Eventos de replay desde el almacén durable (o memoria como respaldo). |
+| `GET /api/continuity` | Linaje de sesiones previas desde el almacén durable. |
 | `GET /api/backtest` | Replay determinístico de la estrategia actual con métricas. |
 | `GET /api/discovery` | Último barrido del radar de red amplia (rutas, persistencia, promotables). |
 | `POST /api/discovery/sweep` | Dispara un barrido manual del radar (con auth opcional). |

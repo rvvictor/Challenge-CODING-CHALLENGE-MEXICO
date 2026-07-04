@@ -1670,5 +1670,59 @@ class AccountingIntegrityTests(unittest.TestCase):
             self.assertGreaterEqual(slo["stages"][stage]["p95"], 0.0)
 
 
+class ContinuityAndControlSurfaceTests(unittest.TestCase):
+    """Durable cross-session lineage + rate-limited control surface."""
+
+    def test_session_lineage_survives_restart(self):
+        import os
+        import tempfile
+
+        from backend.app.integrations.persistence import DurableEventSink
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db = os.path.join(tmp, "lineage.db")
+            first = DurableEventSink(Settings(sqlite_path=db, market_mode="demo"))
+            first.append("trade", {"trade": {"id": "T1"}, "cumulativePnl": 12.5})
+            first.append("trade", {"trade": {"id": "T2"}, "cumulativePnl": 20.75})
+            first.close()
+            second = DurableEventSink(Settings(sqlite_path=db, market_mode="demo"))
+            second.append("risk-event", {"marker": 1})
+            lineage = second.session_lineage()
+            second.close()
+            self.assertEqual(len(lineage), 2)
+            prior = next(session for session in lineage if not session["current"])
+            current = next(session for session in lineage if session["current"])
+            self.assertEqual(prior["trades"], 2)
+            self.assertEqual(prior["finalPnl"], 20.75)
+            self.assertEqual(current["trades"], 0)
+
+    def test_snapshot_includes_continuity_block(self):
+        from backend.app.engines.market_service import MarketService
+
+        service = MarketService(Settings(market_mode="demo"))
+        block = service.snapshot()["continuity"]
+        self.assertIn("priorSessions", block)
+        refreshed = service.refresh_continuity()
+        self.assertIn("sessions", refreshed)
+        self.assertIn("driver", refreshed)
+
+    def test_rate_limit_trips_on_control_surface_flood(self):
+        from fastapi.testclient import TestClient
+
+        from backend.app import main as main_module
+
+        client = TestClient(main_module.app)
+        original = main_module.settings.control_rate_limit
+        main_module._RATE_BUCKETS.clear()
+        main_module.settings.control_rate_limit = 3
+        try:
+            codes = [client.post("/api/scenario", json={"scenario": ""}).status_code for _ in range(5)]
+        finally:
+            main_module.settings.control_rate_limit = original
+            main_module._RATE_BUCKETS.clear()
+        self.assertEqual(codes[:3], [200, 200, 200])
+        self.assertEqual(codes[3:], [429, 429])
+
+
 if __name__ == "__main__":
     unittest.main()

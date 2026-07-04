@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -19,6 +20,10 @@ class DurableEventSink:
         self.error = ""
         self._sqlite: sqlite3.Connection | None = None
         self._pg = None
+        # Serializes all DB access: reads may run in worker threads
+        # (asyncio.to_thread), so the sqlite connection is opened with
+        # check_same_thread=False and guarded by this lock.
+        self._lock = threading.Lock()
         if self.enabled:
             self._connect()
 
@@ -57,7 +62,7 @@ class DurableEventSink:
         try:
             db_path = Path(self.settings.sqlite_path)
             db_path.parent.mkdir(parents=True, exist_ok=True)
-            self._sqlite = sqlite3.connect(db_path)
+            self._sqlite = sqlite3.connect(db_path, check_same_thread=False)
             self._sqlite.execute("PRAGMA journal_mode=WAL")
             self._sqlite.execute(
                 """
@@ -85,8 +90,11 @@ class DurableEventSink:
     def append_many(self, kind: str, payloads: list[dict]) -> None:
         if not self.enabled or self.status != "connected" or not payloads:
             return
+        acquired = False
         try:
             rows = [(self.session_id, kind, json.dumps(payload, default=str), int(time.time() * 1000)) for payload in payloads]
+            self._lock.acquire()
+            acquired = True
             if self.driver == "postgres" and self._pg:
                 with self._pg.cursor() as cursor:
                     cursor.executemany(
@@ -103,6 +111,9 @@ class DurableEventSink:
         except Exception as exc:
             self.status = "error"
             self.error = str(exc)
+        finally:
+            if acquired:
+                self._lock.release()
 
     def read(self, kind: str | None = None, limit: int = 200) -> list[dict]:
         """Read recorded events for this session, newest first. Closes the loop on
@@ -111,7 +122,10 @@ class DurableEventSink:
         if not self.enabled or self.status != "connected":
             return []
         limit = max(1, min(int(limit or 0), 2000))
+        acquired = False
         try:
+            self._lock.acquire()
+            acquired = True
             if self.driver == "postgres" and self._pg:
                 with self._pg.cursor() as cursor:
                     if kind:
@@ -143,12 +157,86 @@ class DurableEventSink:
         except Exception as exc:
             self.status = "error"
             self.error = str(exc)
+        finally:
+            if acquired:
+                self._lock.release()
         return []
+
+    def session_lineage(self, limit: int = 5) -> list[dict]:
+        """Cross-session summaries from the durable store, newest first.
+
+        Completes the auditable-session promise: a restart no longer hides the
+        previous sessions — their trade counts and final P&L remain readable."""
+        if not self.enabled or self.status != "connected":
+            return []
+        limit = max(1, min(int(limit or 0), 20))
+        sessions: list[dict] = []
+        acquired = False
+        try:
+            self._lock.acquire()
+            acquired = True
+            if self.driver == "sqlite" and self._sqlite:
+                cursor = self._sqlite.cursor()
+                cursor.execute(
+                    "SELECT session_id, MIN(created_at), MAX(created_at), COUNT(*) FROM aurelion_events "
+                    "GROUP BY session_id ORDER BY MAX(created_at) DESC LIMIT ?",
+                    (limit,),
+                )
+                for session_id, started, ended, events in cursor.fetchall():
+                    cursor.execute(
+                        "SELECT COUNT(*) FROM aurelion_events WHERE session_id = ? AND kind = 'trade'",
+                        (session_id,),
+                    )
+                    trades = int(cursor.fetchone()[0])
+                    final_pnl = None
+                    cursor.execute(
+                        "SELECT payload FROM aurelion_events WHERE session_id = ? AND kind = 'trade' ORDER BY id DESC LIMIT 1",
+                        (session_id,),
+                    )
+                    row = cursor.fetchone()
+                    if row:
+                        final_pnl = (json.loads(row[0]) or {}).get("cumulativePnl")
+                    sessions.append({
+                        "sessionId": session_id,
+                        "current": session_id == self.session_id,
+                        "startedAt": started,
+                        "endedAt": ended,
+                        "events": int(events),
+                        "trades": trades,
+                        "finalPnl": final_pnl,
+                    })
+            elif self.driver == "postgres" and self._pg:  # pragma: no cover - optional external DB
+                with self._pg.cursor() as cursor:
+                    cursor.execute(
+                        "SELECT session_id, MIN(created_at), MAX(created_at), COUNT(*) FROM aurelion_events "
+                        "GROUP BY session_id ORDER BY MAX(created_at) DESC LIMIT %s",
+                        (limit,),
+                    )
+                    for session_id, started, ended, events in cursor.fetchall():
+                        sessions.append({
+                            "sessionId": session_id,
+                            "current": session_id == self.session_id,
+                            "startedAt": str(started),
+                            "endedAt": str(ended),
+                            "events": int(events),
+                            "trades": None,
+                            "finalPnl": None,
+                        })
+        except Exception as exc:
+            self.status = "error"
+            self.error = str(exc)
+        finally:
+            if acquired:
+                self._lock.release()
+        return sessions
 
     def count(self) -> int:
         if not self.enabled or self.status != "connected":
             return 0
+        acquired = False
         try:
+            self._lock.acquire()
+            acquired = True
             if self.driver == "postgres" and self._pg:
                 with self._pg.cursor() as cursor:
                     cursor.execute("SELECT COUNT(*) FROM aurelion_events WHERE session_id = %s", (self.session_id,))
@@ -160,6 +248,9 @@ class DurableEventSink:
         except Exception as exc:
             self.status = "error"
             self.error = str(exc)
+        finally:
+            if acquired:
+                self._lock.release()
         return 0
 
     def snapshot(self) -> dict:

@@ -109,6 +109,20 @@ def _stages_table(slo: dict) -> str:
     )
 
 
+def _continuity_line(continuity: dict) -> str:
+    prior = continuity.get("priorSessions") or 0
+    if not prior:
+        return ""
+    pnl = continuity.get("lastSessionFinalPnl")
+    trades = continuity.get("lastSessionTrades")
+    return (
+        "<h2>Continuidad entre sesiones</h2>"
+        f"<p class='muted'>El almacén durable ({_esc(continuity.get('driver'))}) conserva {prior} sesión(es) previa(s); "
+        f"la última cerró con {trades if trades is not None else '—'} operación(es) y P&amp;L final {_fmt(pnl)}. "
+        "Un reinicio no borra la sesión auditable.</p>"
+    )
+
+
 def build_report_html(snapshot: dict, research: list[dict]) -> str:
     metrics = snapshot.get("metrics") or {}
     slo = snapshot.get("latencySlo") or {}
@@ -173,6 +187,8 @@ def build_report_html(snapshot: dict, research: list[dict]) -> str:
 
 <h2>Investigación y entrenamiento (persistido)</h2>
 {_research_section(research)}
+
+{_continuity_line(snapshot.get('continuity') or {})}
 
 <footer>
 Aurelion es software de análisis, simulación y paper trading; no ejecuta órdenes reales y nunca usa llaves con permisos de retiro.

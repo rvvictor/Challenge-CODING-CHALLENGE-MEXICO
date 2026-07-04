@@ -113,10 +113,20 @@ class MarketService:
         # tick, and rapid requests queue CONSECUTIVE faulted ticks — so pressing
         # the button three times fast demonstrates the fail-safe pause live.
         self._fault_ticks = 0
+        # Cross-session lineage from the durable store, computed at start() and
+        # on demand (never per tick — it is a DB query).
+        self._continuity: dict = {"driver": self.persistence.driver, "sessions": [], "priorSessions": 0}
 
     async def start(self) -> None:
         await self.redis.start()
         await self.global_market.start()
+        self.refresh_continuity()
+        prior = self._continuity.get("priorSessions", 0)
+        if prior:
+            self.edge_ledger.append("continuity", {
+                "priorSessions": prior,
+                "lastSessionFinalPnl": self._continuity.get("lastSessionFinalPnl"),
+            })
         if self.mode != "demo":
             await self.start_streams()
         if not self.task:
@@ -640,6 +650,24 @@ class MarketService:
     def narrate_stream(self, question: str | None = None, model: str | None = None, trade_id: str | None = None):
         return self.narrator.stream_async(self.snapshot(), question, model, trade_id)
 
+    def refresh_continuity(self) -> dict:
+        """Recompute cross-session lineage from the durable store. A restart no
+        longer erases the audit trail: previous sessions stay readable."""
+        sessions = self.persistence.session_lineage(6)
+        prior = [session for session in sessions if not session.get("current")]
+        # Headline = most recent prior session that actually traded (short-lived
+        # tooling/test sessions leave 1-event rows that would read as noise).
+        informative = next((session for session in prior if (session.get("trades") or 0) > 0), None)
+        self._continuity = {
+            "driver": self.persistence.driver,
+            "status": self.persistence.status,
+            "sessions": sessions,
+            "priorSessions": len(prior),
+            "lastSessionFinalPnl": informative.get("finalPnl") if informative else None,
+            "lastSessionTrades": informative.get("trades") if informative else None,
+        }
+        return self._continuity
+
     def replay_feed(self, limit: int = 120) -> dict:
         durable = self.persistence.read(limit=limit)
         if durable:
@@ -883,6 +911,7 @@ class MarketService:
                 "feedGuard": self.feed_guard.snapshot(),
             },
             "inventoryAutonomy": self.ledger.inventory_autonomy(self.settings.exchanges, mark_price),
+            "continuity": self._continuity,
             "discovery": self.discovery.snapshot(),
             "models": {
                 "cycleAlgo": self.settings.cycle_algo,

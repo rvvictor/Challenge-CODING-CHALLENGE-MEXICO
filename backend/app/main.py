@@ -4,6 +4,8 @@ import asyncio
 import json
 import site
 import sys
+import time
+from collections import deque
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -11,7 +13,7 @@ USER_SITE = site.getusersitepackages()
 if USER_SITE not in sys.path:
     sys.path.append(USER_SITE)
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -47,6 +49,28 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+_RATE_BUCKETS: dict[str, deque] = {}
+_RATE_WINDOW_S = 10.0
+
+
+def rate_limit(request: Request) -> None:
+    """Sliding-window limiter for state-mutating endpoints (per client IP).
+
+    Defends the control surface against accidental or hostile request floods.
+    CONTROL_RATE_LIMIT requests per 10 s window; 0 disables (e.g., load tests)."""
+    limit = settings.control_rate_limit
+    if limit <= 0:
+        return
+    client = request.client.host if request.client else "local"
+    bucket = _RATE_BUCKETS.setdefault(client, deque())
+    now = time.monotonic()
+    while bucket and now - bucket[0] > _RATE_WINDOW_S:
+        bucket.popleft()
+    if len(bucket) >= limit:
+        raise HTTPException(status_code=429, detail="Rate limit exceeded on control surface; retry shortly")
+    bucket.append(now)
 
 
 def require_control_auth(x_aurelion_token: str | None = Header(default=None)) -> None:
@@ -173,6 +197,12 @@ async def execution() -> dict:
     return market_service.execution_status()
 
 
+@app.get("/api/continuity")
+async def continuity() -> dict:
+    # Cross-session lineage from the durable store (DB query — off-loaded).
+    return await asyncio.to_thread(market_service.refresh_continuity)
+
+
 @app.get("/api/replay")
 async def replay(limit: int = 120) -> dict:
     return market_service.replay_feed(limit)
@@ -195,7 +225,7 @@ async def research_spread(timeframe: str = "1m", limit: int = 300) -> dict:
 
 
 @app.post("/api/research/autotune")
-async def research_autotune(body: AutotunePayload, _: None = Depends(require_control_auth)) -> dict:
+async def research_autotune(body: AutotunePayload, _: None = Depends(require_control_auth), __: None = Depends(rate_limit)) -> dict:
     # Trains a parameter preset by replaying the market through the same
     # engines many times (hyperopt pattern). CPU-bound — off-loaded.
     return await asyncio.to_thread(
@@ -224,7 +254,7 @@ async def discovery() -> dict:
 
 
 @app.post("/api/discovery/sweep")
-async def discovery_sweep(_: None = Depends(require_control_auth)) -> dict:
+async def discovery_sweep(_: None = Depends(require_control_auth), __: None = Depends(rate_limit)) -> dict:
     # Manual wide-net sweep. Off-loaded to a thread like the scheduled lane so a
     # slow venue can never block the live loop or SSE delivery.
     return await market_service.sweep_discovery()
@@ -288,7 +318,7 @@ async def config() -> dict:
 
 
 @app.post("/api/control")
-async def control(body: ControlPayload, _: None = Depends(require_control_auth)) -> dict:
+async def control(body: ControlPayload, _: None = Depends(require_control_auth), __: None = Depends(rate_limit)) -> dict:
     if body.activeExchanges is not None:
         await market_service.set_active_exchanges(body.activeExchanges)
     if body.autoExecution is not None:
@@ -310,7 +340,7 @@ async def get_params() -> dict:
 
 
 @app.post("/api/params")
-async def update_params(body: ParameterPayload, _: None = Depends(require_control_auth)) -> dict:
+async def update_params(body: ParameterPayload, _: None = Depends(require_control_auth), __: None = Depends(rate_limit)) -> dict:
     if body.reset:
         applied = market_service.reset_parameters()
     elif body.preset:
@@ -323,13 +353,13 @@ async def update_params(body: ParameterPayload, _: None = Depends(require_contro
 
 
 @app.post("/api/scenario")
-async def scenario(body: ScenarioPayload, _: None = Depends(require_control_auth)) -> dict:
+async def scenario(body: ScenarioPayload, _: None = Depends(require_control_auth), __: None = Depends(rate_limit)) -> dict:
     result = await market_service.trigger_scenario(body.scenario)
     return {"result": result, "snapshot": market_service.snapshot()}
 
 
 @app.post("/api/reset")
-async def reset(_: None = Depends(require_control_auth)) -> dict:
+async def reset(_: None = Depends(require_control_auth), __: None = Depends(rate_limit)) -> dict:
     market_service.reset()
     return market_service.snapshot()
 
