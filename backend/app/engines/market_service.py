@@ -106,7 +106,10 @@ class MarketService:
         self.consecutive_tick_errors = 0
         self.last_tick_error = ""
         self.last_tick_error_at = 0
-        self._fault_next_tick = False
+        # Queued deliberate faults (Stress Lab): each request faults exactly one
+        # tick, and rapid requests queue CONSECUTIVE faulted ticks — so pressing
+        # the button three times fast demonstrates the fail-safe pause live.
+        self._fault_ticks = 0
 
     async def start(self) -> None:
         await self.redis.start()
@@ -256,7 +259,7 @@ class MarketService:
             self.executor.leg_failure_until = current + 20000
             applied = applied or "leg_failure"
         if key == "engine_fault":
-            self._fault_next_tick = True
+            self._fault_ticks += 1
             applied = "engine_fault"
         event = {
             "id": f"SC-{current}",
@@ -354,7 +357,7 @@ class MarketService:
         self.consecutive_tick_errors = 0
         self.last_tick_error = ""
         self.last_tick_error_at = 0
-        self._fault_next_tick = False
+        self._fault_ticks = 0
         self.started_at = now_ms()
         self.scan_tick = 0
         self.recorded_signal_times.clear()
@@ -456,8 +459,8 @@ class MarketService:
     def tick(self) -> None:
         # Stress Lab "engine_fault": a deliberate crash inside the hot path so
         # an evaluator can watch the watchdog contain it live.
-        if self._fault_next_tick:
-            self._fault_next_tick = False
+        if self._fault_ticks > 0:
+            self._fault_ticks -= 1
             raise RuntimeError("Injected engine fault (Stress Lab): deliberate tick crash")
         self.scan_tick += 1
         if self.mode == "demo" or self.degraded_demo:

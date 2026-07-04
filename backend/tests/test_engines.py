@@ -1511,7 +1511,7 @@ class RobustnessTests(unittest.TestCase):
         service.safe_tick()
         self.assertEqual(service.tick_errors, 0)
         for _ in range(3):
-            service._fault_next_tick = True
+            service._fault_ticks += 1
             service.safe_tick()
         self.assertEqual(service.tick_errors, 3)
         self.assertEqual(service.consecutive_tick_errors, 3)
@@ -1611,7 +1611,7 @@ class RobustnessTests(unittest.TestCase):
             if i % 23 == 7:
                 service.simulator.inject_scenario(rng.choice(list(service.simulator.SCENARIOS)), service.settings.exchanges)
             if i % 31 == 11:
-                service._fault_next_tick = True
+                service._fault_ticks += 1
                 injected_faults += 1
             if i % 9 == 4:
                 spec = rng.choice(numeric)
