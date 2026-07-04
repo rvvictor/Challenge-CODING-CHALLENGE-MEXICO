@@ -248,6 +248,14 @@ async def export_report() -> HTMLResponse:
     return HTMLResponse(html_text)
 
 
+@app.get("/api/observation")
+async def observation() -> dict:
+    # Live observation recorder: per-route frequency, capturable-after-fees rate,
+    # average/best net edge and episode persistence (the committee's observation
+    # phase). Records only in live modes.
+    return market_service.observation.snapshot()
+
+
 @app.get("/api/discovery")
 async def discovery() -> dict:
     return market_service.discovery.snapshot()

@@ -34,6 +34,7 @@ from backend.app.engines.edge_ledger import EdgeLedger
 from backend.app.engines.event_store import EventStore
 from backend.app.engines.execution import ExecutionSimulator
 from backend.app.engines.feed_guard import FeedGuard
+from backend.app.engines.observation import ObservationRecorder
 from backend.app.engines.fills import best
 from backend.app.engines.ledger import WalletLedger
 from backend.app.engines.queue import OpportunityQueue
@@ -107,6 +108,7 @@ class MarketService:
         # Engine watchdog: the loop routes every tick through safe_tick(), so a
         # fault inside tick() is contained instead of killing the engine task.
         self.feed_guard = FeedGuard(cfg)
+        self.observation = ObservationRecorder(cfg)
         self.tick_count = 0
         self.tick_errors = 0
         self.consecutive_tick_errors = 0
@@ -381,6 +383,7 @@ class MarketService:
         self.decision_latency_window = []
         self.stage_windows = {}
         self.feed_guard.reset()
+        self.observation.reset()
         self.tick_count = 0
         self.tick_errors = 0
         self.consecutive_tick_errors = 0
@@ -544,6 +547,9 @@ class MarketService:
         self.decision_latency_window.append(decision_latency_ms)
         self.decision_latency_window = self.decision_latency_window[-200:]
         self.last_scan = ranked
+        # Observation recorder: accumulate per-route live statistics (frequency,
+        # capturable-after-fees rate, episode persistence). No-op in demo.
+        self.observation.observe(ranked, self.mode, self.degraded_demo)
         if ranked:
             curated = self.curated_opportunities(ranked)
             self.store.add_opportunities(curated)
@@ -984,6 +990,7 @@ class MarketService:
             },
             "inventoryAutonomy": self.ledger.inventory_autonomy(self.settings.exchanges, mark_price),
             "continuity": self._continuity,
+            "observation": self.observation.snapshot(),
             "discovery": self.discovery.snapshot(),
             "models": {
                 "cycleAlgo": self.settings.cycle_algo,

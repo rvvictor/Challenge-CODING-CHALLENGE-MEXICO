@@ -1902,5 +1902,51 @@ class LiveExecutionRealismTests(unittest.TestCase):
         self.assertGreaterEqual(stream["latencyP95Ms"], stream["latencyP50Ms"])
 
 
+class ObservationRecorderTests(unittest.TestCase):
+    """Live observation: per-route frequency, capturable rate, episode length."""
+
+    def test_records_capturable_episodes_and_frequency(self):
+        from backend.app.engines.observation import ObservationRecorder
+
+        rec = ObservationRecorder(Settings(market_mode="auto"))
+        prof = {"strategy": "simple", "status": "profitable", "netBps": 6.0, "baseAsset": "XRP",
+                "buyExchange": "OKX", "sellExchange": "Bybit"}
+        rej = {"strategy": "simple", "status": "rejected", "netBps": -3.0, "baseAsset": "XRP",
+               "buyExchange": "OKX", "sellExchange": "Bybit"}
+        # 3 consecutive capturable samples, then one rejected -> episode of 3.
+        for _ in range(3):
+            rec.observe([prof], "auto", False)
+        rec.observe([rej], "auto", False)
+        snap = rec.snapshot()
+        self.assertTrue(snap["recording"])
+        self.assertEqual(snap["samples"], 4)
+        top = snap["topRoutes"][0]
+        self.assertEqual(top["seen"], 4)
+        self.assertEqual(top["capturable"], 3)
+        self.assertEqual(top["maxEpisodeSamples"], 3)
+        self.assertAlmostEqual(top["capturableRate"], 0.75, places=3)
+        self.assertEqual(snap["capturableRoutes"], 1)
+
+    def test_demo_is_never_recorded(self):
+        from backend.app.engines.observation import ObservationRecorder
+
+        rec = ObservationRecorder(Settings(market_mode="demo"))
+        opp = {"strategy": "simple", "status": "profitable", "netBps": 5.0, "baseAsset": "BTC",
+               "buyExchange": "OKX", "sellExchange": "Bybit"}
+        for _ in range(10):
+            rec.observe([opp], "demo", False)
+        snap = rec.snapshot()
+        self.assertFalse(snap["recording"])
+        self.assertEqual(snap["samples"], 0)
+        self.assertEqual(snap["routesObserved"], 0)
+
+    def test_snapshot_wired_into_service(self):
+        from backend.app.engines.market_service import MarketService
+
+        service = MarketService(Settings(market_mode="demo"))
+        service.tick()
+        self.assertIn("observation", service.snapshot())
+
+
 if __name__ == "__main__":
     unittest.main()
