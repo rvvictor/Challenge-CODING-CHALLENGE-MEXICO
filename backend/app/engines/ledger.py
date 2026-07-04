@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from backend.app.core.config import Settings
+from backend.app.core.config import ASSET_BY_SYMBOL, LEDGER_ASSETS, Settings
 
 
 class WalletLedger:
@@ -14,14 +14,34 @@ class WalletLedger:
             self._add_wallet(exchange)
         self.realized_pnl = 0.0
 
+    def _starting_balance(self, asset: str) -> float:
+        # USDT/BTC/ETH reproduce the original demo wallet exactly; alts seed from
+        # starting_alt_balances (empty -> 0 in demo, so demo P&L is unchanged).
+        if asset == "USDT":
+            return self.settings.starting_usdt
+        if asset == "BTC":
+            return self.settings.starting_btc
+        if asset == "ETH":
+            return self.settings.starting_eth
+        return float(self.settings.starting_alt_balances.get(asset, 0.0))
+
     def _add_wallet(self, exchange) -> None:
-        self.balances[exchange.id] = {
-            "exchangeId": exchange.id,
-            "exchangeName": exchange.name,
-            "USDT": self.settings.starting_usdt,
-            "BTC": self.settings.starting_btc,
-            "ETH": self.settings.starting_eth,
-        }
+        wallet: dict[str, float | str] = {"exchangeId": exchange.id, "exchangeName": exchange.name}
+        for asset in LEDGER_ASSETS:
+            wallet[asset] = self._starting_balance(asset)
+        self.balances[exchange.id] = wallet
+
+    @staticmethod
+    def _asset_floor_for(settings, asset: str) -> float:
+        """Per-venue reserve kept when rebalancing an asset. BTC and the quote
+        currency reproduce the original numbers exactly; other bases use their
+        catalog minimum order size."""
+        if asset == "BTC":
+            return settings.min_trade_btc
+        if asset in ("USDT", "USD"):
+            return settings.min_trade_btc * 70000
+        spec = ASSET_BY_SYMBOL.get(asset)
+        return spec.min_order if spec else settings.min_trade_btc
 
     def sync_exchanges(self, exchanges) -> None:
         for exchange in exchanges:
@@ -40,19 +60,19 @@ class WalletLedger:
         self.sync_exchanges(exchanges)
         return [dict(self.balances[exchange.id]) for exchange in exchanges]
 
-    def route_capacity_btc(self, buy_exchange_id: str, sell_exchange_id: str, ask_price: float, exchanges) -> dict[str, float | str]:
+    def route_capacity_btc(self, buy_exchange_id: str, sell_exchange_id: str, ask_price: float, exchanges, base: str = "BTC") -> dict[str, float | str]:
         buy = self.get(buy_exchange_id)
         sell = self.get(sell_exchange_id)
-        local_qty = min(float(sell["BTC"]), (float(buy["USDT"]) * 0.985) / ask_price)
+        local_qty = min(float(sell[base]), (float(buy["USDT"]) * 0.985) / ask_price)
         if not self.settings.inventory_rebalance_enabled:
             return {"qty": local_qty, "mode": "local"}
 
         active_ids = {exchange.id for exchange in exchanges}
         active_wallets = [wallet for exchange_id, wallet in self.balances.items() if exchange_id in active_ids]
-        reserve_btc = self.settings.min_trade_btc * max(1, len(active_wallets))
-        total_btc = max(0, sum(float(wallet["BTC"]) for wallet in active_wallets) - reserve_btc)
+        reserve_base = self._asset_floor_for(self.settings, base) * max(1, len(active_wallets))
+        total_base = max(0, sum(float(wallet[base]) for wallet in active_wallets) - reserve_base)
         total_usdt = sum(float(wallet["USDT"]) for wallet in active_wallets) * 0.985 / ask_price
-        pooled_qty = min(total_btc, total_usdt)
+        pooled_qty = min(total_base, total_usdt)
         if pooled_qty > local_qty:
             return {"qty": pooled_qty, "mode": "rebalanced"}
         return {"qty": local_qty, "mode": "local"}
@@ -61,22 +81,23 @@ class WalletLedger:
         if not self.settings.inventory_rebalance_enabled or trade["strategy"] == "triangular":
             return []
 
+        base = trade.get("baseAsset", "BTC")
         transfers: list[dict] = []
         buy = self.get(trade["buyExchangeId"])
         sell = self.get(trade["sellExchangeId"])
         buy_debit = trade["buyQuote"] + trade["buyFee"] + trade["slippageCostBuy"] + trade["rebalanceCost"]
-        if self._available_asset("BTC", trade["sellExchangeId"]) < trade["qtyBtc"]:
+        if self._available_asset(base, trade["sellExchangeId"]) < trade["qtyBtc"]:
             return []
         if self._available_asset("USDT", trade["buyExchangeId"]) < buy_debit:
             return []
-        self._rebalance_asset("BTC", trade["sellExchangeId"], trade["qtyBtc"], transfers)
+        self._rebalance_asset(base, trade["sellExchangeId"], trade["qtyBtc"], transfers)
         self._rebalance_asset("USDT", trade["buyExchangeId"], buy_debit, transfers)
         buy["exchangeName"] = trade["buyExchange"]
         sell["exchangeName"] = trade["sellExchange"]
         return transfers
 
     def _available_asset(self, asset: str, target_exchange_id: str) -> float:
-        floor = self.settings.min_trade_btc if asset == "BTC" else self.settings.min_trade_btc * 70000
+        floor = self._asset_floor_for(self.settings, asset)
         target = self.get(target_exchange_id)
         donor_capacity = sum(
             max(0, float(wallet[asset]) - floor)
@@ -92,7 +113,7 @@ class WalletLedger:
             return
 
         needed = (required - current) * (1 + self.settings.inventory_rebalance_buffer)
-        floor = self.settings.min_trade_btc if asset == "BTC" else self.settings.min_trade_btc * 70000
+        floor = self._asset_floor_for(self.settings, asset)
         donors = sorted(
             (
                 (exchange_id, wallet)
@@ -110,11 +131,12 @@ class WalletLedger:
             source[asset] = float(source[asset]) - moved
             target[asset] = float(target[asset]) + moved
             needed -= moved
+            spec = ASSET_BY_SYMBOL.get(asset)
             transfers.append({
                 "asset": asset,
                 "from": source_id,
                 "to": target_exchange_id,
-                "amount": round(moved, 8 if asset == "BTC" else 4),
+                "amount": round(moved, spec.precision if spec else 4),
             })
             if needed <= 0:
                 break
@@ -126,13 +148,14 @@ class WalletLedger:
             self.realized_pnl += trade["netProfit"]
             return
 
+        base = trade.get("baseAsset", "BTC")
         buy = self.get(trade["buyExchangeId"])
         sell = self.get(trade["sellExchangeId"])
         buy_debit = trade["buyQuote"] + trade["buyFee"] + trade["slippageCostBuy"] + trade["rebalanceCost"]
         sell_credit = trade["sellQuote"] - trade["sellFee"] - trade["slippageCostSell"] - trade["latencyRiskCost"] - trade.get("adverseMoveCost", 0)
         buy["USDT"] = float(buy["USDT"]) - buy_debit
-        buy["BTC"] = float(buy["BTC"]) + trade["qtyBtc"]
-        sell["BTC"] = float(sell["BTC"]) - trade["qtyBtc"]
+        buy[base] = float(buy[base]) + trade["qtyBtc"]
+        sell[base] = float(sell[base]) - trade["qtyBtc"]
         sell["USDT"] = float(sell["USDT"]) + sell_credit
         self.realized_pnl += trade["netProfit"]
 
@@ -180,32 +203,34 @@ class WalletLedger:
             "lowVenues": sum(1 for row in rows if row["low"]),
         }
 
-    def totals(self, mark_price: float, exchanges=None, eth_mark_price: float | None = None) -> dict:
+    def totals(self, mark_price: float, exchanges=None, eth_mark_price: float | None = None, asset_prices: dict | None = None) -> dict:
         wallets = self.active(exchanges) if exchanges is not None else self.all()
-        usdt = sum(float(wallet["USDT"]) for wallet in wallets)
-        btc = sum(float(wallet["BTC"]) for wallet in wallets)
-        eth = sum(float(wallet["ETH"]) for wallet in wallets)
         eth_price = eth_mark_price if eth_mark_price is not None else mark_price * 0.052
-        starting_value = len(wallets) * (
-            self.settings.starting_usdt
-            + self.settings.starting_btc * mark_price
-            + self.settings.starting_eth * eth_price
+        # USD price per asset. USDT=1, BTC=mark, ETH=eth_price; alts from the live
+        # book (asset_prices) or their catalog hint. In demo alts are zero so
+        # their contribution is zero regardless of price.
+        prices = {"USDT": 1.0, "BTC": mark_price, "ETH": eth_price}
+        for asset in LEDGER_ASSETS:
+            if asset not in prices:
+                spec = ASSET_BY_SYMBOL.get(asset)
+                prices[asset] = float((asset_prices or {}).get(asset, spec.price_hint if spec else 0.0))
+        held = {asset: sum(float(wallet[asset]) for wallet in wallets) for asset in LEDGER_ASSETS}
+        start = {"USDT": self.settings.starting_usdt, "BTC": self.settings.starting_btc, "ETH": self.settings.starting_eth}
+        starting_value = len(wallets) * sum(
+            start.get(asset, self._starting_balance(asset)) * prices[asset] for asset in LEDGER_ASSETS
         )
-        mark_to_market = usdt + btc * mark_price + eth * eth_price
+        mark_to_market = sum(held[asset] * prices[asset] for asset in LEDGER_ASSETS)
         total_pnl = mark_to_market - starting_value
         unrealized_pnl = total_pnl - self.realized_pnl
+        exposure = {asset: {"qty": held[asset], "usd": held[asset] * prices[asset]} for asset in LEDGER_ASSETS}
         return {
-            "USDT": usdt,
-            "BTC": btc,
-            "ETH": eth,
+            "USDT": held["USDT"],
+            "BTC": held["BTC"],
+            "ETH": held["ETH"],
             "markToMarket": mark_to_market,
             "realizedPnl": self.realized_pnl,
             "unrealizedPnl": unrealized_pnl,
             "totalPnl": total_pnl,
             "startingValue": starting_value,
-            "exposure": {
-                "USDT": {"qty": usdt, "usd": usdt},
-                "BTC": {"qty": btc, "usd": btc * mark_price},
-                "ETH": {"qty": eth, "usd": eth * eth_price},
-            },
+            "exposure": exposure,
         }

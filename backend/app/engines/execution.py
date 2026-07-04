@@ -71,10 +71,11 @@ class ExecutionSimulator:
             wallet = self.ledger.get(trade["exchangeId"])
             return float(wallet["USDT"]) >= trade["quoteIn"]
 
+        base = trade.get("baseAsset", "BTC")
         buy = self.ledger.get(trade["buyExchangeId"])
         sell = self.ledger.get(trade["sellExchangeId"])
         buy_debit = trade["buyQuote"] + trade["buyFee"] + trade["slippageCostBuy"] + trade["rebalanceCost"]
-        return float(buy["USDT"]) >= buy_debit and float(sell["BTC"]) >= trade["qtyBtc"]
+        return float(buy["USDT"]) >= buy_debit and float(sell[base]) >= trade["qtyBtc"]
 
     def reconcile_fills(self, opportunity: dict) -> dict | None:
         """Per-leg reconciliation for cross-exchange trades: intended vs filled on

@@ -1724,5 +1724,56 @@ class ContinuityAndControlSurfaceTests(unittest.TestCase):
         self.assertEqual(codes[3:], [429, 429])
 
 
+class MultiAssetLedgerTests(unittest.TestCase):
+    """Generalized asset model: alts are first-class, demo stays BTC-identical."""
+
+    def test_wallets_carry_all_ledger_assets(self):
+        from backend.app.core.config import LEDGER_ASSETS
+
+        ledger = WalletLedger(Settings(market_mode="demo"))
+        wallet = ledger.all()[0]
+        for asset in LEDGER_ASSETS:
+            self.assertIn(asset, wallet)
+        # Alts seed at zero in demo, so demo balances/P&L are unchanged.
+        for asset in ("XRP", "LTC", "SOL", "AVAX"):
+            self.assertEqual(wallet[asset], 0.0)
+
+    def test_alt_cross_trade_moves_the_right_asset_and_conserves_pnl(self):
+        settings = Settings(market_mode="demo", starting_alt_balances={"XRP": 10000.0})
+        ledger = WalletLedger(settings)
+        a, b = settings.exchanges[0].id, settings.exchanges[1].id
+        before_xrp = float(ledger.get(a)["XRP"]) + float(ledger.get(b)["XRP"])
+        before_pnl = ledger.realized_pnl
+        trade = {
+            "strategy": "simple", "baseAsset": "XRP",
+            "buyExchangeId": a, "sellExchangeId": b,
+            "buyExchange": "A", "sellExchange": "B",
+            "qtyBtc": 500.0,  # base-asset qty (field name kept for compatibility)
+            "buyQuote": 275.0, "sellQuote": 280.0,
+            "buyFee": 0.3, "sellFee": 0.3, "slippageCostBuy": 0.1, "slippageCostSell": 0.1,
+            "latencyRiskCost": 0.05, "rebalanceCost": 0.0, "adverseMoveCost": 0.0,
+            "netProfit": 3.85,
+        }
+        ledger.apply_trade(trade)
+        # XRP is conserved across venues (buy leg gains what sell leg loses).
+        after_xrp = float(ledger.get(a)["XRP"]) + float(ledger.get(b)["XRP"])
+        self.assertAlmostEqual(after_xrp, before_xrp, places=6)
+        self.assertGreater(float(ledger.get(a)["XRP"]), 10000.0)  # buy venue accumulated XRP
+        self.assertLess(float(ledger.get(b)["XRP"]), 10000.0)     # sell venue released XRP
+        # BTC untouched by an XRP trade.
+        self.assertEqual(float(ledger.get(a)["BTC"]), settings.starting_btc)
+        self.assertAlmostEqual(ledger.realized_pnl - before_pnl, 3.85, places=6)
+
+    def test_totals_price_alts_from_book_and_stay_finite(self):
+        import json as json_module
+
+        settings = Settings(market_mode="demo", starting_alt_balances={"SOL": 100.0})
+        ledger = WalletLedger(settings)
+        totals = ledger.totals(70000.0, settings.exchanges, eth_mark_price=3600.0, asset_prices={"SOL": 150.0})
+        self.assertIn("SOL", totals["exposure"])
+        self.assertAlmostEqual(totals["exposure"]["SOL"]["usd"], 100.0 * 150.0 * len(settings.exchanges), places=2)
+        json_module.dumps(totals, allow_nan=False)
+
+
 if __name__ == "__main__":
     unittest.main()

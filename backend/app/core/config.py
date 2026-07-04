@@ -37,6 +37,40 @@ class ExchangeConfig:
     order_book_limit: int | None = None
 
 
+@dataclass(frozen=True)
+class AssetConfig:
+    """A tradable asset. `kind` is 'quote' for settlement currencies (USDT/USD)
+    and 'base' for coins. `price_hint` is a rough USD price used only as a
+    fallback for autonomy/exposure when a live book is unavailable (e.g. demo,
+    where alt balances are zero anyway); live/testnet mark to the real book."""
+    symbol: str
+    kind: str            # "base" | "quote"
+    precision: int       # decimals for order quantity
+    min_order: float     # minimum tradable size, base units
+    withdrawal_fee: float  # network/settlement fee, base units (rebalance cost)
+    price_hint: float    # rough USD price (fallback only)
+
+
+# The asset universe. USDT/BTC/ETH reproduce the original wallet exactly; the
+# alts (XRP/LTC/SOL/AVAX) are the venues where the wide-net radar and OU study
+# found real edges — enabled for the live/testnet trading universe, seeded at
+# zero in demo so demo balances and P&L are numerically unchanged.
+ASSET_CATALOG: tuple[AssetConfig, ...] = (
+    AssetConfig("USDT", "quote", 2, 1.0, 1.0, 1.0),
+    AssetConfig("USD", "quote", 2, 1.0, 1.0, 1.0),
+    AssetConfig("BTC", "base", 8, 0.0005, 0.0002, 70000.0),
+    AssetConfig("ETH", "base", 6, 0.01, 0.002, 3600.0),
+    AssetConfig("XRP", "base", 2, 5.0, 0.2, 0.55),
+    AssetConfig("LTC", "base", 4, 0.1, 0.001, 85.0),
+    AssetConfig("SOL", "base", 3, 0.05, 0.01, 150.0),
+    AssetConfig("AVAX", "base", 3, 0.1, 0.02, 28.0),
+)
+ASSET_BY_SYMBOL: dict[str, AssetConfig] = {asset.symbol: asset for asset in ASSET_CATALOG}
+# Ledger-tracked balance assets (USD normalizes to USDT in the ledger, so it is
+# not a separate wallet key — an existing simplification we preserve).
+LEDGER_ASSETS: tuple[str, ...] = ("USDT", "BTC", "ETH", "XRP", "LTC", "SOL", "AVAX")
+
+
 FAST_EXCHANGE_PROFILE = "okx,bybit,kucoin,kraken,bitstamp"
 DEMO_EXCHANGE_PROFILE = "okx,bybit,kucoin,kraken,bitstamp"
 COVERAGE_EXCHANGE_PROFILE = "okx,bybit,kucoin,kraken,bitstamp,coinbase,gateio,gemini,bitfinex,binance"
@@ -196,6 +230,10 @@ class Settings:
     starting_usdt: float = number_env("STARTING_USDT_PER_EXCHANGE", 35000)
     starting_btc: float = number_env("STARTING_BTC_PER_EXCHANGE", 0.25)
     starting_eth: float = number_env("STARTING_ETH_PER_EXCHANGE", 6)
+    # Per-exchange starting balances for alt bases (XRP/LTC/SOL/AVAX). Empty in
+    # demo (alts start at zero, so demo balances/P&L are unchanged); the testnet
+    # trading path seeds this from its sandbox balances.
+    starting_alt_balances: dict = field(default_factory=dict)
     exchange_universe: tuple[ExchangeConfig, ...] = field(default_factory=exchange_catalog)
     exchanges: tuple[ExchangeConfig, ...] = field(default_factory=exchange_catalog)
 
