@@ -80,6 +80,7 @@ class MarketService:
         self.pre_trade_guard = PreTradeGuard()
         self.gateway_mode = "paper"
         self.gateway = PaperExecutionGateway(self.pre_trade_guard)
+        self.executor.gateway = self.gateway
         self.stream_provider: CcxtStreamProvider | None = None
         self.discovery = WideNetRadar(cfg)
         self.started_at = now_ms()
@@ -309,6 +310,7 @@ class MarketService:
         if mode in GATEWAY_MODES:
             self.gateway_mode = mode
             self.gateway = build_gateway(mode, self.pre_trade_guard)
+            self.executor.gateway = self.gateway
 
     def set_kill_switch(self, enabled: bool) -> None:
         self.pre_trade_guard.kill_switch = bool(enabled)
@@ -397,7 +399,7 @@ class MarketService:
         self.cross_engine = CrossExchangeArbitrageEngine(self.settings, self.ledger, self.calibrator)
         self.triangular_engine = TriangularArbitrageEngine(self.settings, self.ledger, self.calibrator)
         self.queue = OpportunityQueue()
-        self.executor = ExecutionSimulator(self.settings, self.ledger, self.store, self.risk)
+        self.executor = ExecutionSimulator(self.settings, self.ledger, self.store, self.risk, gateway=self.gateway)
 
     async def loop(self) -> None:
         while True:
@@ -538,6 +540,9 @@ class MarketService:
         if self.pre_trade_guard.kill_switch:
             self.last_executions = []
         else:
+            # Give the executor the live book map so the gateway can settle
+            # (paper: passthrough; testnet: place real sandbox orders).
+            self.executor.book_map = adjusted_books
             self.last_executions = self.executor.try_execute(ranked, summaries)
         for trade in self.last_executions:
             self._record_calibration(trade)

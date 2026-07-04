@@ -73,6 +73,23 @@ class ExecutionGateway(Protocol):
 
     def place_order(self, order: ClientOrder, book) -> GatewayFill: ...
 
+    def settle_trade(self, trade: dict, opportunity: dict, book_map: dict) -> dict: ...
+
+
+def _synthetic_orders(trade: dict) -> list[dict]:
+    """Client-order records for a paper trade, so the order lifecycle is visible
+    (and shaped) the same way a real venue order would be."""
+    if trade.get("strategy") == "triangular":
+        legs = trade.get("legs") or []
+        return [
+            {"clientId": f"{trade['id']}-L{i}", "venue": trade.get("exchangeId"), "leg": f"{leg.get('from')}->{leg.get('to')}", "tif": "IOC", "status": trade.get("status")}
+            for i, leg in enumerate(legs)
+        ]
+    return [
+        {"clientId": f"{trade['id']}-BUY", "venue": trade.get("buyExchangeId"), "side": "buy", "tif": "IOC", "status": trade.get("status")},
+        {"clientId": f"{trade['id']}-SELL", "venue": trade.get("sellExchangeId"), "side": "sell", "tif": "IOC", "status": trade.get("status")},
+    ]
+
 
 class PaperExecutionGateway:
     """Deterministic paper fills computed by walking the provided order book."""
@@ -111,6 +128,16 @@ class PaperExecutionGateway:
         note = "paper fill" if status != "rejected" else "limit not met"
         return GatewayFill(order.client_id, order.venue, order.symbol, order.side, order.qty, filled, avg, status, note)
 
+    def settle_trade(self, trade: dict, opportunity: dict, book_map: dict) -> dict:
+        # Paper settlement: the fill was already modeled during opportunity
+        # evaluation (book-walk + costs + adverse move), so we trust it and just
+        # tag provenance + attach the order lifecycle. This makes the gateway the
+        # thing the trade loop routes through while keeping paper P&L identical.
+        trade["gateway"] = self.name
+        trade["execution"] = "paper"
+        trade.setdefault("orders", _synthetic_orders(trade))
+        return trade
+
 
 class ReadOnlyLiveGateway(PaperExecutionGateway):
     """Real market data, paper fills — the honest 'live' path. Inherits the paper
@@ -145,6 +172,13 @@ class LiveExecutionGateway:
             "Live execution is intentionally not implemented. The gateway exists to demonstrate "
             "readiness; connecting a real venue requires read-only-trading credentials and an "
             "explicit, security-reviewed enablement. Aurelion never holds withdrawal-capable keys."
+        )
+
+    def settle_trade(self, trade: dict, opportunity: dict, book_map: dict) -> dict:
+        raise NotImplementedError(
+            "Mainnet live settlement is intentionally not implemented. Use the testnet gateway; "
+            "graduating to real capital is a separate, security-reviewed step (see "
+            "docs/SECURITY-live-readiness.md)."
         )
 
 

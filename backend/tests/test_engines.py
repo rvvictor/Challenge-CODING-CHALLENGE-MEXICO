@@ -1775,5 +1775,50 @@ class MultiAssetLedgerTests(unittest.TestCase):
         json_module.dumps(totals, allow_nan=False)
 
 
+class GatewayRoutedExecutionTests(unittest.TestCase):
+    """The trade loop settles through the ExecutionGateway seam, not around it."""
+
+    def _run_until_trade(self, service, max_ticks=400):
+        for _ in range(max_ticks):
+            service.safe_tick()
+            if service.store.latest_trades(1):
+                return service.store.latest_trades(1)[0]
+        return None
+
+    def test_paper_trades_carry_gateway_provenance_and_orders(self):
+        from backend.app.engines.market_service import MarketService
+
+        service = MarketService(Settings(market_mode="demo"))
+        trade = self._run_until_trade(service)
+        self.assertIsNotNone(trade, "demo must execute a trade within the window")
+        self.assertEqual(trade["gateway"], "paper")
+        self.assertEqual(trade["execution"], "paper")
+        self.assertTrue(trade.get("orders"), "the order lifecycle must be attached")
+
+    def test_gateway_that_rejects_settlement_blocks_the_trade(self):
+        from backend.app.engines.market_service import MarketService
+
+        service = MarketService(Settings(market_mode="demo"))
+
+        class RejectingGateway:
+            name = "reject"
+            def settle_trade(self, trade, opportunity, book_map):
+                return None
+
+        service.executor.gateway = RejectingGateway()
+        for _ in range(200):
+            service.safe_tick()
+        self.assertEqual(service.store.executed_count, 0, "no trade may settle when the gateway rejects")
+        self.assertEqual(service.ledger.realized_pnl, 0.0)
+
+    def test_set_execution_gateway_keeps_executor_in_sync(self):
+        from backend.app.engines.market_service import MarketService
+
+        service = MarketService(Settings(market_mode="demo"))
+        service.set_execution_gateway("read-only-live")
+        self.assertIs(service.executor.gateway, service.gateway)
+        self.assertEqual(service.gateway.name, "read-only-live")
+
+
 if __name__ == "__main__":
     unittest.main()

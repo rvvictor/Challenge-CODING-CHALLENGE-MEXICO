@@ -14,11 +14,21 @@ def now_ms() -> int:
 
 
 class ExecutionSimulator:
-    def __init__(self, settings: Settings, ledger: WalletLedger, store: EventStore, risk: RiskManager):
+    def __init__(self, settings: Settings, ledger: WalletLedger, store: EventStore, risk: RiskManager, gateway=None):
         self.settings = settings
         self.ledger = ledger
         self.store = store
         self.risk = risk
+        # The execution gateway the trade loop settles through. Paper /
+        # read-only-live settle as a provenance passthrough (identical P&L);
+        # the testnet gateway places real sandbox orders and returns real fills.
+        # Defaults to a paper gateway so the simulator works standalone (tests).
+        if gateway is None:
+            from backend.app.integrations.gateways import PaperExecutionGateway
+
+            gateway = PaperExecutionGateway()
+        self.gateway = gateway
+        self.book_map: dict = {}
         self.cooldowns: dict[str, int] = {}
         self.last_demo_execution_at = 0
         self.leg_failure_until = 0
@@ -50,6 +60,14 @@ class ExecutionSimulator:
                 trade["inventoryRebalance"] = transfers
             if not self.has_inventory(trade):
                 continue
+            # Route settlement through the execution gateway. Paper /
+            # read-only-live tag provenance and return the modeled trade
+            # unchanged; the testnet gateway places real sandbox orders and
+            # rewrites the fill. A gateway that rejects returns None.
+            settled = self.gateway.settle_trade(trade, opportunity, self.book_map)
+            if settled is None:
+                continue
+            trade = settled
             self.ledger.apply_trade(trade)
             self.cooldowns[key] = current + self.settings.pair_cooldown_ms
             self.risk.record_trade(trade, current)
