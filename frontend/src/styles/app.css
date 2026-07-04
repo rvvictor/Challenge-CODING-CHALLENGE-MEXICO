@@ -2089,3 +2089,54 @@ input:focus-visible,
   border: 1px solid var(--line);
   font-size: 11px;
 }
+
+/* --- Per-stage latency strip + Resilience panel --------------------------- */
+.sloStages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.sloStages span {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  flex: 1 1 44px;
+  padding: 6px 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper-2);
+}
+
+.sloStages em {
+  font-style: normal;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.sloStages b {
+  font-size: 12px;
+  font-weight: 900;
+  color: var(--ink);
+}
+
+.resiliencePanel .resilienceNote {
+  display: block;
+  margin-top: 10px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.resiliencePanel .resilienceNote b {
+  color: var(--ink);
+}
+
+.systemGrid small.amberTone {
+  color: var(--amber);
+  font-weight: 800;
+}
