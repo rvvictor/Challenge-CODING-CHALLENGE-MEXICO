@@ -176,6 +176,7 @@ class ExecutionSimulator:
             }
         return {
             **base,
+            "baseAsset": opportunity.get("baseAsset", "BTC"),
             "buyExchangeId": opportunity["buyExchangeId"],
             "sellExchangeId": opportunity["sellExchangeId"],
             "buyExchange": opportunity["buyExchange"],

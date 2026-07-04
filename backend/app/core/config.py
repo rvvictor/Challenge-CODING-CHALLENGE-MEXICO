@@ -69,6 +69,19 @@ ASSET_BY_SYMBOL: dict[str, AssetConfig] = {asset.symbol: asset for asset in ASSE
 # Ledger-tracked balance assets (USD normalizes to USDT in the ledger, so it is
 # not a separate wallet key — an existing simplification we preserve).
 LEDGER_ASSETS: tuple[str, ...] = ("USDT", "BTC", "ETH", "XRP", "LTC", "SOL", "AVAX")
+# Alt bases the live/auto engine trades cross-exchange (direct X/quote pairs),
+# beyond the BTC primary. These are the assets the wide-net radar and OU study
+# flagged as where real edges live. Demo does not trade them (demo feeds only
+# the primaries to the cross engine), so demo behavior is unchanged.
+LIVE_ALT_BASES: tuple[str, ...] = ("XRP", "LTC", "SOL", "AVAX")
+
+
+def live_symbols(exchange: ExchangeConfig) -> tuple[str, ...]:
+    """Symbols the live stream watches for a venue: the primary BTC pair, the
+    triangular legs, and the direct alt pairs (X/USDT or X/USD)."""
+    quote = "USD" if exchange.primary_symbol.endswith("/USD") else "USDT"
+    alts = tuple(f"{base}/{quote}" for base in LIVE_ALT_BASES)
+    return tuple(dict.fromkeys((exchange.primary_symbol, *exchange.triangular_symbols, *alts)))
 
 
 FAST_EXCHANGE_PROFILE = "okx,bybit,kucoin,kraken,bitstamp"
@@ -214,6 +227,12 @@ class Settings:
     discovery_interval_ms: int = int_env("DISCOVERY_INTERVAL_MS", 45000)
     discovery_min_persistence: int = int_env("DISCOVERY_MIN_PERSISTENCE", 3)
     discovery_min_net_bps: float = number_env("DISCOVERY_MIN_NET_BPS", 0.0)
+    # Live/auto alt trading: when on, live mode watches and trades XRP/LTC/SOL/AVAX
+    # cross-exchange (never affects demo, which trades BTC only).
+    live_alt_enabled: bool = bool_env("LIVE_ALT_ENABLED", True)
+    # Paper inventory seeded per venue for each alt base when entering a live mode,
+    # so the read-only-live path can paper-trade alts. In USD-notional terms.
+    live_alt_seed_usd: float = number_env("LIVE_ALT_SEED_USD", 4000.0)
     active_exchanges: str = os.getenv("ACTIVE_EXCHANGES", "")
     max_active_exchanges: int = int_env("MAX_ACTIVE_EXCHANGES", 0)
     control_token: str = os.getenv("CONTROL_TOKEN", "")

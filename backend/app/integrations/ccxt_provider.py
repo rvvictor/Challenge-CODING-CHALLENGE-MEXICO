@@ -4,7 +4,7 @@ import asyncio
 import time
 from collections.abc import Awaitable, Callable
 
-from backend.app.core.config import ExchangeConfig, Settings
+from backend.app.core.config import ExchangeConfig, Settings, live_symbols
 from backend.app.core.models import Level, OrderBook
 from backend.app.engines.fills import sort_levels
 
@@ -41,8 +41,11 @@ class CcxtStreamProvider:
         if not self.available:
             await self.emit("provider-unavailable", {"severity": "warning", "reason": self.unavailable_reason})
             return
+        # Watch the primary + triangular legs, and (when alt trading is on) the
+        # direct XRP/LTC/SOL/AVAX pairs where real edges were found.
         for exchange in self.settings.exchanges:
-            for symbol in dict.fromkeys((exchange.primary_symbol, *exchange.triangular_symbols)):
+            symbols = live_symbols(exchange) if self.settings.live_alt_enabled else dict.fromkeys((exchange.primary_symbol, *exchange.triangular_symbols))
+            for symbol in symbols:
                 state = self.state(exchange, symbol)
                 asyncio.create_task(self.watch_loop(state))
 

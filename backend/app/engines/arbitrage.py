@@ -20,6 +20,17 @@ def rounded(value: float, decimals: int = 6) -> float:
     return round(value or 0.0, decimals)
 
 
+def base_of(symbol: str) -> str:
+    return symbol.split("/", 1)[0]
+
+
+# USD notional anchor: trade sizes are expressed as MAX_TRADE_BTC BTC, i.e. this
+# many USD. For BTC the size stays MAX_TRADE_BTC exactly (price ~= anchor); for
+# alts the size is the notional-equivalent in the alt's own units, so a "trade"
+# is a comparable dollar amount rather than 0.05 of a $0.50 coin.
+NOTIONAL_ANCHOR_USD = 70000.0
+
+
 class CrossExchangeArbitrageEngine:
     def __init__(self, settings: Settings, ledger: WalletLedger, calibrator=None):
         self.settings = settings
@@ -29,22 +40,43 @@ class CrossExchangeArbitrageEngine:
     def scan(self, books_by_exchange: dict[str, OrderBook]) -> list[dict]:
         current = now_ms()
         books = [book for book in books_by_exchange.values() if book.asks and book.bids]
+        # Group by base asset so a cross-exchange pair is only ever formed between
+        # books of the SAME coin (never XRP-ask vs BTC-bid). Demo passes only BTC
+        # primaries, so grouping is a no-op there and behavior is unchanged; the
+        # live path passes alt direct pairs too, and each base is scanned on its own.
+        by_base: dict[str, list[OrderBook]] = {}
+        for book in books:
+            by_base.setdefault(base_of(book.symbol), []).append(book)
         opportunities = []
-        for buy_book in books:
-            for sell_book in books:
-                if buy_book.exchange_id == sell_book.exchange_id:
-                    continue
-                opportunity = self.evaluate_pair(buy_book, sell_book, current)
-                if opportunity:
-                    opportunities.append(opportunity.to_dict())
+        for group in by_base.values():
+            for buy_book in group:
+                for sell_book in group:
+                    if buy_book.exchange_id == sell_book.exchange_id:
+                        continue
+                    opportunity = self.evaluate_pair(buy_book, sell_book, current)
+                    if opportunity:
+                        opportunities.append(opportunity.to_dict())
         return sorted(opportunities, key=lambda item: item["score"], reverse=True)
 
-    def target_size_btc(self, ask, bid, buy_book: OrderBook, sell_book: OrderBook, buy_exchange, sell_exchange) -> float:
-        """Nominal trade size. `fixed` uses MAX_TRADE_BTC; `kelly` scales it by a
-        fractional-Kelly multiplier derived from a quick top-of-book edge estimate,
-        the venue confidences (win probability) and the adverse-move ceiling
-        (downside). Sizing toward edge quality, capped at MAX_TRADE_BTC."""
-        max_size = self.settings.max_trade_btc
+    def _max_size(self, base_asset: str, ask_price: float) -> float:
+        # BTC keeps MAX_TRADE_BTC exactly; alts use the notional-equivalent size.
+        if base_asset == "BTC":
+            return self.settings.max_trade_btc
+        return (self.settings.max_trade_btc * NOTIONAL_ANCHOR_USD) / ask_price if ask_price else 0.0
+
+    def _min_size(self, base_asset: str, ask_price: float) -> float:
+        if base_asset == "BTC":
+            return self.settings.min_trade_btc
+        return (self.settings.min_trade_btc * NOTIONAL_ANCHOR_USD) / ask_price if ask_price else 0.0
+
+    def target_size_btc(self, ask, bid, buy_book: OrderBook, sell_book: OrderBook, buy_exchange, sell_exchange, base_asset: str = "BTC") -> float:
+        """Nominal trade size in BASE units. `fixed` uses the max size; `kelly`
+        scales it by a fractional-Kelly multiplier derived from a quick
+        top-of-book edge estimate, the venue confidences (win probability) and
+        the adverse-move ceiling (downside). Sizing toward edge quality, capped
+        at the max. For BTC the max is MAX_TRADE_BTC (unchanged); for alts it is
+        the notional-equivalent quantity."""
+        max_size = self._max_size(base_asset, ask.price)
         if self.settings.sizing_mode != "kelly":
             return max_size
         gross_bps = (bid.price - ask.price) / ask.price * 10000 if ask.price else 0
@@ -57,7 +89,7 @@ class CrossExchangeArbitrageEngine:
         win_prob = min(buy_book.confidence, sell_book.confidence)
         payoff = edge_bps / max(self.settings.execution_adverse_max_bps, 0.1) if edge_bps > 0 else 0.0
         multiplier = kelly_multiplier(win_prob, payoff, self.settings.kelly_fraction)
-        return max(self.settings.min_trade_btc, max_size * multiplier)
+        return max(self._min_size(base_asset, ask.price), max_size * multiplier)
 
     def evaluate_pair(self, buy_book: OrderBook, sell_book: OrderBook, current: int) -> Opportunity | None:
         ask = best(buy_book.asks, "ask")
@@ -67,16 +99,18 @@ class CrossExchangeArbitrageEngine:
 
         buy_exchange = self.settings.exchange_by_id(buy_book.exchange_id)
         sell_exchange = self.settings.exchange_by_id(sell_book.exchange_id)
-        capacity = self.ledger.route_capacity_btc(buy_book.exchange_id, sell_book.exchange_id, ask.price, self.settings.exchanges)
+        base_asset = base_of(buy_book.symbol)
+        capacity = self.ledger.route_capacity_btc(buy_book.exchange_id, sell_book.exchange_id, ask.price, self.settings.exchanges, base=base_asset)
         wallet_qty = float(capacity["qty"])
         buy_depth = depth_qty(buy_book.asks)
         sell_depth = depth_qty(sell_book.bids)
-        target_size = self.target_size_btc(ask, bid, buy_book, sell_book, buy_exchange, sell_exchange)
+        target_size = self.target_size_btc(ask, bid, buy_book, sell_book, buy_exchange, sell_exchange, base_asset)
         target_qty = min(target_size, buy_depth, sell_depth, wallet_qty)
+        min_size = self._min_size(base_asset, ask.price)
 
-        if target_qty < self.settings.min_trade_btc:
+        if target_qty < min_size:
             gross_bps = ((bid.price - ask.price) / ask.price) * 10000
-            blocked_reason = "Insufficient wallet inventory" if wallet_qty < self.settings.min_trade_btc else "Insufficient book depth"
+            blocked_reason = "Insufficient wallet inventory" if wallet_qty < min_size else "Insufficient book depth"
             return Opportunity(
                 id=f"{current}-{buy_book.exchange_id}-{sell_book.exchange_id}-blocked",
                 strategy="simple",
@@ -93,6 +127,7 @@ class CrossExchangeArbitrageEngine:
                 reason=blocked_reason,
                 product=buy_book.symbol,
                 data={
+                    "baseAsset": base_of(buy_book.symbol),
                     "buyExchangeId": buy_book.exchange_id,
                     "sellExchangeId": sell_book.exchange_id,
                     "buyExchange": buy_book.exchange_name,
@@ -191,6 +226,7 @@ class CrossExchangeArbitrageEngine:
                 "totalCosts": rounded(total_costs, 4),
             },
             data={
+                "baseAsset": base_asset,
                 "buyExchangeId": buy_book.exchange_id,
                 "sellExchangeId": sell_book.exchange_id,
                 "buyExchange": buy_book.exchange_name,

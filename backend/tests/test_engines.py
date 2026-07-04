@@ -1820,5 +1820,55 @@ class GatewayRoutedExecutionTests(unittest.TestCase):
         self.assertEqual(service.gateway.name, "read-only-live")
 
 
+class LiveAltUniverseTests(unittest.TestCase):
+    """Cross-exchange engine trades the alt universe; demo stays BTC-only."""
+
+    def test_cross_engine_finds_xrp_dislocation_and_tags_base_asset(self):
+        from backend.app.engines.arbitrage import CrossExchangeArbitrageEngine
+
+        settings = Settings(active_exchanges="okx,bybit", min_net_bps=0.1, min_net_profit_usd=0.05,
+                            min_confidence=0.1, max_trade_btc=0.05, min_trade_btc=0.001,
+                            starting_alt_balances={"XRP": 20000.0})
+        ledger = WalletLedger(settings)
+        a, b = settings.exchanges[0], settings.exchanges[1]
+        # XRP cheaper on A, richer on B -> a real cross-exchange edge.
+        books = {
+            f"{a.id}:XRP/USDT": book(a, "XRP/USDT", [(0.500, 40000)], [(0.499, 40000)]),
+            f"{b.id}:XRP/USDT": book(b, "XRP/USDT", [(0.520, 40000)], [(0.508, 40000)]),
+        }
+        engine = CrossExchangeArbitrageEngine(settings, ledger)
+        opps = engine.scan(books)
+        profitable = [o for o in opps if o["status"] == "profitable"]
+        self.assertTrue(profitable, "expected a profitable XRP cross-exchange opportunity")
+        self.assertEqual(profitable[0]["baseAsset"], "XRP")
+        self.assertEqual(profitable[0]["buyExchangeId"], a.id)  # bought where cheap
+
+    def test_cross_engine_never_pairs_across_different_bases(self):
+        from backend.app.engines.arbitrage import CrossExchangeArbitrageEngine
+
+        settings = Settings(active_exchanges="okx,bybit", min_net_bps=0.1, min_net_profit_usd=0.05, min_confidence=0.1)
+        ledger = WalletLedger(settings)
+        a, b = settings.exchanges[0], settings.exchanges[1]
+        # A huge apparent 'edge' only if you (wrongly) compare SOL ask to BTC bid.
+        books = {
+            f"{a.id}:SOL/USDT": book(a, "SOL/USDT", [(150.0, 500)], [(149.5, 500)]),
+            f"{b.id}:BTC/USDT": book(b, "BTC/USDT", [(70000, 2)], [(69950, 2)]),
+        }
+        engine = CrossExchangeArbitrageEngine(settings, ledger)
+        opps = engine.scan(books)
+        # Different bases and only one venue each -> no valid cross pair at all.
+        self.assertEqual(opps, [])
+
+    def test_demo_cross_scan_input_stays_btc_only(self):
+        from backend.app.engines.market_service import MarketService
+
+        service = MarketService(Settings(market_mode="demo"))
+        service.tick()
+        adjusted_primary = service.health_adjusted_books(service.primary_books())
+        cross_input = service.cross_scan_input(adjusted_primary, service.health_adjusted_book_map())
+        bases = {b.symbol.split("/")[0] for b in cross_input.values()}
+        self.assertEqual(bases, {"BTC"}, "demo cross scan must remain BTC-only")
+
+
 if __name__ == "__main__":
     unittest.main()

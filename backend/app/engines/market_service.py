@@ -7,6 +7,8 @@ import traceback
 from collections.abc import AsyncIterator
 
 from backend.app.core.config import (
+    ASSET_BY_SYMBOL,
+    LIVE_ALT_BASES,
     PARAMETER_GROUPS,
     PARAMETER_PRESETS,
     Settings,
@@ -200,8 +202,19 @@ class MarketService:
         # gateway (disabled stub) is only ever selected explicitly.
         if mode == "demo":
             self.set_execution_gateway("paper")
+            self.apply_alt_inventory(0)
         elif self.gateway_mode == "paper":
             self.set_execution_gateway("read-only-live")
+        # Seed paper alt inventory for live modes so read-only-live can paper-trade
+        # the alt universe; clear it when returning to demo (done above).
+        if mode != "demo" and self.settings.live_alt_enabled:
+            self.schedule(self._seed_alt_inventory_when_ready())
+
+    async def _seed_alt_inventory_when_ready(self) -> None:
+        # Wait briefly for the first alt books to arrive so inventory is valued at
+        # the live mid rather than the catalog hint, then seed.
+        await asyncio.sleep(3.0)
+        self.apply_alt_inventory(self.settings.live_alt_seed_usd)
 
     async def set_execution_gateway_unified(self, mode: str) -> None:
         """Gateway switch with the inverse coupling: choosing a live-data gateway
@@ -523,8 +536,8 @@ class MarketService:
 
         adjusted_primary = self.health_adjusted_books(primary)
         adjusted_books = self.health_adjusted_book_map()
-        primary_map = {book.exchange_id: book for book in adjusted_primary}
-        opportunities = self.cross_engine.scan(primary_map) + self.triangular_engine.scan(adjusted_books)
+        cross_input = self.cross_scan_input(adjusted_primary, adjusted_books)
+        opportunities = self.cross_engine.scan(cross_input) + self.triangular_engine.scan(adjusted_books)
         stage_mark = self._record_stage("scan", stage_mark)
         ranked = [explain_opportunity(item) for item in self.queue.rank(opportunities)]
         decision_latency_ms = (time.perf_counter() - decision_started) * 1000
@@ -740,6 +753,48 @@ class MarketService:
 
     def primary_books(self) -> list[OrderBook]:
         return [book for book in self.books.values() if book.primary and book.asks and book.bids]
+
+    def cross_scan_input(self, adjusted_primary: list[OrderBook], adjusted_books: dict[str, OrderBook]) -> dict[str, OrderBook]:
+        """Books handed to the cross-exchange engine. Demo feeds only the BTC
+        primaries (behavior unchanged). Live/auto also feeds the direct alt pairs
+        (XRP/LTC/SOL/AVAX vs USDT/USD) so the engine trades where edges exist."""
+        result: dict[str, OrderBook] = {book.exchange_id: book for book in adjusted_primary}
+        if self.mode == "demo" or self.degraded_demo or not self.settings.live_alt_enabled:
+            return result
+        for key, book in adjusted_books.items():
+            if book.primary:
+                continue
+            parts = book.symbol.split("/", 1)
+            if len(parts) == 2 and parts[1] in ("USDT", "USD") and parts[0] in LIVE_ALT_BASES:
+                result[key] = book
+        return result
+
+    def live_alt_prices(self) -> dict[str, float]:
+        """Mid price per alt base from the live books, for inventory valuation."""
+        prices: dict[str, float] = {}
+        for book in self.books.values():
+            parts = book.symbol.split("/", 1)
+            if len(parts) == 2 and parts[0] in LIVE_ALT_BASES and parts[1] in ("USDT", "USD"):
+                mid = book_mid(book)
+                if mid:
+                    prices[parts[0]] = mid
+        return prices
+
+    def apply_alt_inventory(self, seed_usd: float) -> None:
+        """Seed (or clear) paper alt inventory so the read-only-live path can
+        paper-trade alts. Sets both the wallet balances and the starting
+        reference (starting_alt_balances) so mark-to-market stays coherent —
+        seeded inventory is not phantom P&L. seed_usd=0 clears it (demo)."""
+        prices = self.live_alt_prices()
+        seeds: dict[str, float] = {}
+        for asset in LIVE_ALT_BASES:
+            spec = ASSET_BY_SYMBOL.get(asset)
+            price = prices.get(asset) or (spec.price_hint if spec else 0.0)
+            seeds[asset] = round(seed_usd / price, spec.precision if spec else 4) if (seed_usd and price > 0) else 0.0
+        self.settings.starting_alt_balances = {k: v for k, v in seeds.items() if v} if seed_usd else {}
+        for wallet in self.ledger.balances.values():
+            for asset, qty in seeds.items():
+                wallet[asset] = qty
 
     def health_adjusted_books(self, books: list[OrderBook]) -> list[OrderBook]:
         adjusted = []
