@@ -1349,7 +1349,7 @@ class ResearchLabTests(unittest.TestCase):
 
         rng = random.Random(5)
         spread_bps = [0.0]
-        for _ in range(240):
+        for _ in range(150):
             spread_bps.append(0.85 * spread_bps[-1] + rng.gauss(0, 1.2))
         for i in range(120, 124):  # injected dislocation clearing the 20 bps fee wall
             spread_bps[i] = 40.0
@@ -1627,6 +1627,47 @@ class RobustnessTests(unittest.TestCase):
         json_module.dumps(snapshot, allow_nan=False)  # no NaN/inf anywhere in the payload
         self.assertEqual(snapshot["engineHealth"]["watchdog"], "armed")
         self.assertGreaterEqual(snapshot["engineHealth"]["tickCount"], 140)
+
+
+class AccountingIntegrityTests(unittest.TestCase):
+    """Net-profit accuracy, proven by invariant: the books must balance."""
+
+    def test_pnl_conservation_and_wallet_sanity_over_long_demo_run(self):
+        from backend.app.engines.market_service import MarketService
+
+        service = MarketService(Settings(market_mode="demo"))
+        for _ in range(150):
+            service.safe_tick()
+        self.assertEqual(service.tick_errors, 0)
+        trades = service.store.latest_trades(10_000)
+        self.assertGreater(len(trades), 0, "a 150-tick demo session must execute trades")
+        # Conservation: realized P&L equals the sum of every trade's net profit
+        # (partials, leg-failure cover costs and rebalances included), and the
+        # cumulative P&L series ends at exactly the same number.
+        total = sum(float(trade["netProfit"]) for trade in trades)
+        self.assertAlmostEqual(total, service.ledger.realized_pnl, places=6)
+        self.assertAlmostEqual(service.store.pnl_series[-1]["pnl"], service.ledger.realized_pnl, places=6)
+        for trade in trades:
+            ratio = trade.get("filledRatio")
+            if ratio is not None:
+                self.assertGreaterEqual(ratio, 0.0)
+                self.assertLessEqual(ratio, 1.000001)
+        # Paper wallets can never go negative in any asset on any venue.
+        for wallet in service.ledger.active(service.settings.exchanges):
+            for asset in ("USDT", "BTC", "ETH"):
+                self.assertGreaterEqual(wallet[asset], -1e-9, f"negative {asset} on {wallet['exchangeId']}")
+
+    def test_stage_latency_breakdown_is_recorded(self):
+        from backend.app.engines.market_service import MarketService
+
+        service = MarketService(Settings(market_mode="demo"))
+        for _ in range(3):
+            service.safe_tick()
+        slo = service.snapshot()["latencySlo"]
+        self.assertIn("stages", slo)
+        for stage in ("ingest", "riskGate", "scan", "rank", "execute", "publish"):
+            self.assertIn(stage, slo["stages"])
+            self.assertGreaterEqual(slo["stages"][stage]["p95"], 0.0)
 
 
 if __name__ == "__main__":

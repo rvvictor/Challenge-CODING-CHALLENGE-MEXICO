@@ -329,6 +329,18 @@ con dos capacidades:
   deliberadas del motor — invariante verificada: solo fallan los ticks
   saboteados a propósito y el snapshot completo queda libre de NaN/infinitos
   (`json.dumps(..., allow_nan=False)`).
+- **Latencia por etapa**: la latencia de decisión (~3-6 ms p50) se descompone en
+  vivo por etapa — ingesta+salud, gate de riesgo, escaneo, ranking, ejecución y
+  publicación — con ventana móvil de 200 muestras, visible en `latencySlo.stages`,
+  en `/metrics` (Prometheus) y como tabla en el reporte del jurado.
+- **Integridad contable, probada por invariante**: el P&L realizado es exactamente
+  la suma del neto de cada operación (parciales, costos de cobertura por leg
+  failure y rebalanceos incluidos), la serie acumulada termina en el mismo número
+  y ninguna wallet puede quedar negativa en ningún asset — verificado en una
+  corrida de 150 ticks en la suite.
+- **Prometheus ampliado** (`GET /metrics`): cuantiles de decisión, latencia p95
+  por etapa, ticks/fallas del watchdog, rechazos del feed guard y el mejor edge
+  del radar.
 
 ---
 

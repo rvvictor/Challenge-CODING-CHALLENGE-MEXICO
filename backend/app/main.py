@@ -122,6 +122,44 @@ async def prometheus_metrics() -> StreamingResponse:
         "# TYPE aurelion_demoted_venues gauge",
         f"aurelion_demoted_venues {metrics_payload['demotedVenues']}",
     ]
+    # Observability depth: internal decision latency (per stage), engine
+    # watchdog counters, feed-guard rejections and the discovery radar.
+    decision = (payload.get("latencySlo") or {}).get("decisionMs") or {}
+    if decision:
+        lines += [
+            "# HELP aurelion_decision_latency_ms Internal decision latency (books read -> ranked + risk-gated).",
+            "# TYPE aurelion_decision_latency_ms gauge",
+            f'aurelion_decision_latency_ms{{quantile="p50"}} {decision.get("p50", 0)}',
+            f'aurelion_decision_latency_ms{{quantile="p95"}} {decision.get("p95", 0)}',
+        ]
+    stages = (payload.get("latencySlo") or {}).get("stages") or {}
+    if stages:
+        lines += [
+            "# HELP aurelion_stage_latency_ms Per-stage tick latency (p95).",
+            "# TYPE aurelion_stage_latency_ms gauge",
+        ]
+        lines += [f'aurelion_stage_latency_ms{{stage="{name}",quantile="p95"}} {stat.get("p95", 0)}' for name, stat in stages.items()]
+    lines += [
+        "# HELP aurelion_ticks_total Engine ticks executed (watchdog-supervised).",
+        "# TYPE aurelion_ticks_total counter",
+        f"aurelion_ticks_total {market_service.tick_count}",
+        "# HELP aurelion_tick_errors_total Tick faults contained by the watchdog.",
+        "# TYPE aurelion_tick_errors_total counter",
+        f"aurelion_tick_errors_total {market_service.tick_errors}",
+        "# HELP aurelion_feed_rejected_total Poisoned live book updates rejected by the feed guard.",
+        "# TYPE aurelion_feed_rejected_total counter",
+        f"aurelion_feed_rejected_total {market_service.feed_guard.rejected_count}",
+    ]
+    radar = market_service.discovery.last_result or {}
+    if radar:
+        lines += [
+            "# HELP aurelion_radar_positive_routes Net-positive routes in the last wide-net sweep.",
+            "# TYPE aurelion_radar_positive_routes gauge",
+            f"aurelion_radar_positive_routes {radar.get('positiveCount', 0)}",
+            "# HELP aurelion_radar_best_net_bps Best net edge (bps) found by the last wide-net sweep.",
+            "# TYPE aurelion_radar_best_net_bps gauge",
+            f"aurelion_radar_best_net_bps {radar.get('bestNetBps') if radar.get('bestNetBps') is not None else 'NaN'}",
+        ]
     return StreamingResponse(iter(["\n".join(lines) + "\n"]), media_type="text/plain; version=0.0.4")
 
 

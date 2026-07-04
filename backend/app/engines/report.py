@@ -84,6 +84,31 @@ def _research_section(research: list[dict]) -> str:
     return f"<ul>{''.join(items)}</ul>{detail}"
 
 
+STAGE_LABELS = {
+    "ingest": "Ingesta + salud de venues",
+    "riskGate": "Gate de riesgo",
+    "scan": "Escaneo de oportunidades",
+    "rank": "Ranking + explicabilidad",
+    "execute": "Ejecución (paper)",
+    "publish": "Snapshot + difusión SSE",
+}
+
+
+def _stages_table(slo: dict) -> str:
+    stages = (slo or {}).get("stages") or {}
+    if not stages:
+        return ""
+    rows = "".join(
+        f"<tr><td>{_esc(STAGE_LABELS.get(name, name))}</td><td>{_fmt(stat.get('p50'))}</td><td>{_fmt(stat.get('p95'))}</td></tr>"
+        for name, stat in stages.items()
+    )
+    return (
+        "<h2>Latencia interna por etapa (ms)</h2>"
+        "<table><tr><th>Etapa</th><th>p50</th><th>p95</th></tr>" + rows + "</table>"
+        "<p class='muted'>Dónde se va cada milisegundo dentro de un tick — medido en vivo, ventana móvil de 200 muestras.</p>"
+    )
+
+
 def build_report_html(snapshot: dict, research: list[dict]) -> str:
     metrics = snapshot.get("metrics") or {}
     slo = snapshot.get("latencySlo") or {}
@@ -132,6 +157,8 @@ def build_report_html(snapshot: dict, research: list[dict]) -> str:
 
 <h2>Curva de P&amp;L</h2>
 {_pnl_svg(snapshot.get('pnlSeries') or [])}
+
+{_stages_table(slo)}
 
 <h2>Modelos activos</h2>
 <table><tr><th>Ciclos</th><th>Slippage</th><th>Sizing</th><th>Volatilidad</th><th>Calibración</th><th>Circuit breaker</th></tr>

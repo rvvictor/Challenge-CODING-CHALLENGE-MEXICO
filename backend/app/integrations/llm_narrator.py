@@ -130,6 +130,7 @@ class DecisionNarrator:
             "bestNetBps": metrics.get("bestNetBps"),
             "autonomy": (snapshot.get("inventoryAutonomy") or {}).get("sessionAutonomy"),
             "radar": radar,
+            "engineFaultsContained": (snapshot.get("engineHealth") or {}).get("tickErrors") or 0,
             "decision": decision,
             "focusTrade": self._focus_trade(snapshot, trade_id),
         }
@@ -237,6 +238,12 @@ class DecisionNarrator:
             parts.append(f"Session P&L stands at {round(float(pnl), 2)}.")
         elif autonomy and self._variety.random() < 0.3:
             parts.append(f"Inventory can still fund roughly {autonomy} trades before a rebalance matters.")
+        faults = ctx.get("engineFaultsContained") or 0
+        if faults and self._variety.random() < 0.25:
+            parts.append(self._pick([
+                f"The watchdog has contained {faults} engine fault(s) this session; trading continues normally.",
+                f"Resilience note: {faults} deliberate or real engine fault(s) were absorbed by the watchdog without downtime.",
+            ]))
         radar = ctx.get("radar")
         if radar and radar.get("bestRoute") and self._variety.random() < 0.3:
             parts.append(self._pick([

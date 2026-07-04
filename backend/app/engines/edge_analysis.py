@@ -129,7 +129,7 @@ def explain_opportunity(item: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
-def latency_slo(books: list[dict[str, Any]], decision_latencies: list[float] | None = None) -> dict[str, Any]:
+def latency_slo(books: list[dict[str, Any]], decision_latencies: list[float] | None = None, stage_windows: dict[str, list[float]] | None = None) -> dict[str, Any]:
     ages = [float(book.get("ageMs") or 0) for book in books]
     updates = [float(book.get("latencyMs") or 0) for book in books]
     p95_age = percentile(ages, 0.95)
@@ -166,6 +166,19 @@ def latency_slo(books: list[dict[str, Any]], decision_latencies: list[float] | N
             "p95": rounded(percentile(decision_latencies, 0.95), 2),
             "last": rounded(decision_latencies[-1], 2),
             "samples": len(decision_latencies),
+        }
+    if stage_windows:
+        # Where the milliseconds go inside one tick: book ingest + venue health,
+        # risk gate, opportunity scan, ranking/explainability, execution and
+        # snapshot publication. Same rolling-window treatment as decisionMs.
+        payload["stages"] = {
+            name: {
+                "p50": rounded(percentile(window, 0.5), 2),
+                "p95": rounded(percentile(window, 0.95), 2),
+                "last": rounded(window[-1], 2),
+            }
+            for name, window in stage_windows.items()
+            if window
         }
     return payload
 

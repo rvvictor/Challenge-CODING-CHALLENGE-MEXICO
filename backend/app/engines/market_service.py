@@ -98,6 +98,9 @@ class MarketService:
         # risk-gated), in ms. Isolated from network/exchange latency so the
         # dashboard can show "how fast does Aurelion itself decide."
         self.decision_latency_window: list[float] = []
+        # Per-stage breakdown of the same window: where the milliseconds go
+        # (ingest, risk gate, scan, rank, execute, publish), rolling 200 samples.
+        self.stage_windows: dict[str, list[float]] = {}
         # Engine watchdog: the loop routes every tick through safe_tick(), so a
         # fault inside tick() is contained instead of killing the engine task.
         self.feed_guard = FeedGuard(cfg)
@@ -351,6 +354,7 @@ class MarketService:
         self.pre_trade_guard.kill_switch = False
         self.set_execution_gateway("paper")
         self.decision_latency_window = []
+        self.stage_windows = {}
         self.feed_guard.reset()
         self.tick_count = 0
         self.tick_errors = 0
@@ -456,6 +460,14 @@ class MarketService:
             pass
         return self.discovery.snapshot()
 
+    def _record_stage(self, name: str, started: float) -> float:
+        ended = time.perf_counter()
+        window = self.stage_windows.setdefault(name, [])
+        window.append((ended - started) * 1000)
+        if len(window) > 200:
+            del window[: len(window) - 200]
+        return ended
+
     def tick(self) -> None:
         # Stress Lab "engine_fault": a deliberate crash inside the hot path so
         # an evaluator can watch the watchdog contain it live.
@@ -476,15 +488,18 @@ class MarketService:
         # Aurelion's own processing time (scan, score, risk-gate), separate from
         # network/exchange latency already tracked per-book (latencyMs/ageMs).
         decision_started = time.perf_counter()
+        stage_mark = decision_started
         primary = self.primary_books()
         summaries = self.book_summaries(primary)
         stream_snapshot = self.stream_provider.snapshot() if self.stream_provider else {"streams": []}
         self.venue_health.sync(self.settings.exchanges)
         self.venue_health.record_books(summaries, stream_snapshot)
         summaries = self.venue_health.enrich_summaries(summaries)
+        stage_mark = self._record_stage("ingest", stage_mark)
         self.risk.evaluate_market(summaries)
         self.flush_risk_events()
         risk_snapshot = self.risk.snapshot(now_ms())
+        stage_mark = self._record_stage("riskGate", stage_mark)
         if risk_snapshot["paused"]:
             self.last_scan = []
             self.last_executions = []
@@ -498,6 +513,7 @@ class MarketService:
         adjusted_books = self.health_adjusted_book_map()
         primary_map = {book.exchange_id: book for book in adjusted_primary}
         opportunities = self.cross_engine.scan(primary_map) + self.triangular_engine.scan(adjusted_books)
+        stage_mark = self._record_stage("scan", stage_mark)
         ranked = [explain_opportunity(item) for item in self.queue.rank(opportunities)]
         decision_latency_ms = (time.perf_counter() - decision_started) * 1000
         self.decision_latency_window.append(decision_latency_ms)
@@ -507,6 +523,7 @@ class MarketService:
             curated = self.curated_opportunities(ranked)
             self.store.add_opportunities(curated)
             self.record_edge_decisions(curated)
+        stage_mark = self._record_stage("rank", stage_mark)
 
         if self.pre_trade_guard.kill_switch:
             self.last_executions = []
@@ -517,10 +534,12 @@ class MarketService:
             self.edge_ledger.append("trade", self.compact_trade_record(trade))
             self.schedule(self.redis.publish("trades", trade))
         self.flush_risk_events()
+        stage_mark = self._record_stage("execute", stage_mark)
 
         snapshot = self.snapshot()
         self.schedule(self.redis.publish("snapshots", snapshot))
         self.broadcast(snapshot)
+        self._record_stage("publish", stage_mark)
 
     def curated_opportunities(self, ranked: list[dict]) -> list[dict]:
         current = now_ms()
@@ -833,7 +852,7 @@ class MarketService:
                 "universeCount": len(self.settings.exchange_universe),
                 "profile": self.settings.active_exchanges or "all",
             },
-            "latencySlo": latency_slo(books, self.decision_latency_window),
+            "latencySlo": latency_slo(books, self.decision_latency_window, self.stage_windows),
             "venueQuality": venue_quality(books),
             "demoQuality": demo_quality(self.mode, metrics, current - self.started_at, risk_snapshot),
             "edgeLedger": self.edge_ledger.snapshot(),
