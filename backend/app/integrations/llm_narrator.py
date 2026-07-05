@@ -9,18 +9,16 @@ import time
 from backend.app.core.config import Settings
 
 SYSTEM_PROMPT = (
-    "You are Aurelion's trading co-pilot. You ONLY explain the system's current "
-    "decisions in plain, concise language for a non-expert evaluator, and answer "
-    "their questions about the live session. You never give financial advice, never "
-    "predict prices, and never decide trades — the engine decides; you describe. "
-    "Keep answers to 2-4 short sentences, grounded only in the facts provided. Do "
-    "not invent numbers. Vary your phrasing naturally between updates so consecutive "
-    "explanations do not sound identical. IMPORTANT: distinguish the mode. When "
-    "facts.mode is 'demo', say it is a scripted/simulated showcase. When it is "
-    "'auto'/'live', it is REAL markets — if few or no trades happen, explain that "
-    "this is the correct, measured result (fees exceed the edge), not a malfunction, "
-    "and point to the observation data. If facts.degraded is true, warn that live "
-    "was requested but the data on screen is the simulated fallback, not real."
+    "Eres el copiloto de trading de Aurelion. SOLO explicas la decisión actual del "
+    "sistema en español claro y muy breve para un evaluador no experto. Nunca das "
+    "consejos financieros, nunca predices precios y nunca decides operaciones — el "
+    "motor decide; tú describes. RESPONDE EN ESPAÑOL, en 1-2 frases cortas (máximo ~30 "
+    "palabras), basándote solo en los hechos dados; no inventes números. Como se "
+    "actualiza muy rápido, sé conciso. Varía la redacción entre actualizaciones. Si "
+    "facts.mode es 'demo', es una muestra simulada. Si es 'auto'/'live' son mercados "
+    "REALES: si operan pocas o ninguna, es el resultado correcto y medido (las "
+    "comisiones superan al margen), no una falla. Si facts.degraded es verdadero, "
+    "advierte que se pidió modo en vivo pero los datos son el respaldo simulado."
 )
 
 ALLOWED_MODELS = (
@@ -165,185 +163,103 @@ class DecisionNarrator:
             focus.get("id"),
         ))
 
-    def _change_note(self, decision: dict | None) -> str:
-        """Narrate the delta versus the previously narrated decision."""
-        previous = self._prev_decision
-        if not decision or not previous:
-            return ""
-        if previous.get("route") != decision.get("route"):
-            return f"Focus shifted to {decision['route']} from {previous.get('route')}."
-        before = previous.get("netBps")
-        after = decision.get("netBps")
-        if before is None or after is None or abs(after - before) < 0.05:
-            return ""
-        direction = "improved" if after > before else "weakened"
-        return f"Its net edge {direction} from {before} to {after} bps since the last read."
-
     def _fallback_focus_trade(self, focus: dict) -> str:
-        parts: list[str] = [f"Trade {focus['route']} ({focus.get('strategy')}) is recorded as {focus.get('status')}."]
+        """Short Spanish explanation of one executed trade. On-demand (the user
+        clicks 'explicar'), so a little more detail than the live stream is fine."""
+        parts: list[str] = [f"Operación {focus['route']}: {focus.get('status')}."]
         net = focus.get("netProfit")
         if net is not None:
-            parts.append(f"Net P&L: {net:+.4f} after all modeled costs.")
+            parts.append(f"P&L neto {net:+.4f} tras todos los costos modelados.")
         if focus.get("partial"):
             ratio = round((focus.get("filledRatio") or 0) * 100)
-            parts.append(f"It only filled {ratio}% of the target size.")
-        capture = focus.get("edgeCaptureBps")
-        if capture is not None:
-            parts.append(f"It captured {capture} bps of edge after the adverse price move during execution.")
-        exposure = focus.get("legExposureBtc")
-        if exposure:
-            parts.append(
-                f"One leg under-filled, leaving {exposure} BTC of open exposure; the bot covered the residual "
-                f"at a worse price, costing {focus.get('coverCost')} — that correction is included in the net P&L above."
-            )
+            parts.append(f"Solo se llenó el {ratio}% del tamaño objetivo.")
+        if focus.get("legExposureBtc"):
+            parts.append(f"Un tramo se llenó de menos; el bot cubrió el residual (costo {focus.get('coverCost')}).")
         return " ".join(parts)
 
-    def _mode_context(self, ctx: dict) -> str:
-        """One grounded sentence framing WHAT the viewer is looking at, so demo
-        and live never read the same. Demo is a scripted showcase; live is real
-        markets where the honest, measured result is that fees exceed edges."""
-        mode = ctx.get("mode")
-        if mode == "demo":
-            return self._pick([
-                "This is demo mode: a deterministic simulated market that exercises the full engine so every feature is visible on demand.",
-                "You're watching the deterministic demo — a scripted market built to showcase the whole system end to end.",
-            ])
+    def _short_mode_tag(self, ctx: dict) -> str:
+        """A brief Spanish mode note so demo and live never read the same. Kept
+        to a few words — the exception is the live 'fee wall' case, which is the
+        honest measured finding worth stating in full."""
         if ctx.get("degraded"):
-            return (
-                "Heads up: live mode requested real venues but the feed is unavailable here, so the engine is running on the "
-                "simulated fallback — the data on screen is NOT live. Check Data Health / streams."
-            )
-        # Real live/auto mode. Prefer the observation recorder's own numbers — its
-        # capturable count is the honest signal, independent of any cumulative
-        # trade count carried over from a prior demo session.
-        obs = ctx.get("observation")
-        if obs and obs.get("samples"):
-            capturable = obs.get("capturable") or 0
-            base = (
-                f"This is live mode on real venues. Across {obs.get('samples')} samples the observation recorder has seen "
-                f"{obs.get('routes')} routes and {capturable} that cleared the fee wall"
-            )
-            if capturable == 0:
-                best = ctx.get("bestObservedNetBps")
-                tail = f" — the best real edge sits around {best} bps net, short of profitable" if best is not None else ""
-                return (
-                    base + f"{tail}. The engine is correctly refusing to trade: this is the measured finding, not a fault. "
-                    "Watch Live Observation and Wide-Net Radar to see the intelligence working in real time."
-                )
-            return base + ". Those are the routes worth acting on; everything else is below its own costs."
+            return "Respaldo simulado (no en vivo)."
+        mode = ctx.get("mode")
         if mode in ("auto", "live"):
-            return (
-                "This is live mode on real venues — real books, real costs. The engine only trades when an edge survives "
-                "fees, slippage and latency, so quiet stretches mean the market is efficient, not that the bot is idle."
-            )
+            obs = ctx.get("observation")
+            if obs and obs.get("samples") and (obs.get("capturable") or 0) == 0:
+                return (
+                    f"En vivo: 0/{obs.get('routes')} rutas superan el muro de comisiones en "
+                    f"{obs.get('samples')} muestras — hallazgo real, no falla."
+                )
+            return "En vivo (mercados reales)."
+        if mode == "demo":
+            return "Demo simulado."
         return ""
 
     def _fallback(self, ctx: dict) -> str:
-        # Phrasing rotates between grounded variants so consecutive template
-        # narrations don't read identically; every variant carries the same facts.
+        # Deliberately SHORT (1-2 sentences): the panel refreshes fast, so long
+        # text is unreadable. Spanish, grounded only in the facts, phrasing rotated.
         if ctx.get("focusTrade"):
             return self._fallback_focus_trade(ctx["focusTrade"])
-        parts: list[str] = []
-        mode_context = self._mode_context(ctx)
-        if mode_context:
-            parts.append(mode_context)
+        tag = self._short_mode_tag(ctx)
+        decision = ctx.get("decision")
         if ctx.get("paused"):
             reason = ctx.get("riskReason")
-            parts.append(self._pick([
-                f"Execution is paused by the circuit breaker ({reason}); the bot keeps watching the market but opens no new trades until risk clears.",
-                f"The circuit breaker has execution on hold ({reason}). Monitoring continues, and trading re-arms automatically once conditions clear.",
-                f"Trading is paused — the circuit breaker tripped ({reason}). Every book is still being watched while the engine waits it out.",
-            ]))
-        decision = ctx.get("decision")
-        if decision:
+            line = self._pick([
+                f"Ejecución en pausa por el disyuntor ({reason}); el bot sigue observando el mercado.",
+                f"El disyuntor detuvo la ejecución ({reason}); el monitoreo continúa y se rearma solo.",
+            ])
+        elif decision:
             route = decision["route"]
             net = decision.get("netBps")
-            reason = decision.get("reason")
-            confidence_pct = round((decision.get("confidence") or 0) * 100)
+            conf = round((decision.get("confidence") or 0) * 100)
             if decision.get("status") == "profitable":
-                parts.append(self._pick([
-                    f"The top route {route} clears the gates with a net edge of {net} bps after fees, slippage and latency, at {confidence_pct}% confidence.",
-                    f"Best opportunity right now: {route}. After fees, slippage and latency it keeps {net} bps of net edge at {confidence_pct}% confidence, so the engine will take it.",
-                    f"{route} leads the queue — {net} bps of edge survives all modeled costs at {confidence_pct}% confidence.",
-                ]))
+                line = self._pick([
+                    f"{route} pasa los filtros: {net} bps netos tras costos, {conf}% de confianza.",
+                    f"Mejor ruta: {route} — {net} bps netos tras comisiones y latencia ({conf}% conf).",
+                ])
             elif decision.get("status") == "blocked":
-                parts.append(self._pick([
-                    f"The top candidate {route} is blocked: {reason}.",
-                    f"{route} can't run right now — blocked by {reason}.",
-                ]))
+                line = f"{route} bloqueada: {decision.get('reason')}."
             else:
-                parts.append(self._pick([
-                    f"The top candidate {route} is skipped because costs or risk removed the edge ({net} bps net): {reason}.",
-                    f"The engine is passing on {route}: once real costs are charged the edge is {net} bps net ({reason}).",
-                    f"{route} looked interesting but doesn't survive the math — {net} bps net after costs, so it stays rejected ({reason}).",
-                ]))
-            change = self._change_note(decision)
-            if change:
-                parts.append(change)
+                line = self._pick([
+                    f"Se omite {route}: con costos reales el margen es {net} bps netos, insuficiente.",
+                    f"{route} no sobrevive los costos ({net} bps netos), así que se descarta.",
+                ])
         else:
-            parts.append(self._pick([
-                "No actionable opportunity right now — visible spreads do not survive costs.",
-                "Nothing actionable at the moment: every visible spread dies once real costs are applied.",
-                "The scanners are running, but no route currently beats its own costs — standing by.",
-            ]))
+            line = self._pick([
+                "Sin oportunidad accionable: los spreads visibles no sobreviven los costos.",
+                "Nada accionable ahora: cada spread visible muere al aplicar los costos reales.",
+            ])
         if ctx.get("scenarios"):
-            names = ", ".join(ctx["scenarios"])
-            parts.append(self._pick([
-                f"Active stress scenarios: {names}.",
-                f"Stress injected right now ({names}) — watch the defenses react.",
-            ]))
-        # Occasional grounded color so repeated updates feel alive, never invented.
-        pnl = ctx.get("realizedPnl")
-        autonomy = ctx.get("autonomy")
-        if pnl and self._variety.random() < 0.35:
-            parts.append(f"Session P&L stands at {round(float(pnl), 2)}.")
-        elif autonomy and self._variety.random() < 0.3:
-            parts.append(f"Inventory can still fund roughly {autonomy} trades before a rebalance matters.")
-        faults = ctx.get("engineFaultsContained") or 0
-        if faults and self._variety.random() < 0.25:
-            parts.append(self._pick([
-                f"The watchdog has contained {faults} engine fault(s) this session; trading continues normally.",
-                f"Resilience note: {faults} deliberate or real engine fault(s) were absorbed by the watchdog without downtime.",
-            ]))
-        radar = ctx.get("radar")
-        if radar and radar.get("bestRoute") and self._variety.random() < 0.3:
-            parts.append(self._pick([
-                f"On the wide net, the best find across {radar.get('venuesLive')} venues is {radar['bestRoute']} at {radar['bestNetBps']} bps net.",
-                f"The discovery radar is sweeping {radar.get('venuesLive')} venues in the background; {radar['bestRoute']} currently leads at {radar['bestNetBps']} bps net.",
-            ]))
-        models = ctx.get("models", {})
-        parts.append(self._pick([
-            f"Models in use: {models.get('cycleAlgo')} cycle detection, {models.get('slippageModel')} slippage, {models.get('sizingMode')} sizing.",
-            f"Strategy stack: {models.get('cycleAlgo')} cycles, {models.get('slippageModel')} slippage, {models.get('sizingMode')} sizing.",
-        ]))
-        return " ".join(part for part in parts if part)
+            line = f"{line} Estrés: {', '.join(ctx['scenarios'])}."
+        return f"{tag} {line}".strip() if tag else line
 
     def _answer_or_fallback(self, ctx: dict, question: str | None) -> str:
         text = self._fallback(ctx)
         if question:
-            text = f"{text} (Connect an Anthropic API key for detailed question-and-answer.)"
+            text = f"{text} (Conecta una llave API de Anthropic para preguntas y respuestas detalladas.)"
         return text
 
     def _prompt(self, ctx: dict, question: str | None) -> str:
         facts = json.dumps(ctx, default=str)
         if ctx.get("focusTrade"):
             base = (
-                "Explain this specific executed trade (ctx.focusTrade) to a non-expert evaluator: what "
-                "happened, whether it filled cleanly or had a problem (partial fill / leg failure / "
-                "adverse price move), and how that affected its P&L."
+                "Explica en español y en 1-2 frases cortas esta operación ejecutada (ctx.focusTrade) a un "
+                "evaluador no experto: qué pasó, si se llenó limpiamente o tuvo un problema (llenado parcial / "
+                "falla de tramo / movimiento adverso) y cómo afectó su P&L."
             )
             if question:
-                base += f" The evaluator also asked: {question}"
-            return f"{base}\n\nFacts:\n{facts}"
+                base += f" El evaluador también preguntó: {question}"
+            return f"{base}\n\nHechos:\n{facts}"
         if question:
             return (
-                "Answer the evaluator's question about Aurelion's current state, grounded ONLY in these "
-                f"facts. Question: {question}\n\nFacts:\n{facts}"
+                "Responde en español, breve, la pregunta del evaluador sobre el estado actual de Aurelion, "
+                f"basándote SOLO en estos hechos. Pregunta: {question}\n\nHechos:\n{facts}"
             )
         return (
-            "Explain Aurelion's current state to a non-expert hackathon judge. Focus on WHY the top "
-            "opportunity is taken or skipped, and mention the circuit breaker or active stress scenarios "
-            f"if relevant. Facts:\n\n{facts}"
+            "Explica en español y en 1-2 frases cortas el estado actual de Aurelion a un juez no experto. "
+            "Céntrate en POR QUÉ la mejor oportunidad se toma o se omite, y menciona el disyuntor o los "
+            f"escenarios de estrés activos solo si son relevantes. Hechos:\n\n{facts}"
         )
 
     def _call_llm(self, ctx: dict, question: str | None, model: str | None) -> str:

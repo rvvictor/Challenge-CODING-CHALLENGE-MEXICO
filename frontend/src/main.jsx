@@ -43,7 +43,7 @@ function clampRatio(value) {
 
 function ago(ms) {
   const value = Math.max(0, Number(ms) || 0);
-  if (value < 1000) return "now";
+  if (value < 1000) return "ahora";
   if (value < 60000) return `${Math.round(value / 1000)}s`;
   return `${Math.round(value / 60000)}m`;
 }
@@ -54,7 +54,14 @@ function signalAge(item, now) {
 
 function seenAge(item, now) {
   const value = signalAge(item, now);
-  return value === "now" ? "now" : `${value} ago`;
+  return value === "ahora" ? "ahora" : `hace ${value}`;
+}
+
+// Data-source labels shown to the user (Spanish). The book.source field stays
+// its raw value internally; this only affects display.
+const SOURCE_LABELS = { simulated: "simulado", websocket: "websocket", rest: "rest", mixed: "mixto" };
+function sourceLabel(source) {
+  return SOURCE_LABELS[source] || source || "—";
 }
 
 function streamCounts(streams = {}) {
@@ -70,17 +77,17 @@ function streamCounts(streams = {}) {
 function dataFeedLabel(streams = {}, books = [], coverage = {}) {
   const counts = streamCounts(streams);
   const venues = coverage.activeCount || books.length || 0;
-  if (!counts.total && books.some((book) => book.source === "simulated")) return `${venues} demo venues`;
-  if (counts.disabled) return `${counts.disabled} disabled`;
-  if (counts.rest) return `${venues} venues / ${counts.ws} WS / ${counts.rest} REST`;
-  return `${venues} venues / ${counts.ws || books.length} WS streams`;
+  if (!counts.total && books.some((book) => book.source === "simulated")) return `${venues} casas demo`;
+  if (counts.disabled) return `${counts.disabled} deshabilitadas`;
+  if (counts.rest) return `${venues} casas · ${counts.ws} WS · ${counts.rest} REST`;
+  return `${venues} casas · ${counts.ws || books.length} WS`;
 }
 
 function auditLabel(database = {}, redis = {}) {
-  if (database?.postgresReady) return "Postgres audit";
-  if (database?.status === "connected") return `${database.driver || "local"} audit`;
+  if (database?.postgresReady) return "auditoría Postgres";
+  if (database?.status === "connected") return `auditoría ${database.driver || "local"}`;
   if (redis?.enabled) return `Redis ${redis.status}`;
-  return "local audit";
+  return "auditoría local";
 }
 
 function useAurelion() {
@@ -239,39 +246,39 @@ function Header({ snapshot, connected, control, reset, exportSession, onHelp }) 
             <p>Bitcoin Arbitrage Intelligence</p>
           </div>
         </div>
-        <span className={`conn ${connected ? "online" : "offline"}`} role="status" aria-live="polite" title="Live data-feed connection (SSE)"><i aria-hidden="true" />{connected ? "connected" : "syncing"}</span>
+        <span className={`conn ${connected ? "online" : "offline"}`} role="status" aria-live="polite" title="Conexión de datos en vivo (SSE)"><i aria-hidden="true" />{connected ? "conectado" : "sincronizando"}</span>
       </div>
       <div className="modeDock">
-        <div className="segmented" role="group" aria-label="Mode">
+        <div className="segmented" role="group" aria-label="Modo">
           {["auto", "live", "demo"].map((mode) => (
             <button key={mode} className={snapshot?.mode === mode ? "active" : ""} aria-pressed={snapshot?.mode === mode} onClick={() => control({ mode })}>{mode[0].toUpperCase() + mode.slice(1)}</button>
           ))}
         </div>
         {snapshot?.mode !== "demo" && (
           snapshot?.degradedDemo
-            ? <span className="modeTruth degraded" role="status" title="Live requested but real venues are unreachable — data on screen is the simulated fallback">simulated fallback · not live</span>
-            : <span className="modeTruth livedata" role="status" title="Real market data from live venues">real market data</span>
+            ? <span className="modeTruth degraded" role="status" title="Se pidió modo en vivo pero las casas reales no son alcanzables — lo que ves es el respaldo simulado">respaldo simulado · no en vivo</span>
+            : <span className="modeTruth livedata" role="status" title="Datos de mercado reales de casas en vivo">datos reales</span>
         )}
       </div>
       <div className="topPulse">
         <span className="pulseItem good"><b>{formatMoney(metrics.cumulativePnl)}</b><small>P&L</small></span>
-        <span className={`pulseItem ${dataTone}`}><b>{dataFeedLabel(snapshot?.streams, snapshot?.books, snapshot?.exchangeCoverage)}</b><small>data feed</small></span>
-        <span className="pulseItem"><b>{snapshot?.venueHealth?.demotedCount || metrics.demotedVenues || 0}</b><small>demoted</small></span>
-        <span className="pulseItem"><b>{auditLabel(snapshot?.database, snapshot?.redis)}</b><small>audit</small></span>
+        <span className={`pulseItem ${dataTone}`}><b>{dataFeedLabel(snapshot?.streams, snapshot?.books, snapshot?.exchangeCoverage)}</b><small>datos</small></span>
+        <span className="pulseItem"><b>{snapshot?.venueHealth?.demotedCount || metrics.demotedVenues || 0}</b><small>degradadas</small></span>
+        <span className="pulseItem"><b>{auditLabel(snapshot?.database, snapshot?.redis)}</b><small>auditoría</small></span>
       </div>
       <div className="controls">
         <button className={`toggle ${risk?.autoExecution ? "on" : ""}`} onClick={() => control({ autoExecution: !risk?.autoExecution })}>
           {risk?.autoExecution ? <Power size={16} /> : <CirclePause size={16} />}
-          {risk?.autoExecution ? "running" : "paused"}
+          {risk?.autoExecution ? "activo" : "en pausa"}
         </button>
-        <button className={`stressButton ${risk?.paused ? "active" : ""}`} title="Simulate volatility circuit breaker" onClick={() => control({ volatilityShock: true })}>
+        <button className={`stressButton ${risk?.paused ? "active" : ""}`} title="Simular el disyuntor de volatilidad" onClick={() => control({ volatilityShock: true })}>
           <Zap size={16} />
-          {risk?.paused ? "risk active" : "volatility"}
+          {risk?.paused ? "riesgo activo" : "volatilidad"}
         </button>
         <button type="button" className="iconButton helpButton" title="¿Qué es esto? (introducción)" aria-label="Abrir la introducción" onClick={onHelp}>?</button>
-        <button type="button" className="iconButton" title="Export audit session" aria-label="Export audit session" onClick={exportSession}><FileDown size={17} /></button>
-        <a className="iconButton" title="Session report (HTML)" aria-label="Open session report" href={`${API_BASE}/api/export/report`} target="_blank" rel="noreferrer"><ListChecks size={17} /></a>
-        <button type="button" className="iconButton" title="Reset session" aria-label="Reset session" onClick={reset}><RefreshCw size={17} /></button>
+        <button type="button" className="iconButton" title="Exportar sesión de auditoría" aria-label="Exportar sesión de auditoría" onClick={exportSession}><FileDown size={17} /></button>
+        <a className="iconButton" title="Reporte de sesión (HTML)" aria-label="Abrir reporte de sesión" href={`${API_BASE}/api/export/report`} target="_blank" rel="noreferrer"><ListChecks size={17} /></a>
+        <button type="button" className="iconButton" title="Reiniciar sesión" aria-label="Reiniciar sesión" onClick={reset}><RefreshCw size={17} /></button>
       </div>
     </header>
   );
@@ -281,26 +288,26 @@ function Overview({ snapshot }) {
   const metrics = snapshot.metrics;
   const risk = snapshot.risk;
   const best = topDecision(snapshot.queuedOpportunities || []);
-  const stateLabel = risk.paused ? "Risk Paused" : risk.autoExecution ? "Running" : "Manual Pause";
-  const condition = risk.condition && risk.condition !== "healthy" ? risk.condition : "healthy";
+  const stateLabel = risk.paused ? "Riesgo en pausa" : risk.autoExecution ? "Activo" : "Pausa manual";
+  const condition = risk.condition && risk.condition !== "healthy" ? risk.condition : "sano";
   const stateNote = risk.paused
-    ? `${condition} / ${risk.reason} / resumes in ${ago(risk.cooldownRemainingMs ?? risk.pausedUntil - snapshot.now)}`
-    : `risk ${formatMoney(risk.riskBudgetUsedUsd || 0)} / ${formatMoney(risk.riskBudgetHourUsd || 0)}`;
+    ? `${condition} · ${risk.reason} · reanuda en ${ago(risk.cooldownRemainingMs ?? risk.pausedUntil - snapshot.now)}`
+    : `riesgo ${formatMoney(risk.riskBudgetUsedUsd || 0)} / ${formatMoney(risk.riskBudgetHourUsd || 0)}`;
   const freshness = Math.max(0, metrics.avgFreshnessMs ?? metrics.avgLatencyMs);
-  const bestEdge = metrics.bestNetBps > 0 ? `${formatNumber(metrics.bestNetBps, 2)} bps` : "No edge";
+  const bestEdge = metrics.bestNetBps > 0 ? `${formatNumber(metrics.bestNetBps, 2)} bps` : "Sin margen";
   const observed = metrics.bestNetBps > 0
-    ? `EV ${formatMoney(best?.expectedValue || best?.netProfit || 0)} / capture ${formatPercent(best?.latencyCaptureProbability || best?.edgeBreakdown?.latencyCaptureProbability || 0)}`
+    ? `EV ${formatMoney(best?.expectedValue || best?.netProfit || 0)} · captura ${formatPercent(best?.latencyCaptureProbability || best?.edgeBreakdown?.latencyCaptureProbability || 0)}`
     : metrics.bestObservedNetBps < 0
-      ? `${formatNumber(Math.abs(metrics.bestObservedNetBps), 2)} bps short`
-      : "waiting for complete books";
+      ? `${formatNumber(Math.abs(metrics.bestObservedNetBps), 2)} bps corto`
+      : "esperando libros completos";
   return (
     <section className="overview">
-      <Metric icon={ChartNoAxesCombined} label="Realized P&L" value={formatMoney(metrics.cumulativePnl)} note={`${metrics.executedCount} executed trades`} tone={metrics.cumulativePnl >= 0 ? "good" : "bad"} />
-      <Metric icon={ShieldAlert} label="Bot Status" value={stateLabel} note={stateNote} tone={risk.paused || !risk.autoExecution ? "bad" : "good"} />
-      <Metric icon={Radar} label="Best Opportunity" value={bestEdge} note={observed} />
-      <Metric icon={ArrowRightLeft} label="Detected Signals" value={compact.format(metrics.detectedCount)} note={`${metrics.liveSignalCount || 0} happening now`} />
-      <Metric icon={Gauge} label="Speed" value={`${Math.round(freshness)} ms`} note={`freshness p95 ${Math.max(0, Math.round(metrics.p95FreshnessMs || freshness))} ms`} tone={(metrics.staleBooks || 0) > 0 ? "bad" : "neutral"} />
-      <Metric icon={DatabaseZap} label="Data Health" value={dataFeedLabel(snapshot.streams, snapshot.books, snapshot.exchangeCoverage)} note={`${metrics.demotedVenues || 0} venues demoted`} tone={(metrics.staleBooks || 0) > 0 || (metrics.demotedVenues || 0) > 0 ? "bad" : "neutral"} />
+      <Metric icon={ChartNoAxesCombined} label="P&L realizado" value={formatMoney(metrics.cumulativePnl)} note={`${metrics.executedCount} operaciones`} tone={metrics.cumulativePnl >= 0 ? "good" : "bad"} />
+      <Metric icon={ShieldAlert} label="Estado del bot" value={stateLabel} note={stateNote} tone={risk.paused || !risk.autoExecution ? "bad" : "good"} />
+      <Metric icon={Radar} label="Mejor oportunidad" value={bestEdge} note={observed} />
+      <Metric icon={ArrowRightLeft} label="Señales detectadas" value={compact.format(metrics.detectedCount)} note={`${metrics.liveSignalCount || 0} ahora mismo`} />
+      <Metric icon={Gauge} label="Velocidad" value={`${Math.round(freshness)} ms`} note={`frescura p95 ${Math.max(0, Math.round(metrics.p95FreshnessMs || freshness))} ms`} tone={(metrics.staleBooks || 0) > 0 ? "bad" : "neutral"} />
+      <Metric icon={DatabaseZap} label="Salud de datos" value={dataFeedLabel(snapshot.streams, snapshot.books, snapshot.exchangeCoverage)} note={`${metrics.demotedVenues || 0} casas degradadas`} tone={(metrics.staleBooks || 0) > 0 || (metrics.demotedVenues || 0) > 0 ? "bad" : "neutral"} />
     </section>
   );
 }
@@ -316,7 +323,7 @@ function ModeBanner({ snapshot }) {
     return (
       <div className="modeBanner degraded" role="status">
         <ShieldAlert size={15} />
-        <span><b>Live requested, but real venues are unreachable here</b> — the market on screen is the deterministic simulated fallback, not live data. Everything still functions; the numbers are simulated.</span>
+        <span><b>Se pidió modo en vivo, pero las casas reales no son alcanzables aquí</b> — el mercado en pantalla es el respaldo simulado determinista, no datos en vivo. Todo sigue funcionando; las cifras son simuladas.</span>
       </div>
     );
   }
@@ -328,10 +335,10 @@ function ModeBanner({ snapshot }) {
     <div className="modeBanner live" role="status">
       <Activity size={15} />
       <span>
-        <b>Live on real venues.</b> The engine only trades when an edge survives fees, slippage and latency.
-        {obs.recording ? ` Observation: ${obs.routesObserved || 0} routes tracked, ${obs.capturableRoutes || 0} clearing the fee wall` : " Warming up the observation recorder"}
-        {bestReal != null ? ` · best real edge ${formatNumber(bestReal, 1)} bps net` : ""}
-        {(obs.capturableRoutes === 0) ? " — this is the measured finding, not a fault. See Wide-Net Radar & Live Observation." : "."}
+        <b>En vivo sobre casas reales.</b> El motor solo opera cuando un margen sobrevive comisiones, deslizamiento y latencia.
+        {obs.recording ? ` Observación: ${obs.routesObserved || 0} rutas seguidas, ${obs.capturableRoutes || 0} superan el muro de comisiones` : " Calentando el registro de observación"}
+        {bestReal != null ? ` · mejor margen real ${formatNumber(bestReal, 1)} bps neto` : ""}
+        {(obs.capturableRoutes === 0) ? " — este es el hallazgo medido, no una falla. Ver Radar de red amplia y Observación en vivo." : "."}
       </span>
     </div>
   );
@@ -340,24 +347,24 @@ function ModeBanner({ snapshot }) {
 function Books({ books }) {
   return (
     <section className="surface books" id="market">
-      <PanelTitle icon={Activity} title="Live Market" pill={`${books.length} venues`} />
+      <PanelTitle icon={Activity} title="Mercado en vivo" pill={`${books.length} casas`} />
       <div className="bookGrid">
         {books.map((book) => (
           <article className={`book ${book.source}`} key={book.exchangeId}>
             <div className="bookHead">
               <div><strong>{book.exchangeName}</strong><span>{book.symbol}</span></div>
-              <em>{book.source}</em>
+              <em>{sourceLabel(book.source)}</em>
             </div>
             <div className="quote">
-              <span>Bid</span><b className="green">{formatMoney(book.bestBid)}</b>
+              <span>Compra</span><b className="green">{formatMoney(book.bestBid)}</b>
             </div>
             <div className="quote">
-              <span>Ask</span><b className="red">{formatMoney(book.bestAsk)}</b>
+              <span>Venta</span><b className="red">{formatMoney(book.bestAsk)}</b>
             </div>
             <div className="micro">
               <span>{formatBtc(book.depthBid)}</span>
-              <span>{Math.round(book.ageMs)} ms age</span>
-              <span>{Math.round(book.latencyMs)} ms upd</span>
+              <span>{Math.round(book.ageMs)} ms edad</span>
+              <span>{Math.round(book.latencyMs)} ms act</span>
             </div>
           </article>
         ))}
@@ -382,14 +389,14 @@ function RouteLabel({ item }) {
       <span className="routeStack">
         <b>{item.exchange} triangular</b>
         <span className="cyclePath">{path.map((node, index) => <React.Fragment key={`${node}-${index}`}><i>{node}</i>{index < path.length - 1 && <ArrowRightLeft size={12} />}</React.Fragment>)}</span>
-        <small>{item.dynamicCycle || path.length > 4 ? `dynamic ${path.length - 1}-leg cycle / ` : ""}{item.legs?.map((leg) => leg.symbol).join(" / ") || item.product}</small>
+        <small>{item.dynamicCycle || path.length > 4 ? `ciclo dinámico de ${path.length - 1} tramos · ` : ""}{item.legs?.map((leg) => leg.symbol).join(" / ") || item.product}</small>
       </span>
     );
   }
   return (
     <span className="routeStack">
       <b>{item.buyExchange} {"->"} {item.sellExchange}</b>
-      <small>{formatMoney(item.buyPrice)} buy / {formatMoney(item.sellPrice)} sell</small>
+      <small>{formatMoney(item.buyPrice)} compra / {formatMoney(item.sellPrice)} venta</small>
     </span>
   );
 }
@@ -400,8 +407,8 @@ function opportunitySize(item) {
 }
 
 function opportunityTarget(item) {
-  if (item.strategy === "triangular") return `target ${formatMoney(item.targetQuote || item.quoteIn)}`;
-  return `target ${formatBtc(item.targetQtyBtc || item.qtyBtc)}`;
+  if (item.strategy === "triangular") return `objetivo ${formatMoney(item.targetQuote || item.quoteIn)}`;
+  return `objetivo ${formatBtc(item.targetQtyBtc || item.qtyBtc)}`;
 }
 
 function statusClass(item) {
@@ -411,37 +418,37 @@ function statusClass(item) {
 }
 
 function statusLabel(item) {
-  if (item.status === "profitable" && item.partial) return "profitable partial";
-  if (item.status === "profitable") return "profitable";
-  if (item.status === "blocked" && `${item.reason}`.toLowerCase().includes("wallet")) return "inventory";
-  if (item.status === "blocked") return "liquidity";
-  if (item.status === "rejected") return "rejected";
+  if (item.status === "profitable" && item.partial) return "rentable parcial";
+  if (item.status === "profitable") return "rentable";
+  if (item.status === "blocked" && `${item.reason}`.toLowerCase().includes("wallet")) return "inventario";
+  if (item.status === "blocked") return "liquidez";
+  if (item.status === "rejected") return "rechazada";
   return item.status;
 }
 
 function statusHelp(item) {
-  if (item.status === "profitable" && item.partial) return `${formatPercent(clampRatio(item.filledRatio))} liquidity`;
-  if (item.status === "profitable") return "ready to execute";
-  if (item.status === "blocked") return item.reason || "insufficient inventory or depth";
+  if (item.status === "profitable" && item.partial) return `${formatPercent(clampRatio(item.filledRatio))} de liquidez`;
+  if (item.status === "profitable") return "lista para ejecutar";
+  if (item.status === "blocked") return item.reason || "inventario o profundidad insuficientes";
   return item.reason;
 }
 
 function decisionActionLabel(item) {
   const action = item?.decision?.action;
-  if (action === "execute-partial") return "Execute partial";
-  if (action === "execute-full") return "Execute full";
-  if (action === "inventory-gate") return "Wait inventory";
-  if (action === "liquidity-gate") return "Wait liquidity";
-  if (action === "skip-costs") return "Skip";
+  if (action === "execute-partial") return "Ejecutar parcial";
+  if (action === "execute-full") return "Ejecutar completo";
+  if (action === "inventory-gate") return "Esperar inventario";
+  if (action === "liquidity-gate") return "Esperar liquidez";
+  if (action === "skip-costs") return "Omitir";
   return statusLabel(item || {});
 }
 
 function decisionCaption(item) {
   if (!item) return "";
-  if (item.status === "profitable" && item.partial) return "Profitable, with limited executable liquidity.";
-  if (item.status === "profitable") return "Profitable after fees, slippage and latency.";
-  if (item.status === "blocked") return "A hard inventory or depth gate blocked execution.";
-  return "Total cost consumes the observed spread.";
+  if (item.status === "profitable" && item.partial) return "Rentable, con liquidez ejecutable limitada.";
+  if (item.status === "profitable") return "Rentable tras comisiones, deslizamiento y latencia.";
+  if (item.status === "blocked") return "Un límite de inventario o profundidad bloqueó la ejecución.";
+  return "El costo total consume el margen observado.";
 }
 
 function OpportunityTable({ opportunities, queue = {}, now }) {
@@ -450,32 +457,32 @@ function OpportunityTable({ opportunities, queue = {}, now }) {
   const rows = fallback.slice(0, 7);
   return (
     <section className="surface queue" id="opportunities">
-      <PanelTitle icon={Triangle} title="Priority Queue" pill={queue.paused ? "risk paused" : `${queue.executable || 0} executable`} />
+      <PanelTitle icon={Triangle} title="Cola de prioridad" pill={queue.paused ? "riesgo en pausa" : `${queue.executable || 0} ejecutables`} />
       <div className="queueStats">
-        <span><b>{queue.received || 0}</b> analyzed</span>
-        <span><b>{queue.deduped || 0}</b> deduped</span>
-        <span><b>{queue.executable || 0}</b> ready</span>
-        <span><b>{queue.queued || 0}</b> ranked</span>
+        <span><b>{queue.received || 0}</b> analizadas</span>
+        <span><b>{queue.deduped || 0}</b> sin duplicar</span>
+        <span><b>{queue.executable || 0}</b> listas</span>
+        <span><b>{queue.queued || 0}</b> en ranking</span>
       </div>
       <div className="table">
-        <div className="thead"><span>Route</span><span>Size</span><span>Net Profit</span><span>EV</span><span>Status</span></div>
+        <div className="thead"><span>Ruta</span><span>Tamaño</span><span>Ganancia neta</span><span>EV</span><span>Estado</span></div>
         {rows.map((opportunity) => (
           <div className="tr" key={opportunity.id}>
             <span className="routeStack">
               <RouteLabel item={opportunity} />
-              <small className={now - opportunity.time <= 1500 ? "liveStamp on" : "liveStamp"}><Clock3 size={12} /> seen {seenAge(opportunity, now)}</small>
+              <small className={now - opportunity.time <= 1500 ? "liveStamp on" : "liveStamp"}><Clock3 size={12} /> vista {seenAge(opportunity, now)}</small>
             </span>
             <span>
               <b>{opportunitySize(opportunity)}</b>
-              <small>{opportunity.partial ? `${formatPercent(clampRatio(opportunity.filledRatio))} of target` : opportunityTarget(opportunity)}</small>
+              <small>{opportunity.partial ? `${formatPercent(clampRatio(opportunity.filledRatio))} del objetivo` : opportunityTarget(opportunity)}</small>
             </span>
             <span className={opportunity.netProfit >= 0 ? "green" : "red"}>
               {formatMoney(opportunity.netProfit)}
-              <small>{formatNumber(opportunity.netBps, 2)} bps / costs {formatMoney(opportunity.costs?.totalCosts)}</small>
+              <small>{formatNumber(opportunity.netBps, 2)} bps · costos {formatMoney(opportunity.costs?.totalCosts)}</small>
             </span>
             <span>
               <b>{formatMoney(opportunity.expectedValue ?? opportunity.netProfit)}</b>
-              <small>{formatNumber(opportunity.evBps ?? opportunity.netBps, 2)} bps / conf {formatNumber(opportunity.confidence, 2)}</small>
+              <small>{formatNumber(opportunity.evBps ?? opportunity.netBps, 2)} bps · conf {formatNumber(opportunity.confidence, 2)}</small>
             </span>
             <span>
               <em className={`badge ${statusClass(opportunity)}`}>{statusLabel(opportunity)}</em>
@@ -483,7 +490,7 @@ function OpportunityTable({ opportunities, queue = {}, now }) {
             </span>
           </div>
         ))}
-        {!rows.length && <div className="tableEmpty">{queue.paused ? "Execution paused: Aurelion keeps reading the market, but does not generate new signals until risk clears." : "No ranked opportunities yet."}</div>}
+        {!rows.length && <div className="tableEmpty">{queue.paused ? "Ejecución en pausa: Aurelion sigue leyendo el mercado, pero no genera nuevas señales hasta que el riesgo se despeje." : "Aún no hay oportunidades en el ranking."}</div>}
       </div>
     </section>
   );
@@ -504,8 +511,8 @@ function EdgeExplainability({ opportunities = [] }) {
   if (!item) {
     return (
       <section className="surface edgePanel" id="decision">
-        <PanelTitle icon={Radar} title="Current Decision" pill="waiting" />
-        <div className="empty">No ranked routes yet</div>
+        <PanelTitle icon={Radar} title="Decisión actual" pill="esperando" />
+        <div className="empty">Aún no hay rutas en el ranking</div>
       </section>
     );
   }
@@ -513,7 +520,7 @@ function EdgeExplainability({ opportunities = [] }) {
   const breakdown = item.edgeBreakdown || {};
   return (
     <section className="surface edgePanel" id="decision">
-      <PanelTitle icon={Radar} title="Current Decision" pill={`grade ${decision.scoreGrade || "D"}`} />
+      <PanelTitle icon={Radar} title="Decisión actual" pill={`grado ${decision.scoreGrade || "D"}`} />
       <div className="edgeBody">
         <div className={`decisionStamp ${statusClass(item)}`}>
           <b>{decisionActionLabel(item)}</b>
@@ -521,14 +528,14 @@ function EdgeExplainability({ opportunities = [] }) {
         </div>
         <div className="edgeRoute">
           <RouteLabel item={item} />
-          <small>{formatNumber(breakdown.netBps, 2)} bps net / {formatNumber(breakdown.costDragPct, 1)}% cost drag / {formatNumber(breakdown.latencyMs, 0)} ms</small>
+          <small>{formatNumber(breakdown.netBps, 2)} bps neto · {formatNumber(breakdown.costDragPct, 1)}% costo · {formatNumber(breakdown.latencyMs, 0)} ms</small>
           <div className="evStrip">
             <span>EV <b>{formatMoney(item.expectedValue ?? breakdown.expectedValue ?? item.netProfit)}</b></span>
-            <span>capture <b>{formatPercent(item.latencyCaptureProbability ?? breakdown.latencyCaptureProbability ?? 0)}</b></span>
+            <span>captura <b>{formatPercent(item.latencyCaptureProbability ?? breakdown.latencyCaptureProbability ?? 0)}</b></span>
             <span>{formatNumber(item.evBps ?? breakdown.evBps ?? item.netBps, 2)} EV bps</span>
             {decision.captureConfidence != null && (
-              <span title={`Ensemble model: ${decision.captureConfidenceModel || "combined probabilities"}`}>
-                confidence <b className={decision.captureConfidence >= 0.5 ? "green" : ""}>{formatPercent(decision.captureConfidence)}</b>
+              <span title={`Modelo de ensamble: ${decision.captureConfidenceModel || "probabilidades combinadas"}`}>
+                confianza <b className={decision.captureConfidence >= 0.5 ? "green" : ""}>{formatPercent(decision.captureConfidence)}</b>
               </span>
             )}
           </div>
@@ -553,25 +560,25 @@ function RealityCheck({ opportunities = [] }) {
   if (!item || !reality) {
     return (
       <section className="surface realityPanel" id="reality">
-        <PanelTitle icon={ArrowRightLeft} title="Real Costs" pill="no route" />
-        <div className="empty">No route to review</div>
+        <PanelTitle icon={ArrowRightLeft} title="Costos reales" pill="sin ruta" />
+        <div className="empty">No hay ruta para revisar</div>
       </section>
     );
   }
   return (
     <section className="surface realityPanel" id="reality">
-      <PanelTitle icon={ArrowRightLeft} title="Real Costs" pill={reality.verdict} />
+      <PanelTitle icon={ArrowRightLeft} title="Costos reales" pill={reality.verdict} />
       <div className="realityGrid">
         <article>
-          <span>Prefunded</span>
+          <span>Prefinanciado</span>
           <b className={reality.prefundedNetProfit >= 0 ? "green" : "red"}>{formatMoney(reality.prefundedNetProfit)}</b>
         </article>
         <article>
-          <span>Settlement Net</span>
+          <span>Neto liquidado</span>
           <b className={reality.settlementNetProfit >= 0 ? "green" : "red"}>{formatMoney(reality.settlementNetProfit)}</b>
         </article>
         <article>
-          <span>Extra Cost</span>
+          <span>Costo extra</span>
           <b>{formatMoney(reality.settlementDrag)}</b>
           <small>{formatNumber(reality.settlementDragBps, 2)} bps</small>
         </article>
@@ -583,15 +590,15 @@ function RealityCheck({ opportunities = [] }) {
 function OpportunityHistory({ opportunities = [], metrics = {}, now }) {
   const [filter, setFilter] = React.useState("all");
   const filters = [
-    ["all", "All"],
-    ["live", "Now"],
-    ["profitable", "Profitable"],
-    ["rejected", "Rejected"],
-    ["cross", "Cross"],
-    ["partial-cross", "Partial Cross"],
-    ["partial", "Partials"],
+    ["all", "Todas"],
+    ["live", "Ahora"],
+    ["profitable", "Rentables"],
+    ["rejected", "Rechazadas"],
+    ["cross", "Cruce"],
+    ["partial-cross", "Cruce parcial"],
+    ["partial", "Parciales"],
     ["triangular", "Triangular"],
-    ["dynamic", "Dynamic 4-leg"],
+    ["dynamic", "Dinámico 4 tramos"],
   ];
   const filtered = opportunities.filter((item) => {
     if (filter === "all") return true;
@@ -605,8 +612,8 @@ function OpportunityHistory({ opportunities = [], metrics = {}, now }) {
   const rows = filtered.slice(0, 18);
   return (
     <section className="surface history" id="signals">
-      <PanelTitle icon={ListChecks} title="Signal History" pill={`${rows.length} recent`} />
-      <div className="historyToolbar" role="group" aria-label="Filter signals">
+      <PanelTitle icon={ListChecks} title="Historial de señales" pill={`${rows.length} recientes`} />
+      <div className="historyToolbar" role="group" aria-label="Filtrar señales">
         {filters.map(([id, label]) => (
           <button className={filter === id ? "active" : ""} aria-pressed={filter === id} key={id} onClick={() => setFilter(id)} type="button">{label}</button>
         ))}
@@ -621,11 +628,11 @@ function OpportunityHistory({ opportunities = [], metrics = {}, now }) {
             </span>
             <span className="historyMeta">
               <em className={`badge ${statusClass(item)}`}>{statusLabel(item)}</em>
-              <small className={now - item.time <= 1500 ? "liveStamp on" : "liveStamp"}><Clock3 size={12} /> seen {seenAge(item, now)}</small>
+              <small className={now - item.time <= 1500 ? "liveStamp on" : "liveStamp"}><Clock3 size={12} /> vista {seenAge(item, now)}</small>
             </span>
           </article>
         ))}
-        {!rows.length && <div className="empty">No signals match this filter</div>}
+        {!rows.length && <div className="empty">Ninguna señal coincide con este filtro</div>}
       </div>
     </section>
   );
@@ -633,21 +640,21 @@ function OpportunityHistory({ opportunities = [], metrics = {}, now }) {
 
 function Streams({ streams, redis }) {
   const rows = streams.streams || [];
-  const redisLabel = redis.enabled ? redis.status : "optional off";
+  const redisLabel = redis.enabled ? redis.status : "opcional apagado";
   const streamTone = (stream) => stream.disabled ? "disabled" : stream.restFallback ? "rest" : "ws";
   return (
     <section className="surface streams">
-      <PanelTitle icon={DatabaseZap} title="Infrastructure" pill={redisLabel} />
+      <PanelTitle icon={DatabaseZap} title="Infraestructura" pill={redisLabel} />
       <div className="streamList">
         {rows.slice(0, 12).map((stream) => (
           <article className="stream" key={stream.key}>
             <b>{stream.exchangeName}</b>
             <span>{stream.symbol}</span>
             <em className={streamTone(stream)}>{stream.mode}</em>
-            <small>{stream.disabledReason || `${stream.updates} updates / ${stream.failures} failures`}</small>
+            <small>{stream.disabledReason || `${stream.updates} actualizaciones / ${stream.failures} fallas`}</small>
           </article>
         ))}
-        {!rows.length && <div className="empty">{streams.unavailableReason || "No stream telemetry"}</div>}
+        {!rows.length && <div className="empty">{streams.unavailableReason || "Sin telemetría de streams"}</div>}
       </div>
     </section>
   );
@@ -656,20 +663,20 @@ function Streams({ streams, redis }) {
 function GlobalMarket({ globalMarket }) {
   return (
     <section className="surface">
-      <PanelTitle icon={Globe2} title="Global Context" pill={globalMarket.status || "loading"} />
+      <PanelTitle icon={Globe2} title="Contexto global" pill={globalMarket.status || "cargando"} />
       <div className="globalGrid">
         <article>
-          <span>BTC reference</span>
+          <span>Referencia BTC</span>
           <b>{formatMoney(globalMarket.btcUsd)}</b>
           <small className={globalMarket.btcChange24h >= 0 ? "green" : "red"}>{formatNumber(globalMarket.btcChange24h, 2)}% 24h</small>
         </article>
         <article>
-          <span>ETH reference</span>
+          <span>Referencia ETH</span>
           <b>{formatMoney(globalMarket.ethUsd)}</b>
           <small className={globalMarket.ethChange24h >= 0 ? "green" : "red"}>{formatNumber(globalMarket.ethChange24h, 2)}% 24h</small>
         </article>
         <article>
-          <span>BTC market cap</span>
+          <span>Cap. de mercado BTC</span>
           <b>{compact.format(globalMarket.btcMarketCap || 0)}</b>
           <small>{globalMarket.source || "CoinGecko"}</small>
         </article>
@@ -684,63 +691,63 @@ function LatencySloPanel({ slo = {} }) {
   const decision = slo.decisionMs;
   return (
     <section className={`surface sloPanel ${slo.status || "green"}`} id="speed">
-      <PanelTitle icon={Gauge} title="Speed" pill={slo.summary || "loading"} />
+      <PanelTitle icon={Gauge} title="Velocidad" pill={slo.summary || "cargando"} />
       <div className="sloGrid">
         <article>
-          <span>Book age p95</span>
+          <span>Edad libro p95</span>
           <b>{Math.round(age.p95 || 0)} ms</b>
-          <small>target {Math.round(age.targetP95 || 0)} ms</small>
+          <small>objetivo {Math.round(age.targetP95 || 0)} ms</small>
         </article>
         <article>
-          <span>Update p95</span>
+          <span>Actualización p95</span>
           <b>{Math.round(update.p95 || 0)} ms</b>
-          <small>target {Math.round(update.targetP95 || 0)} ms</small>
+          <small>objetivo {Math.round(update.targetP95 || 0)} ms</small>
         </article>
       </div>
       {decision && (
         <div className="sloDecision">
-          <span>Aurelion decision time (scan + score + risk-gate, ex. network)</span>
+          <span>Tiempo de decisión de Aurelion (escaneo + score + gate de riesgo, sin red)</span>
           <b>{formatNumber(decision.p50, 2)} ms p50 · {formatNumber(decision.p95, 2)} ms p95</b>
         </div>
       )}
       {slo.stages && (
-        <div className="sloStages" title="Where each millisecond of a decision goes (p50)">
+        <div className="sloStages" title="Dónde se va cada milisegundo de una decisión (p50)">
           {STAGE_ORDER.map(([key, label]) => slo.stages[key] && (
             <span key={key}><em>{label}</em><b>{formatNumber(slo.stages[key].p50, 2)}</b></span>
           ))}
         </div>
       )}
       <div className="sloStrip">
-        <span>p50 age {Math.round(age.p50 || 0)} ms</span>
-        <span>p99 age {Math.round(age.p99 || 0)} ms</span>
-        <span>p99 upd {Math.round(update.p99 || 0)} ms</span>
+        <span>p50 edad {Math.round(age.p50 || 0)} ms</span>
+        <span>p99 edad {Math.round(age.p99 || 0)} ms</span>
+        <span>p99 act {Math.round(update.p99 || 0)} ms</span>
       </div>
     </section>
   );
 }
 
 const STAGE_ORDER = [
-  ["ingest", "ingest"],
-  ["riskGate", "risk"],
-  ["scan", "scan"],
-  ["rank", "rank"],
-  ["execute", "exec"],
-  ["publish", "publish"],
+  ["ingest", "ingesta"],
+  ["riskGate", "riesgo"],
+  ["scan", "escaneo"],
+  ["rank", "ranking"],
+  ["execute", "ejec"],
+  ["publish", "publica"],
 ];
 
 function DemoQualityPanel({ quality = {}, mode }) {
   const tone = scoreTone(Number(quality.score || 0));
   return (
     <section className={`surface qualityPanel ${tone}`}>
-      <PanelTitle icon={Sparkles} title="Demo Quality" pill={mode === "demo" ? quality.label || "loading" : "observing"} />
+      <PanelTitle icon={Sparkles} title="Calidad del demo" pill={mode === "demo" ? quality.label || "cargando" : "observando"} />
       <div className="qualityDial">
         <b>{Math.round(quality.score || 0)}</b>
-        <span>quality</span>
+        <span>calidad</span>
       </div>
       <div className="qualityStats">
         <span>{formatMoney(quality.pnlPerMinute || 0)} / min</span>
-        <span>{formatNumber(quality.fillsPerMinute || 0, 2)} fills / min</span>
-        <span>{formatPercent(quality.partialRate || 0)} partial</span>
+        <span>{formatNumber(quality.fillsPerMinute || 0, 2)} llenados / min</span>
+        <span>{formatPercent(quality.partialRate || 0)} parcial</span>
       </div>
     </section>
   );
@@ -760,8 +767,8 @@ function ExchangeCoverage({ coverage = {}, quality = [], health = {}, control })
   };
   return (
     <section className="surface" id="exchanges">
-      <PanelTitle icon={Network} title="Exchanges" pill={`${coverage.activeCount || active.size} active / ${health.demotedCount || 0} demoted`} />
-      <div className="coverageGrid" role="group" aria-label="Active exchanges (2-5)">
+      <PanelTitle icon={Network} title="Casas de cambio" pill={`${coverage.activeCount || active.size} activas · ${health.demotedCount || 0} degradadas`} />
+      <div className="coverageGrid" role="group" aria-label="Casas activas (2-5)">
         {universe.map((exchange) => {
           const venue = qualityById.get(exchange.id);
           const healthRow = healthById.get(exchange.id);
@@ -769,7 +776,7 @@ function ExchangeCoverage({ coverage = {}, quality = [], health = {}, control })
           return (
             <button className={`${active.has(exchange.id) ? "active" : ""} ${healthStatus}`} aria-pressed={active.has(exchange.id)} disabled={!active.has(exchange.id) && active.size >= 5} key={exchange.id} onClick={() => toggle(exchange)} type="button">
               <b>{exchange.name}</b>
-              <span>{venue ? `${healthStatus} / ${venue.latencyMs} ms / q ${venue.score}` : active.has(exchange.id) ? "speed profile" : "coverage catalog"}</span>
+              <span>{venue ? `${venue.latencyMs} ms · cal ${venue.score}` : active.has(exchange.id) ? "perfil de velocidad" : "en catálogo"}</span>
             </button>
           );
         })}
@@ -871,7 +878,7 @@ function PnlChart({ series }) {
       ctx.fillStyle = "#66736d";
       ctx.font = "700 12px Aptos, Segoe UI, sans-serif";
       ctx.textAlign = "left";
-      ctx.fillText("Waiting for the first trade", chartLeft, rect.height - 13);
+      ctx.fillText("Esperando la primera operación", chartLeft, rect.height - 13);
     }
   }, [series]);
   return <canvas className="chart" ref={ref} />;
@@ -886,20 +893,20 @@ function SystemStatus({ snapshot }) {
   const ratio = limit > 0 ? Math.min(1, used / limit) : 0;
   return (
     <section className="surface systemStatus">
-      <PanelTitle icon={DatabaseZap} title="System" pill={risk.paused ? "halted" : "armed"} />
+      <PanelTitle icon={DatabaseZap} title="Sistema" pill={risk.paused ? "detenido" : "armado"} />
       <div className="systemGrid">
         <article>
-          <span>Market data</span>
+          <span>Datos de mercado</span>
           <b>{dataFeedLabel(snapshot.streams, snapshot.books, snapshot.exchangeCoverage)}</b>
-          <small>{counts.total || snapshot.books.length} streams watched</small>
+          <small>{counts.total || snapshot.books.length} streams vigilados</small>
         </article>
         <article>
-          <span>Audit trail</span>
+          <span>Rastro de auditoría</span>
           <b>{auditLabel(database, snapshot.redis)}</b>
           <small>{database.status || "local"} / {snapshot.redis?.enabled ? snapshot.redis.status : "SSE"}</small>
         </article>
         <article className="riskBudget">
-          <span>Risk budget</span>
+          <span>Presupuesto de riesgo</span>
           <b>{formatMoney(used)} / {formatMoney(limit)}</b>
           <i style={{ "--fill": `${ratio * 100}%` }} />
         </article>
@@ -917,30 +924,30 @@ function ResiliencePanel({ engineHealth = {}, continuity = {} }) {
   const armed = engineHealth.watchdog === "armed";
   return (
     <section className="surface resiliencePanel" id="resilience">
-      <PanelTitle icon={ShieldAlert} title="Resilience" pill={armed ? "watchdog armed" : "—"} />
+      <PanelTitle icon={ShieldAlert} title="Resiliencia" pill={armed ? "vigilante armado" : "—"} />
       <div className="systemGrid">
         <article>
-          <span>Ticks supervised</span>
+          <span>Ticks supervisados</span>
           <b>{formatNumber(engineHealth.tickCount || 0, 0)}</b>
-          <small className={faults ? "amberTone" : ""}>{faults ? `${faults} fault${faults > 1 ? "s" : ""} contained` : "no faults contained"}</small>
+          <small className={faults ? "amberTone" : ""}>{faults ? `${faults} falla${faults > 1 ? "s" : ""} contenida${faults > 1 ? "s" : ""}` : "sin fallas contenidas"}</small>
         </article>
         <article>
-          <span>Feed guard</span>
-          <b>{feed.enabled ? "on" : "off"}</b>
-          <small>{formatNumber(feed.rejectedCount || 0, 0)} poisoned book{(feed.rejectedCount || 0) === 1 ? "" : "s"} rejected</small>
+          <span>Guardia de datos</span>
+          <b>{feed.enabled ? "activa" : "apagada"}</b>
+          <small>{formatNumber(feed.rejectedCount || 0, 0)} libro{(feed.rejectedCount || 0) === 1 ? "" : "s"} corrupto{(feed.rejectedCount || 0) === 1 ? "" : "s"} rechazado{(feed.rejectedCount || 0) === 1 ? "" : "s"}</small>
         </article>
         <article>
-          <span>Session audit</span>
-          <b>{continuity.priorSessions || 0} prior</b>
-          <small>{continuity.lastSessionFinalPnl != null ? `last session P&L ${formatMoney(continuity.lastSessionFinalPnl)}` : `${continuity.driver || "durable"} store`}</small>
+          <span>Auditoría de sesión</span>
+          <b>{continuity.priorSessions || 0} previas</b>
+          <small>{continuity.lastSessionFinalPnl != null ? `P&L última sesión ${formatMoney(continuity.lastSessionFinalPnl)}` : `almacén ${continuity.driver || "durable"}`}</small>
         </article>
         <article>
-          <span>Open exposure</span>
+          <span>Exposición abierta</span>
           <b className={engineHealth.exposureHalt ? "red" : ""}>{formatMoney(engineHealth.openExposureUsd || 0)}</b>
-          <small className={engineHealth.exposureHalt ? "amberTone" : ""}>{engineHealth.exposureHalt ? "HALT: new positions blocked" : `cap ${formatMoney(engineHealth.maxOpenExposureUsd || 0)}`}</small>
+          <small className={engineHealth.exposureHalt ? "amberTone" : ""}>{engineHealth.exposureHalt ? "ALTO: nuevas posiciones bloqueadas" : `tope ${formatMoney(engineHealth.maxOpenExposureUsd || 0)}`}</small>
         </article>
       </div>
-      <small className="resilienceNote">Every tick runs under a watchdog; three consecutive faults trigger a fail-safe pause. Try the <b>Engine fault</b> button in the Stress Lab.</small>
+      <small className="resilienceNote">Cada tick corre bajo un vigilante; tres fallas consecutivas activan una pausa a prueba de fallos. Prueba el botón <b>Falla del motor</b> en el Laboratorio de estrés.</small>
     </section>
   );
 }
@@ -952,17 +959,17 @@ function LiveObservationPanel({ observation = {}, mode }) {
   const routes = observation.topRoutes || [];
   return (
     <section className="surface radarPanel" id="observation">
-      <PanelTitle icon={History} title="Live Observation" pill={observation.recording ? `${observation.samples} samples` : "live only"} />
+      <PanelTitle icon={History} title="Observación en vivo" pill={observation.recording ? `${observation.samples} muestras` : "solo en vivo"} />
       <p className="radarNote">
-        On real books and real costs, per route: how often it appears, what fraction clears the fee wall, and the
-        longest run of consecutive samples it stayed profitable — the committee's observation phase, measured.
-        {mode === "demo" && " Switch to auto/live to record real markets."}
+        Sobre libros y costos reales, por ruta: con qué frecuencia aparece, qué fracción supera el muro de comisiones y la
+        racha más larga que se mantuvo rentable — la fase de observación del comité, medida.
+        {mode === "demo" && " Cambia a auto/en vivo para registrar mercados reales."}
       </p>
       {observation.recording && (
         <div className="radarStats">
-          <span>Routes observed<b>{observation.routesObserved ?? 0}</b></span>
-          <span>Ever capturable<b className={observation.capturableRoutes ? "green" : ""}>{observation.capturableRoutes ?? 0}</b></span>
-          <span>Samples<b>{observation.samples ?? 0}</b></span>
+          <span>Rutas observadas<b>{observation.routesObserved ?? 0}</b></span>
+          <span>Alguna vez capturable<b className={observation.capturableRoutes ? "green" : ""}>{observation.capturableRoutes ?? 0}</b></span>
+          <span>Muestras<b>{observation.samples ?? 0}</b></span>
         </div>
       )}
       <div className="radarRoutes">
@@ -975,13 +982,13 @@ function LiveObservationPanel({ observation = {}, mode }) {
             <div className="radarRouteNums">
               <small>{formatNumber(route.frequencyPerHour, 1)}/h</small>
               <small>capturable {formatPercent(route.capturableRate)}</small>
-              <small>avg {formatNumber(route.avgNetBps, 1)} bps</small>
-              <b className={route.bestNetBps > 0 ? "green" : "red"}>best {formatNumber(route.bestNetBps, 1)} bps</b>
-              {route.maxEpisodeSamples > 1 && <small className="radarStreak">episode ×{route.maxEpisodeSamples}</small>}
+              <small>prom {formatNumber(route.avgNetBps, 1)} bps</small>
+              <b className={route.bestNetBps > 0 ? "green" : "red"}>mejor {formatNumber(route.bestNetBps, 1)} bps</b>
+              {route.maxEpisodeSamples > 1 && <small className="radarStreak">episodio ×{route.maxEpisodeSamples}</small>}
             </div>
           </article>
         ))}
-        {!routes.length && <div className="empty">{observation.recording ? "No routes cleared the fee wall yet" : "Observation records in auto/live mode"}</div>}
+        {!routes.length && <div className="empty">{observation.recording ? "Aún ninguna ruta superó el muro de comisiones" : "La observación registra en modo auto/en vivo"}</div>}
       </div>
     </section>
   );
@@ -992,19 +999,19 @@ function PnlBreakdown({ totals = {} }) {
   return (
     <div className="pnlBreakdown">
       <article>
-        <span>Realized</span>
+        <span>Realizado</span>
         <b className={(totals.realizedPnl || 0) >= 0 ? "green" : "red"}>{formatMoney(totals.realizedPnl)}</b>
       </article>
       <article>
-        <span>Unrealized</span>
+        <span>No realizado</span>
         <b className={(totals.unrealizedPnl || 0) >= 0 ? "green" : "red"}>{formatMoney(totals.unrealizedPnl)}</b>
       </article>
       <article>
-        <span>BTC exposure</span>
+        <span>Exposición BTC</span>
         <b>{formatMoney(exposure.BTC?.usd || 0)}</b>
       </article>
       <article>
-        <span>ETH exposure</span>
+        <span>Exposición ETH</span>
         <b>{formatMoney(exposure.ETH?.usd || 0)}</b>
       </article>
     </div>
@@ -1012,12 +1019,12 @@ function PnlBreakdown({ totals = {} }) {
 }
 
 const SCENARIO_LABELS = {
-  flash_crash: "Flash crash",
-  liquidity_crunch: "Liquidity crunch",
-  latency_spike: "Latency spike",
-  venue_outage: "Venue outage",
-  leg_failure: "Leg failure",
-  engine_fault: "Engine fault (watchdog)",
+  flash_crash: "Caída relámpago",
+  liquidity_crunch: "Crisis de liquidez",
+  latency_spike: "Pico de latencia",
+  venue_outage: "Caída de casa",
+  leg_failure: "Falla de tramo",
+  engine_fault: "Falla del motor (vigilante)",
 };
 
 function StressLab({ scenarios = {}, triggerScenario }) {
@@ -1034,8 +1041,8 @@ function StressLab({ scenarios = {}, triggerScenario }) {
   };
   return (
     <section className="surface stressLab" id="stress">
-      <PanelTitle icon={FlaskConical} title="Stress Lab" pill={active.length ? `${active.length} active` : "stable"} />
-      <div className="stressGrid" role="group" aria-label="Inject a stress scenario">
+      <PanelTitle icon={FlaskConical} title="Laboratorio de estrés" pill={active.length ? `${active.length} activo${active.length > 1 ? "s" : ""}` : "estable"} />
+      <div className="stressGrid" role="group" aria-label="Inyectar un escenario de estrés">
         {available.map((name) => (
           <button key={name} type="button" className={active.includes(name) ? "active" : ""} aria-pressed={active.includes(name)} disabled={busy === name} onClick={() => fire(name)}>
             {SCENARIO_LABELS[name] || name}
@@ -1043,7 +1050,7 @@ function StressLab({ scenarios = {}, triggerScenario }) {
         ))}
       </div>
       {active.length > 0 && (
-        <div className="stressActive">Injected: {active.map((name) => SCENARIO_LABELS[name] || name).join(", ")}. Watch the circuit breaker, venue health and trade reconciliation respond.</div>
+        <div className="stressActive">Inyectado: {active.map((name) => SCENARIO_LABELS[name] || name).join(", ")}. Observa cómo responden el disyuntor, la salud de casas y la reconciliación de operaciones.</div>
       )}
     </section>
   );
@@ -1056,12 +1063,12 @@ function WalletsPanel({ snapshot }) {
   const fundableById = Object.fromEntries(venueRows.map((venue) => [venue.exchangeId, venue.tradesFundable]));
   return (
     <section className="surface" id="wallets">
-      <PanelTitle icon={DatabaseZap} title="Wallets" pill={formatMoney(snapshot.totals.markToMarket)} />
+      <PanelTitle icon={DatabaseZap} title="Carteras" pill={formatMoney(snapshot.totals.markToMarket)} />
       {autonomy.sessionAutonomy != null && (
         <div className="autonomyBar">
-          <span>Inventory autonomy</span>
-          <b className={autonomy.sessionAutonomy < 8 ? "amberTone" : ""}>{autonomy.sessionAutonomy} trades</b>
-          <small>{autonomy.rebalanceEnabled ? "pooled" : "per-venue"}{autonomy.lowVenues ? ` · ${autonomy.lowVenues} low` : ""}</small>
+          <span>Autonomía de inventario</span>
+          <b className={autonomy.sessionAutonomy < 8 ? "amberTone" : ""}>{autonomy.sessionAutonomy} operaciones</b>
+          <small>{autonomy.rebalanceEnabled ? "combinado" : "por casa"}{autonomy.lowVenues ? ` · ${autonomy.lowVenues} bajas` : ""}</small>
         </div>
       )}
       <div className="wallets">
@@ -1069,7 +1076,7 @@ function WalletsPanel({ snapshot }) {
           <article key={wallet.exchangeId} className={lowSet.has(wallet.exchangeId) ? "walletLow" : ""}>
             <b>{wallet.exchangeName}</b>
             <span>{formatMoney(wallet.USDT)}</span>
-            <small>{formatBtc(wallet.BTC)} / {formatNumber(wallet.ETH, 3)} ETH{fundableById[wallet.exchangeId] != null ? ` · ${fundableById[wallet.exchangeId]} trades` : ""}</small>
+            <small>{formatBtc(wallet.BTC)} / {formatNumber(wallet.ETH, 3)} ETH{fundableById[wallet.exchangeId] != null ? ` · ${fundableById[wallet.exchangeId]} ops` : ""}</small>
           </article>
         ))}
       </div>
@@ -1099,18 +1106,18 @@ function SecondaryGrid({ snapshot, control, onExplainTrade }) {
 }
 
 function fillTitle(item) {
-  if (item.strategy === "triangular" && item.dynamicCycle) return `${item.exchange} dynamic cycle`;
-  if (item.strategy === "triangular") return `${item.exchange} triangular cycle`;
+  if (item.strategy === "triangular" && item.dynamicCycle) return `${item.exchange} ciclo dinámico`;
+  if (item.strategy === "triangular") return `${item.exchange} ciclo triangular`;
   return `${item.buyExchange} -> ${item.sellExchange}`;
 }
 
 function executionKind(item) {
-  if (item.strategy === "triangular" && item.dynamicCycle && item.partial) return "dynamic partial";
-  if (item.strategy === "triangular" && item.dynamicCycle) return "dynamic 4-leg";
-  if (item.strategy === "triangular" && item.partial) return "triangular partial";
+  if (item.strategy === "triangular" && item.dynamicCycle && item.partial) return "dinámico parcial";
+  if (item.strategy === "triangular" && item.dynamicCycle) return "dinámico 4 tramos";
+  if (item.strategy === "triangular" && item.partial) return "triangular parcial";
   if (item.strategy === "triangular") return "triangular";
-  if (item.partial) return "partial";
-  return "complete";
+  if (item.partial) return "parcial";
+  return "completa";
 }
 
 function executionKindClass(item) {
@@ -1124,13 +1131,13 @@ function executionKindClass(item) {
 function Trades({ trades, metrics = {}, onExplainTrade }) {
   const [filter, setFilter] = React.useState("all");
   const filters = [
-    ["all", "All"],
-    ["cross", "Cross"],
-    ["partial-cross", "Partial Cross"],
-    ["partial", "Partials"],
-    ["complete", "Complete"],
+    ["all", "Todas"],
+    ["cross", "Cruce"],
+    ["partial-cross", "Cruce parcial"],
+    ["partial", "Parciales"],
+    ["complete", "Completas"],
     ["triangular", "Triangular"],
-    ["dynamic", "Dynamic 4-leg"],
+    ["dynamic", "Dinámico 4 tramos"],
   ];
   const visibleTrades = trades.filter((trade) => {
     if (filter === "cross") return trade.strategy === "simple";
@@ -1143,8 +1150,8 @@ function Trades({ trades, metrics = {}, onExplainTrade }) {
   });
   return (
     <section className="surface trades" id="trades">
-      <PanelTitle icon={ArrowRightLeft} title="Executed Trades" pill={`${visibleTrades.length}/${trades.length} visible`} />
-      <div className="tradeToolbar" role="group" aria-label="Filter trades">
+      <PanelTitle icon={ArrowRightLeft} title="Operaciones ejecutadas" pill={`${visibleTrades.length}/${trades.length} visibles`} />
+      <div className="tradeToolbar" role="group" aria-label="Filtrar operaciones">
         {filters.map(([id, label]) => (
           <button className={filter === id ? "active" : ""} aria-pressed={filter === id} key={id} onClick={() => setFilter(id)} type="button">{label}</button>
         ))}
@@ -1158,7 +1165,7 @@ function Trades({ trades, metrics = {}, onExplainTrade }) {
                 <em className={`badge ${executionKindClass(trade)}`}>{executionKind(trade)}</em>
                 {onExplainTrade && (
                   <button type="button" className="explainTradeBtn" onClick={() => onExplainTrade(trade.id)}>
-                    <Sparkles size={11} /> explain
+                    <Sparkles size={11} /> explicar
                   </button>
                 )}
               </div>
@@ -1167,19 +1174,19 @@ function Trades({ trades, metrics = {}, onExplainTrade }) {
             <em className={trade.netProfit >= 0 ? "green" : "red"}>{formatMoney(trade.netProfit)}</em>
             <div className="tradeDetails">
               <small>{new Date(trade.time).toLocaleTimeString()}</small>
-              <small>{formatNumber(trade.executionQuality?.edgeCaptureBps || trade.netBps, 2)} bps captured</small>
+              <small>{formatNumber(trade.executionQuality?.edgeCaptureBps || trade.netBps, 2)} bps capturados</small>
               <small>EV {formatMoney(trade.expectedValue ?? trade.netProfit)}</small>
-              {trade.executionQuality?.adverseMoveBps > 0 && <small>latency move {formatNumber(trade.executionQuality.adverseMoveBps, 2)} bps</small>}
+              {trade.executionQuality?.adverseMoveBps > 0 && <small>mov. latencia {formatNumber(trade.executionQuality.adverseMoveBps, 2)} bps</small>}
               {trade.strategy === "triangular" && <small>{trade.legs?.map((leg) => `${leg.from}->${leg.to}`).join(" / ")}</small>}
-              {trade.partial && <small>{formatPercent(clampRatio(trade.filledRatio))} of target</small>}
-              {!trade.partial && <small>100% of target</small>}
+              {trade.partial && <small>{formatPercent(clampRatio(trade.filledRatio))} del objetivo</small>}
+              {!trade.partial && <small>100% del objetivo</small>}
               {trade.reconciliation?.netExposureBtc > 0 && (
-                <small className="reconNote">leg failure · covered {formatBtc(trade.reconciliation.netExposureBtc)} ({formatMoney(trade.reconciliation.coverCost)})</small>
+                <small className="reconNote">falla de tramo · cubierto {formatBtc(trade.reconciliation.netExposureBtc)} ({formatMoney(trade.reconciliation.coverCost)})</small>
               )}
             </div>
           </article>
         ))}
-        {!visibleTrades.length && <div className="empty">{trades.length ? "No trades match this filter" : "No executed trades yet"}</div>}
+        {!visibleTrades.length && <div className="empty">{trades.length ? "Ninguna operación coincide con este filtro" : "Aún no hay operaciones ejecutadas"}</div>}
       </div>
     </section>
   );
@@ -1191,26 +1198,26 @@ function ExecutionPanel({ execution = {}, control }) {
   const modes = execution.available || [];
   return (
     <section className="surface executionPanel" id="execution">
-      <PanelTitle icon={Network} title="Execution gateway" pill={execution.mode || "paper"} />
+      <PanelTitle icon={Network} title="Pasarela de ejecución" pill={execution.mode || "paper"} />
       <div className="execBody">
         <div className="execCaps">
-          <span>Market data<b>{caps.marketData || "—"}</b></span>
-          <span>Execution<b>{caps.execution || "—"}</b></span>
-          <span>Live data<b>{caps.live ? "yes" : "no"}</b></span>
-          <span>Read-only<b>{caps.readOnly ? "yes" : "no"}</b></span>
-          <span>Withdrawal<b className="red">never</b></span>
-          <span>Live exec<b>{execution.liveEnabled ? "enabled" : "disabled (stub)"}</b></span>
+          <span>Datos<b>{caps.marketData || "—"}</b></span>
+          <span>Ejecución<b>{caps.execution || "—"}</b></span>
+          <span>En vivo<b>{caps.live ? "sí" : "no"}</b></span>
+          <span>Solo lectura<b>{caps.readOnly ? "sí" : "no"}</b></span>
+          <span>Retiro<b className="red">nunca</b></span>
+          <span>Ejec. en vivo<b>{execution.liveEnabled ? "habilitada" : "deshabilitada"}</b></span>
         </div>
-        <div className="execModes" role="group" aria-label="Execution gateway mode">
+        <div className="execModes" role="group" aria-label="Modo de la pasarela de ejecución">
           {modes.map((mode) => (
             <button key={mode} type="button" className={execution.mode === mode ? "active" : ""} aria-pressed={execution.mode === mode} onClick={() => control({ executionGateway: mode })}>{mode}</button>
           ))}
         </div>
         <div className="execGuard">
           <button type="button" className={`crToggle ${guard.killSwitch ? "on" : "off"}`} aria-pressed={!!guard.killSwitch} onClick={() => control({ killSwitch: !guard.killSwitch })}>
-            kill switch {guard.killSwitch ? "on" : "off"}
+            interruptor {guard.killSwitch ? "activo" : "apagado"}
           </button>
-          <small>order cap ${formatNumber(guard.maxOrderNotionalUsd || 0, 0)} · demo↔paper, auto/live↔read-only-live · testnet places real sandbox orders (fake money, needs AURELION_ENABLE_LIVE + testnet keys)</small>
+          <small>tope de orden ${formatNumber(guard.maxOrderNotionalUsd || 0, 0)} · demo↔paper, auto/en vivo↔solo-lectura · testnet coloca órdenes reales de prueba (dinero falso, requiere AURELION_ENABLE_LIVE + llaves de testnet)</small>
         </div>
       </div>
     </section>
@@ -1229,16 +1236,16 @@ function InfrastructurePanel({ snapshot, control }) {
       <GlobalMarket globalMarket={snapshot.globalMarket || {}} />
       <Streams streams={snapshot.streams} redis={snapshot.redis} />
       <section className="surface">
-        <PanelTitle icon={ShieldAlert} title="Risk Timeline" pill={`${snapshot.riskEvents.length} events`} />
+        <PanelTitle icon={ShieldAlert} title="Cronología de riesgo" pill={`${snapshot.riskEvents.length} eventos`} />
         <div className="events compactEvents">
           {snapshot.riskEvents.slice(0, 10).map((event) => (
             <article className="event" key={event.id || `${event.type}-${event.time}`}>
               <b>{event.condition || event.type}</b>
-              <span>{event.reason || "market event"}</span>
+              <span>{event.reason || "evento de mercado"}</span>
               <small>{new Date(event.time).toLocaleTimeString()}</small>
             </article>
           ))}
-          {!snapshot.riskEvents.length && <div className="empty">No risk events</div>}
+          {!snapshot.riskEvents.length && <div className="empty">Sin eventos de riesgo</div>}
         </div>
       </section>
     </div>
@@ -1252,7 +1259,7 @@ function stepDecimals(step) {
 }
 
 function formatParamChange(value) {
-  if (typeof value === "boolean") return value ? "on" : "off";
+  if (typeof value === "boolean") return value ? "sí" : "no";
   if (typeof value === "number") return Number.isInteger(value) ? String(value) : value.toFixed(value < 1 ? 4 : 2);
   return String(value ?? "—");
 }
@@ -1277,7 +1284,7 @@ function ControlRow({ spec, value, highlight, onScalar, onBool, onChoice }) {
       <div className={`crRow crBoolRow ${highlight ? "crHot" : ""}`}>
         <label htmlFor={fieldId} title={spec.description}>{spec.label}</label>
         <button id={fieldId} type="button" className={`crToggle ${on ? "on" : "off"}`} aria-pressed={on} onClick={() => onBool(spec.key, !on)}>
-          {on ? "on" : "off"}
+          {on ? "sí" : "no"}
         </button>
       </div>
     );
@@ -1363,8 +1370,8 @@ function ControlRoom({ loadParams, applyParams }) {
   if (!data) {
     return (
       <section className="surface controlRoom" id="control">
-        <PanelTitle icon={SlidersHorizontal} title="Control Room" pill="loading" />
-        <div className="empty">Loading parameters…</div>
+        <PanelTitle icon={SlidersHorizontal} title="Sala de control" pill="cargando" />
+        <div className="empty">Cargando parámetros…</div>
       </section>
     );
   }
@@ -1373,14 +1380,14 @@ function ControlRoom({ loadParams, applyParams }) {
 
   return (
     <section className="surface controlRoom" id="control">
-      <PanelTitle icon={SlidersHorizontal} title="Control Room" pill={`${data.specs.length} live params`} />
-      <div className="crPresets tradeToolbar" role="group" aria-label="Parameter presets">
+      <PanelTitle icon={SlidersHorizontal} title="Sala de control" pill={`${data.specs.length} parámetros en vivo`} />
+      <div className="crPresets tradeToolbar" role="group" aria-label="Presets de parámetros">
         <span className="crPresetLabel">Presets</span>
         {data.presets.map((name) => (
           <button key={name} type="button" className={activePreset === name ? "active" : ""} aria-pressed={activePreset === name} onClick={() => { setActivePreset(name); commit({ preset: name }); }}>{name}</button>
         ))}
-        <button type="button" className="crReset" onClick={() => { setActivePreset(null); commit({ reset: true }); }}><RotateCcw size={13} /> reset</button>
-        {busy && <span className="crBusy">applying…</span>}
+        <button type="button" className="crReset" onClick={() => { setActivePreset(null); commit({ reset: true }); }}><RotateCcw size={13} /> reiniciar</button>
+        {busy && <span className="crBusy">aplicando…</span>}
       </div>
       {changedKeys.length > 0 && (
         <div className="crChanged">
@@ -1409,7 +1416,8 @@ function ControlRoom({ loadParams, applyParams }) {
 
 // Event-driven replay of the current (tuned) strategy over deterministic data.
 const BACKTEST_REGIMES = ["calm", "normal", "volatile", "stressed"];
-const BACKTEST_SOURCES = [["simulated", "Simulated"], ["historical", "Real history"]];
+const REGIME_LABELS = { calm: "tranquilo", normal: "normal", volatile: "volátil", stressed: "estresado" };
+const BACKTEST_SOURCES = [["simulated", "Simulado"], ["historical", "Historia real"]];
 
 function Backtest({ runBacktest }) {
   const [ticks, setTicks] = React.useState(250);
@@ -1433,59 +1441,59 @@ function Backtest({ runBacktest }) {
 
   return (
     <section className="surface backtest" id="backtest">
-      <PanelTitle icon={History} title="Backtest / Replay" pill={result ? `${result.executed} trades` : "idle"} />
+      <PanelTitle icon={History} title="Backtest / Repetición" pill={result ? `${result.executed} operaciones` : "inactivo"} />
       <div className="backtestToolbar tradeToolbar">
-        <span role="group" aria-label="Data source" className="btGroup">
+        <span role="group" aria-label="Fuente de datos" className="btGroup">
           {BACKTEST_SOURCES.map(([id, label]) => (
             <button key={id} type="button" className={source === id ? "active" : ""} aria-pressed={source === id} onClick={() => setSource(id)}>{label}</button>
           ))}
         </span>
         <span className="btDivider" aria-hidden="true" />
-        <span role="group" aria-label="Tick count" className="btGroup">
+        <span role="group" aria-label="Cantidad de ticks" className="btGroup">
           {[120, 250, 500].map((n) => (
             <button key={n} type="button" className={ticks === n ? "active" : ""} aria-pressed={ticks === n} onClick={() => setTicks(n)}>{n} ticks</button>
           ))}
         </span>
         <span className="btDivider" aria-hidden="true" />
-        <span role="group" aria-label="Market regime" className="btGroup">
+        <span role="group" aria-label="Régimen de mercado" className="btGroup">
           {BACKTEST_REGIMES.map((name) => (
-            <button key={name} type="button" className={regime === name ? "active" : ""} aria-pressed={regime === name} onClick={() => setRegime(name)}>{name}</button>
+            <button key={name} type="button" className={regime === name ? "active" : ""} aria-pressed={regime === name} onClick={() => setRegime(name)}>{REGIME_LABELS[name] || name}</button>
           ))}
         </span>
-        <button type="button" className="btRun" onClick={run} disabled={busy}><FlaskConical size={13} /> {busy ? "running…" : "Run backtest"}</button>
+        <button type="button" className="btRun" onClick={run} disabled={busy}><FlaskConical size={13} /> {busy ? "corriendo…" : "Ejecutar backtest"}</button>
       </div>
       {source === "historical" && (
-        <div className="btSourceNote">Real OHLCV closes from live exchange APIs (public, no keys); order-book depth around each price is synthesized — real L2 history isn't freely available. Triangular legs are skipped for this source.</div>
+        <div className="btSourceNote">Cierres OHLCV reales de APIs públicas de las casas (sin llaves); la profundidad del libro alrededor de cada precio se sintetiza — la historia L2 real no está disponible gratis. Los tramos triangulares se omiten en esta fuente.</div>
       )}
       {result ? (
         <div className="backtestBody">
           {usedReal && (
-            <div className="btDataBadge good">real data: {(dq.exchanges || []).join(", ")}</div>
+            <div className="btDataBadge good">datos reales: {(dq.exchanges || []).join(", ")}</div>
           )}
           {fellBack && (
-            <div className="btDataBadge warn">real data unavailable right now (network/exchange) — used the simulator instead</div>
+            <div className="btDataBadge warn">datos reales no disponibles ahora (red/casa) — se usó el simulador en su lugar</div>
           )}
           <div className="btStats">
-            <div className="btStat"><span>Trades</span><strong>{result.executed}</strong></div>
-            <div className="btStat"><span>Hit rate</span><strong>{formatPercent(result.hitRate, 1)}</strong></div>
-            <div className="btStat"><span>Total P&amp;L</span><strong className={result.totalPnl >= 0 ? "green" : "red"}>{formatMoney(result.totalPnl)}</strong></div>
-            <div className="btStat"><span>Avg / trade</span><strong className={result.avgPnlPerTrade >= 0 ? "green" : "red"}>{formatMoney(result.avgPnlPerTrade)}</strong></div>
-            <div className="btStat"><span>Max drawdown</span><strong className="red">{formatMoney(result.maxDrawdown)}</strong></div>
-            <div className="btStat"><span>Sharpe-like</span><strong>{formatNumber(result.sharpeLike, 2)}</strong></div>
+            <div className="btStat"><span>Operaciones</span><strong>{result.executed}</strong></div>
+            <div className="btStat"><span>Tasa de acierto</span><strong>{formatPercent(result.hitRate, 1)}</strong></div>
+            <div className="btStat"><span>P&amp;L total</span><strong className={result.totalPnl >= 0 ? "green" : "red"}>{formatMoney(result.totalPnl)}</strong></div>
+            <div className="btStat"><span>Prom / operación</span><strong className={result.avgPnlPerTrade >= 0 ? "green" : "red"}>{formatMoney(result.avgPnlPerTrade)}</strong></div>
+            <div className="btStat"><span>Caída máxima</span><strong className="red">{formatMoney(result.maxDrawdown)}</strong></div>
+            <div className="btStat"><span>Tipo Sharpe</span><strong>{formatNumber(result.sharpeLike, 2)}</strong></div>
           </div>
           <PnlChart series={(result.equityCurve || []).map((point) => ({ time: point.t, pnl: point.pnl }))} />
           {result.executed === 0 && (
             <div className="btHonest">
-              No trades cleared the cost gates. Best edge observed: <b>{formatNumber(result.bestObservedNetBps, 2)} bps</b> after fees, slippage and latency
-              {usedReal ? " — real cross-exchange BTC arbitrage is efficiently priced right now; this is the system correctly refusing an unprofitable trade, not a bug." : "."}
+              Ninguna operación superó los filtros de costos. Mejor margen observado: <b>{formatNumber(result.bestObservedNetBps, 2)} bps</b> tras comisiones, deslizamiento y latencia
+              {usedReal ? " — el arbitraje real de BTC entre casas está eficientemente valorado ahora; esto es el sistema rechazando correctamente una operación no rentable, no un error." : "."}
             </div>
           )}
           <div className="btParams">
-            <b>{result.regime}</b> regime · {result.wins}W / {result.losses}L · {result.detected} signals over {result.ticks} ticks · strategy {result.params.cycleAlgo}/{result.params.slippageModel}/{result.params.sizingMode} @ {result.params.minNetBps} bps
+            régimen <b>{REGIME_LABELS[result.regime] || result.regime}</b> · {result.wins}G / {result.losses}P · {result.detected} señales en {result.ticks} ticks · estrategia {result.params.cycleAlgo}/{result.params.slippageModel}/{result.params.sizingMode} @ {result.params.minNetBps} bps
           </div>
         </div>
       ) : (
-        <div className="empty">Replay the current tuned strategy over simulated or <b>real exchange history</b> under a chosen regime, to measure hit rate, P&amp;L, drawdown and a Sharpe-like ratio. Tune in the Control Room, then backtest here.</div>
+        <div className="empty">Repite la estrategia ajustada actual sobre datos simulados o <b>historia real de las casas</b> bajo un régimen elegido, para medir tasa de acierto, P&amp;L, caída máxima y un ratio tipo Sharpe. Ajusta en la Sala de control y luego haz backtest aquí.</div>
       )}
     </section>
   );
@@ -1496,15 +1504,15 @@ function CalibrationPanel({ calibration, enabled }) {
   const venues = calibration.venues || [];
   return (
     <section className="surface calibration" id="calibration">
-      <PanelTitle icon={Brain} title="Self-calibration" pill={enabled ? "applied" : "tracking"} />
+      <PanelTitle icon={Brain} title="Autocalibración" pill={enabled ? "aplicada" : "rastreando"} />
       <div className="calBody">
         {venues.length ? venues.map((venue) => (
           <div className="calRow" key={venue.venue}>
             <b>{venue.venue}</b>
             <div className="calBar"><span className={venue.probability >= 0.75 ? "good" : venue.probability >= 0.5 ? "warn" : "bad"} style={{ width: `${Math.round(clampRatio(venue.probability) * 100)}%` }} /></div>
-            <small>{formatPercent(venue.probability, 0)} · {venue.samples} fills{venue.applied ? "" : " · warming"}</small>
+            <small>{formatPercent(venue.probability, 0)} · {venue.samples} llenados{venue.applied ? "" : " · calentando"}</small>
           </div>
-        )) : <div className="empty">Learning venue reliability from fills…</div>}
+        )) : <div className="empty">Aprendiendo la fiabilidad de cada casa a partir de los llenados…</div>}
       </div>
     </section>
   );
@@ -1578,25 +1586,25 @@ function ResearchLab({ runSpreadStudy, runAutotune, applyParams, loadResearchHis
   return (
     <div className="researchLab" id="research">
       <section className="surface radarPanel">
-        <PanelTitle icon={Activity} title="Spread dynamics (fitted on real data)" pill={study ? `${study.pairsFitted}/${study.pairsTotal} pairs` : "OU model"} />
+        <PanelTitle icon={Activity} title="Dinámica de spreads (ajustada con datos reales)" pill={study ? `${study.pairsFitted}/${study.pairsTotal} pares` : "modelo OU"} />
         <p className="radarNote">
-          Fits a mean-reversion (Ornstein-Uhlenbeck) model to each venue pair's real spread history and measures
-          the three questions from the observation plan: <b>how long dislocations last</b> (half-life, episode duration),
-          <b> how often they appear</b>, and <b>what fraction disappears before it could be executed</b>.
+          Ajusta un modelo de reversión a la media (Ornstein-Uhlenbeck) a la historia real de spread de cada par de casas y mide
+          las tres preguntas del plan de observación: <b>cuánto duran las dislocaciones</b> (vida media, duración del episodio),
+          <b> con qué frecuencia aparecen</b> y <b>qué fracción desaparece antes de poder ejecutarse</b>.
         </p>
         <div className="radarActions">
           <button type="button" className="iconButton" onClick={fitModels} disabled={studyBusy}>
-            <Activity size={12} /> {studyBusy ? "fitting on real history..." : "fit models on real history"}
+            <Activity size={12} /> {studyBusy ? "ajustando con historia real..." : "ajustar modelos con historia real"}
           </button>
           {study?.summary?.medianHalfLifeMs != null && (
             <button type="button" className="iconButton" onClick={applyMeasuredHalfLife} disabled={halfLifeApplied}>
-              <Zap size={12} /> {halfLifeApplied ? "measured half-life applied ✓" : "apply measured half-life (clamped)"}
+              <Zap size={12} /> {halfLifeApplied ? "vida media medida aplicada ✓" : "aplicar vida media medida (acotada)"}
             </button>
           )}
           {study?.summary && (
             <small>
-              median half-life {prettyMs(study.summary.medianHalfLifeMs)} ·{" "}
-              {study.summary.capturableNow ? `${study.summary.executableEpisodes} episode(s) beat the fee wall` : "no episode beat the fee wall"}
+              vida media mediana {prettyMs(study.summary.medianHalfLifeMs)} ·{" "}
+              {study.summary.capturableNow ? `${study.summary.executableEpisodes} episodio(s) superan el muro de comisiones` : "ningún episodio superó el muro de comisiones"}
             </small>
           )}
         </div>
@@ -1605,78 +1613,78 @@ function ResearchLab({ runSpreadStudy, runAutotune, applyParams, loadResearchHis
             <article key={`${pair.base}-${pair.venueA}-${pair.venueB}`} className={pair.executable?.count ? "radarPositive" : ""}>
               <div className="radarRouteTop">
                 <b>{pair.venueA} ↔ {pair.venueB} · {pair.base}</b>
-                <em className="badge triangular">{pair.fitted ? `half-life ${prettyMs(pair.halfLifeMs)}` : "no fit"}</em>
+                <em className="badge triangular">{pair.fitted ? `vida media ${prettyMs(pair.halfLifeMs)}` : "sin ajuste"}</em>
               </div>
               <div className="radarRouteNums">
                 {pair.fitted ? (
                   <>
                     <small>σ {formatNumber(pair.sigmaBps, 1)} bps</small>
-                    <small>fee wall {formatNumber(pair.costsBps, 1)} bps</small>
-                    <small>{formatNumber(pair.dislocations.perHour, 1)} dislocations/h</small>
-                    <small>median {prettyMs(pair.dislocations.medianDurationMs)}</small>
-                    <small>{formatNumber(pair.dislocations.vanishedWithinOneSamplePct, 0)}% gone within 1 candle</small>
+                    <small>muro {formatNumber(pair.costsBps, 1)} bps</small>
+                    <small>{formatNumber(pair.dislocations.perHour, 1)} disloc/h</small>
+                    <small>mediana {prettyMs(pair.dislocations.medianDurationMs)}</small>
+                    <small>{formatNumber(pair.dislocations.vanishedWithinOneSamplePct, 0)}% se van en 1 vela</small>
                     <b className={pair.executable.count ? "green" : "red"}>{pair.verdict}</b>
                   </>
                 ) : (
-                  <small>{pair.verdict} ({pair.points} points)</small>
+                  <small>{pair.verdict} ({pair.points} puntos)</small>
                 )}
               </div>
             </article>
           ))}
-          {!study && <div className="empty">Run a fit to measure real dislocation dynamics per venue pair</div>}
+          {!study && <div className="empty">Ejecuta un ajuste para medir la dinámica real de dislocación por par de casas</div>}
         </div>
         {study?.summary?.note && <div className="radarActions"><small>{study.summary.note}</small></div>}
       </section>
 
       <section className="surface radarPanel">
-        <PanelTitle icon={Brain} title="Parameter trainer" pill={training ? `${training.trials} trials` : "hyperopt-style"} />
+        <PanelTitle icon={Brain} title="Entrenador de parámetros" pill={training ? `${training.trials} pruebas` : "estilo hyperopt"} />
         <p className="radarNote">
-          Trains a preset by replaying the market through the <b>same engines</b> many times with different Control Room
-          parameters (the approach freqtrade calls hyperopt). Objective: <code>{training?.objective || "totalPnl - 0.5 * maxDrawdown"}</code>.
-          Top candidates are re-scored on an <b>independent market realization</b> and the winner is chosen by
-          validation score — an overfit preset shows up as a large train/validation gap.
+          Entrena un preset repitiendo el mercado a través de los <b>mismos motores</b> muchas veces con distintos
+          parámetros de la Sala de control (lo que freqtrade llama hyperopt). Objetivo: <code>{training?.objective || "totalPnl - 0.5 * maxDrawdown"}</code>.
+          Los mejores candidatos se re-evalúan sobre una <b>realización de mercado independiente</b> y el ganador se elige por
+          score de validación — un preset sobreajustado se delata con una gran brecha entrenamiento/validación.
         </p>
         <div className="radarActions">
-          <label className="researchControl">trials
+          <label className="researchControl">pruebas
             <select value={trials} onChange={(event) => setTrials(Number(event.target.value))}>
               {[16, 24, 32, 48].map((count) => <option key={count} value={count}>{count}</option>)}
             </select>
           </label>
-          <label className="researchControl">regime
+          <label className="researchControl">régimen
             <select value={regime} onChange={(event) => setRegime(event.target.value)} disabled={robust}>
-              {["calm", "normal", "volatile", "stressed"].map((name) => <option key={name} value={name}>{name}</option>)}
+              {["calm", "normal", "volatile", "stressed"].map((name) => <option key={name} value={name}>{REGIME_LABELS[name] || name}</option>)}
             </select>
           </label>
-          <label className="researchControl">data
+          <label className="researchControl">datos
             <select value={source} onChange={(event) => setSource(event.target.value)}>
-              <option value="simulated">simulated</option>
-              <option value="historical">real history</option>
+              <option value="simulated">simulado</option>
+              <option value="historical">historia real</option>
             </select>
           </label>
           <label className="researchControl">
             <input type="checkbox" checked={robust} onChange={(event) => setRobust(event.target.checked)} />
-            robust (all regimes)
+            robusto (todos los regímenes)
           </label>
           <button type="button" className="iconButton" onClick={train} disabled={trainBusy}>
-            <Brain size={12} /> {trainBusy ? (robust ? "training across regimes..." : "training...") : "train parameters"}
+            <Brain size={12} /> {trainBusy ? (robust ? "entrenando en todos los regímenes..." : "entrenando...") : "entrenar parámetros"}
           </button>
         </div>
         {training && (
           <>
             <div className="radarStats">
-              <span>Baseline (validation)<b>{formatNumber(training.baseline?.validationScore, 2)}</b></span>
-              <span>Best (train)<b>{formatNumber(training.best?.score, 2)}</b></span>
-              <span>Best (validation)<b className={training.improvedVsBaseline ? "green" : ""}>{formatNumber(training.best?.validationScore, 2)}</b></span>
-              <span>Overfit gap<b className={(training.best?.overfitGap || 0) > (training.best?.validationScore || 0) * 0.5 ? "red" : ""}>{formatNumber(training.best?.overfitGap, 2)}</b></span>
-              <span>Improved<b className={training.improvedVsBaseline ? "green" : "red"}>{training.improvedVsBaseline ? "yes" : "no"}</b></span>
-              <span>Took<b>{prettyMs(training.durationMs)}</b></span>
+              <span>Base (validación)<b>{formatNumber(training.baseline?.validationScore, 2)}</b></span>
+              <span>Mejor (entren.)<b>{formatNumber(training.best?.score, 2)}</b></span>
+              <span>Mejor (validación)<b className={training.improvedVsBaseline ? "green" : ""}>{formatNumber(training.best?.validationScore, 2)}</b></span>
+              <span>Brecha sobreajuste<b className={(training.best?.overfitGap || 0) > (training.best?.validationScore || 0) * 0.5 ? "red" : ""}>{formatNumber(training.best?.overfitGap, 2)}</b></span>
+              <span>Mejoró<b className={training.improvedVsBaseline ? "green" : "red"}>{training.improvedVsBaseline ? "sí" : "no"}</b></span>
+              <span>Tomó<b>{prettyMs(training.durationMs)}</b></span>
             </div>
             <div className="radarRoutes">
               {(training.leaderboard || []).slice(0, 5).map((row, index) => (
                 <article key={row.trial} className={index === 0 ? "radarPositive" : ""}>
                   <div className="radarRouteTop">
-                    <b>#{index + 1} · train {formatNumber(row.score, 2)}{row.validationScore != null ? ` · validation ${formatNumber(row.validationScore, 2)}` : ""}</b>
-                    <em className="badge filled">P&L {formatNumber(row.totalPnl, 2)} · dd {formatNumber(row.maxDrawdown, 2)} · {row.executed} trades{training.robust ? " · avg of 3 regimes" : ""}</em>
+                    <b>#{index + 1} · entren. {formatNumber(row.score, 2)}{row.validationScore != null ? ` · validación ${formatNumber(row.validationScore, 2)}` : ""}</b>
+                    <em className="badge filled">P&L {formatNumber(row.totalPnl, 2)} · dd {formatNumber(row.maxDrawdown, 2)} · {row.executed} ops{training.robust ? " · prom de 3 regímenes" : ""}</em>
                   </div>
                   <div className="radarRouteNums">
                     {Object.entries(row.changedVsCurrent || {}).slice(0, 6).map(([key, change]) => (
@@ -1688,35 +1696,35 @@ function ResearchLab({ runSpreadStudy, runAutotune, applyParams, loadResearchHis
             </div>
             <div className="radarActions">
               <button type="button" className="iconButton" onClick={applyLearned} disabled={!training.best || applied}>
-                <Zap size={12} /> {applied ? "learned preset applied ✓" : "apply learned preset"}
+                <Zap size={12} /> {applied ? "preset aprendido aplicado ✓" : "aplicar preset aprendido"}
               </button>
-              <small>applies through the same registry as any manual change — visible in the Control Room, reversible with reset</small>
+              <small>se aplica por el mismo registro que cualquier cambio manual — visible en la Sala de control, reversible con reiniciar</small>
             </div>
           </>
         )}
       </section>
 
       <section className="surface radarPanel">
-        <PanelTitle icon={History} title="Learned sessions (persisted)" pill={`${history.length} saved`} />
+        <PanelTitle icon={History} title="Sesiones aprendidas (persistidas)" pill={`${history.length} guardadas`} />
         <p className="radarNote">
-          Every study and training run is saved to disk — the bot keeps what it learned across restarts.
-          A previously trained preset can be re-applied in one click.
+          Cada estudio y cada entrenamiento se guarda en disco — el bot conserva lo que aprendió entre reinicios.
+          Un preset entrenado antes puede reaplicarse con un clic.
         </p>
         <div className="radarRoutes">
           {history.slice(0, 8).map((entry) => (
             <article key={entry.file}>
               <div className="radarRouteTop">
-                <b>{entry.kind === "autotune" ? "Training" : "Spread study"} · {entry.generatedAt ? new Date(entry.generatedAt).toLocaleString() : "—"}</b>
+                <b>{entry.kind === "autotune" ? "Entrenamiento" : entry.kind === "validation" ? "Validación" : "Estudio de spreads"} · {entry.generatedAt ? new Date(entry.generatedAt).toLocaleString() : "—"}</b>
                 {entry.kind === "autotune" && entry.payload?.best?.params && (
                   <button type="button" className="explainTradeBtn" onClick={() => applySaved(entry)} disabled={historyApplied === entry.file}>
-                    {historyApplied === entry.file ? "applied ✓" : "re-apply preset"}
+                    {historyApplied === entry.file ? "aplicado ✓" : "reaplicar preset"}
                   </button>
                 )}
               </div>
               <div className="radarRouteNums"><small>{entry.headline}</small></div>
             </article>
           ))}
-          {!history.length && <div className="empty">No persisted research yet — run a fit or a training above</div>}
+          {!history.length && <div className="empty">Aún no hay investigación persistida — ejecuta un ajuste o un entrenamiento arriba</div>}
         </div>
       </section>
     </div>
@@ -1737,19 +1745,19 @@ function WideNetRadarPanel({ discovery = {}, sweepDiscovery }) {
   };
   return (
     <section className="surface radarPanel" id="radar">
-      <PanelTitle icon={Radar} title="Wide-Net Radar" pill={discovery.enabled ? `${sweep.venuesLive ?? 0}/${discovery.universeCount || 0} venues` : "off"} />
+      <PanelTitle icon={Radar} title="Radar de red amplia" pill={discovery.enabled ? `${sweep.venuesLive ?? 0}/${discovery.universeCount || 0} casas` : "apagado"} />
       <p className="radarNote">
-        A background scout sweeps all {discovery.universeCount || 0} venues + {(discovery.bases || []).join("/")} from batched public tickers —
-        the hot loop and its decision latency are untouched. Routes holding above {discovery.minNetBps} bps net for {discovery.minPersistence}+
-        consecutive sweeps get flagged <b>promotable</b>; adding them to the active set stays your call.
+        Un explorador en segundo plano barre las {discovery.universeCount || 0} casas + {(discovery.bases || []).join("/")} desde tickers públicos por lotes —
+        el bucle principal y su latencia de decisión no se tocan. Las rutas que se mantienen sobre {discovery.minNetBps} bps neto durante {discovery.minPersistence}+
+        barridos consecutivos se marcan <b>promocionables</b>; añadirlas al conjunto activo sigue siendo tu decisión.
       </p>
       <div className="radarStats">
-        <span>Last sweep<b>{ageSec == null ? "pending" : `${ageSec}s ago`}</b></span>
-        <span>Sweep time<b>{sweep.durationMs ? `${formatNumber(sweep.durationMs / 1000, 1)}s` : "—"}</b></span>
+        <span>Último barrido<b>{ageSec == null ? "pendiente" : `hace ${ageSec}s`}</b></span>
+        <span>Duración<b>{sweep.durationMs ? `${formatNumber(sweep.durationMs / 1000, 1)}s` : "—"}</b></span>
         <span>Series<b>{sweep.seriesCount ?? 0}</b></span>
-        <span>Routes priced<b>{sweep.routesPriced ?? 0}</b></span>
-        <span>Net-positive<b className={sweep.positiveCount ? "green" : ""}>{sweep.positiveCount ?? 0}</b></span>
-        <span>Cadence<b>{Math.round((discovery.intervalMs || 0) / 1000)}s</b></span>
+        <span>Rutas valoradas<b>{sweep.routesPriced ?? 0}</b></span>
+        <span>Netas positivas<b className={sweep.positiveCount ? "green" : ""}>{sweep.positiveCount ?? 0}</b></span>
+        <span>Cadencia<b>{Math.round((discovery.intervalMs || 0) / 1000)}s</b></span>
       </div>
       <div className="radarRoutes">
         {routes.map((route) => (
@@ -1759,26 +1767,26 @@ function WideNetRadarPanel({ discovery = {}, sweepDiscovery }) {
               <em className={`badge ${route.kind === "cross" ? "filled" : "triangular"}`}>{route.kind} · {route.base}</em>
             </div>
             <div className="radarRouteNums">
-              <small>gross {formatNumber(route.grossBps, 1)} bps</small>
-              <small>costs {formatNumber(route.costsBps, 1)} bps</small>
-              <b className={route.netBps > 0 ? "green" : "red"}>net {formatNumber(route.netBps, 1)} bps</b>
-              {route.streak > 0 && <small className="radarStreak">seen ×{route.streak}</small>}
-              {route.promotable && <em className="badge promotable">promotable</em>}
-              {route.crossQuote && <small title="Buy and sell legs quote in USD vs USDT">USD/USDT</small>}
+              <small>bruto {formatNumber(route.grossBps, 1)} bps</small>
+              <small>costos {formatNumber(route.costsBps, 1)} bps</small>
+              <b className={route.netBps > 0 ? "green" : "red"}>neto {formatNumber(route.netBps, 1)} bps</b>
+              {route.streak > 0 && <small className="radarStreak">visto ×{route.streak}</small>}
+              {route.promotable && <em className="badge promotable">promocionable</em>}
+              {route.crossQuote && <small title="Los tramos de compra y venta cotizan en USD vs USDT">USD/USDT</small>}
             </div>
           </article>
         ))}
         {!routes.length && (
           <div className="empty">
-            {discovery.sweepCount ? "No routes priced in the last sweep — venues unreachable from this network" : "First sweep pending — the scout runs automatically in the background"}
+            {discovery.sweepCount ? "Ninguna ruta valorada en el último barrido — casas inalcanzables desde esta red" : "Primer barrido pendiente — el explorador corre automáticamente en segundo plano"}
           </div>
         )}
       </div>
       <div className="radarActions">
         <button type="button" className="iconButton" onClick={runSweep} disabled={busy}>
-          <RefreshCw size={12} /> {busy ? "sweeping..." : "sweep now"}
+          <RefreshCw size={12} /> {busy ? "barriendo..." : "barrer ahora"}
         </button>
-        <small>read-only public data · no API keys · fee model: entry-tier taker + slippage buffer per leg</small>
+        <small>datos públicos de solo lectura · sin llaves API · modelo de comisiones: taker de nivel de entrada + margen de deslizamiento por tramo</small>
       </div>
     </section>
   );
@@ -1790,39 +1798,39 @@ function WideNetRadarPanel({ discovery = {}, sweepDiscovery }) {
 // whether the spread would actually pay.
 function ModelsPanel({ models = {}, metrics = {} }) {
   const active = [
-    ["Cycle detection", models.cycleAlgo, models.cycleAlgo === "bellman_ford"],
-    ["Slippage model", models.slippageModel, models.slippageModel !== "book_walk"],
-    ["Position sizing", models.sizingMode, models.sizingMode === "kelly"],
-    ["Volatility model", models.volatilityModel, models.volatilityModel !== "range"],
-    ["Bayesian calibration", models.calibrationEnabled ? "on" : "tracking", !!models.calibrationEnabled],
+    ["Detección de ciclos", models.cycleAlgo, models.cycleAlgo === "bellman_ford"],
+    ["Modelo de deslizamiento", models.slippageModel, models.slippageModel !== "book_walk"],
+    ["Dimensionamiento", models.sizingMode, models.sizingMode === "kelly"],
+    ["Modelo de volatilidad", models.volatilityModel, models.volatilityModel !== "range"],
+    ["Calibración bayesiana", models.calibrationEnabled ? "activa" : "rastreando", !!models.calibrationEnabled],
   ];
   const catalog = [
-    ["Cross-exchange arbitrage", "Buys on the cheaper venue and sells on the richer one, priced to the executable book depth on both sides."],
-    ["Bellman-Ford negative-cycle detection", "Finds every profitable multi-hop loop (not just some) by shortest-path over −log(rate·(1−fee)) edges. Selectable vs. bounded DFS."],
-    ["Triangular & dynamic multi-leg cycles", "Detects 3-leg and 4-leg cycles within one venue (e.g. USDT→BTC→ETH→USDT)."],
-    ["Market-impact slippage (√-law / Almgren)", "Charges the cost of consuming depth beyond the top of book, so large sizes are priced honestly."],
-    ["Fractional-Kelly sizing", "Sizes each trade by edge quality (win probability × payoff), scaled by a Kelly fraction and capped."],
-    ["Bayesian venue calibration", "A Beta-Bernoulli success posterior per venue, learned from real fills — the bot trusts venues that fail less. 'Changes behavior after failing.'"],
-    ["EWMA / rolling-σ volatility", "Feeds the circuit breaker; trips on abnormal BTC moves within a window."],
-    ["Expected-value scoring", "Ranks opportunities by EV after latency risk, volatility risk and inventory penalty — not by raw spread."],
-    ["Ornstein-Uhlenbeck spread model", "Fits mean-reversion to real spread history: half-life, episode frequency, and how much vanishes before execution (Research Lab)."],
-    ["Hyperopt trainer + out-of-sample validation", "Searches the parameter space over replays, then re-scores the winner on an independent market realization to defend against overfit (Research Lab)."],
-    ["Ensemble capture-confidence", "One calibrated probability combining venue confidence, latency-capture and edge-survival — 'how sure is it this trade would pay?'"],
-    ["Wide-net radar + observation recorder", "Scans 10 venues + XRP/LTC/SOL/AVAX and measures, on real data, how often edges appear and clear the fee wall."],
+    ["Arbitraje entre casas", "Compra en la casa más barata y vende en la más cara, valorado a la profundidad ejecutable del libro en ambos lados."],
+    ["Detección de ciclos negativos Bellman-Ford", "Encuentra todo bucle multi-salto rentable (no solo algunos) por camino más corto sobre aristas −log(tasa·(1−comisión)). Seleccionable vs. DFS acotado."],
+    ["Ciclos triangulares y dinámicos multi-tramo", "Detecta ciclos de 3 y 4 tramos dentro de una casa (p. ej. USDT→BTC→ETH→USDT)."],
+    ["Deslizamiento por impacto (ley √ / Almgren)", "Cobra el costo de consumir profundidad más allá del tope del libro, para que los tamaños grandes se valoren con honestidad."],
+    ["Dimensionamiento Kelly fraccional", "Dimensiona cada operación por la calidad del margen (probabilidad de éxito × pago), escalado por una fracción de Kelly y acotado."],
+    ["Calibración bayesiana por casa", "Un posterior de éxito Beta-Bernoulli por casa, aprendido de llenados reales — el bot confía menos en las casas que fallan. 'Cambia de comportamiento tras fallar.'"],
+    ["Volatilidad EWMA / σ móvil", "Alimenta el disyuntor; se dispara ante movimientos anómalos de BTC dentro de una ventana."],
+    ["Puntuación por valor esperado", "Ordena oportunidades por EV tras riesgo de latencia, riesgo de volatilidad y penalización de inventario — no por el margen bruto."],
+    ["Modelo de spread Ornstein-Uhlenbeck", "Ajusta reversión a la media a la historia real de spread: vida media, frecuencia de episodios y cuánto se desvanece antes de ejecutar (Laboratorio de investigación)."],
+    ["Entrenador hyperopt + validación fuera de muestra", "Busca en el espacio de parámetros sobre repeticiones y re-evalúa al ganador sobre una realización de mercado independiente para defenderse del sobreajuste (Laboratorio de investigación)."],
+    ["Confianza de captura de ensamble", "Una probabilidad calibrada que combina confianza de la casa, captura por latencia y supervivencia del margen — '¿qué tan seguro es que esta operación pagaría?'"],
+    ["Radar de red amplia + registro de observación", "Escanea 10 casas + XRP/LTC/SOL/AVAX y mide, con datos reales, con qué frecuencia aparecen los márgenes y superan el muro de comisiones."],
   ];
   return (
     <section className="surface modelsPanel" id="models">
-      <PanelTitle icon={Brain} title="Models & Intelligence" pill="quant stack" />
+      <PanelTitle icon={Brain} title="Modelos e inteligencia" pill="stack cuantitativo" />
       <p className="radarNote">
-        Every one of these is live and, where selectable, switchable in the Control Room. This is the depth that separates a
-        real arbitrage-intelligence system from a spread checker.
+        Cada uno de estos está en vivo y, donde es seleccionable, se puede cambiar en la Sala de control. Esta es la
+        profundidad que separa un sistema real de inteligencia de arbitraje de un simple revisor de márgenes.
       </p>
       <div className="modelsActive">
         {active.map(([label, value, on]) => (
           <span key={label} className={on ? "on" : ""}><em>{label}</em><b>{value || "—"}</b></span>
         ))}
         {metrics.edgeCaptureRatio != null && (
-          <span className={metrics.edgeCaptureRatio > 0 ? "on" : ""}><em>Edge capture</em><b>{formatPercent(metrics.edgeCaptureRatio)}</b></span>
+          <span className={metrics.edgeCaptureRatio > 0 ? "on" : ""}><em>Captura de margen</em><b>{formatPercent(metrics.edgeCaptureRatio)}</b></span>
         )}
       </div>
       <div className="modelsCatalog">
@@ -1981,13 +1989,13 @@ function CoPilot({ snapshot, focusTrade }) {
 
   return (
     <section className="surface coPilot" id="copilot">
-      <PanelTitle icon={Sparkles} title="AI Co-pilot" pill={coPilot.available ? "Claude · live" : "live"} />
+      <PanelTitle icon={Sparkles} title="Copiloto IA" pill={coPilot.available ? "Claude · en vivo" : "en vivo"} />
       <div className="coPilotBody">
         <p className="coPilotText" aria-live="polite">
-          {text || (streaming ? "" : "Reading the current decision…")}
+          {text || (streaming ? "" : "Leyendo la decisión actual…")}
           {streaming && <span className="coPilotCaret" aria-hidden="true">▍</span>}
         </p>
-        <small className="coPilotFootline">Plain-language explanation of the live decision · advisory only, never trades{source && source !== "claude" ? ` · ${source}` : ""}</small>
+        <small className="coPilotFootline">Explicación en vivo · solo informativo, nunca opera{source && source !== "claude" ? ` · ${source}` : ""}</small>
       </div>
     </section>
   );
@@ -2078,12 +2086,12 @@ function WelcomeOverlay({ snapshot, onClose }) {
 }
 
 const JUDGE_CRITERIA = [
-  { crit: "Parametrization depth", why: "How much of the behavior is actually tunable.", how: "47 parameters tunable live in the Control Room (7 groups + Conservative/Balanced/Aggressive/HFT presets). A trainer even searches them for you.", links: [{ l: "Control Room", h: "#control" }, { l: "Research Lab", h: "#research" }] },
-  { crit: "Net-profit accuracy", why: "Profit must survive real costs.", how: "Every opportunity is charged fees, book-walk slippage, market impact, latency risk, inventory rebalancing and adverse move. P&L conservation is proven by invariant tests.", links: [{ l: "Current Decision", h: "#decision" }, { l: "Real Costs", h: "#reality" }, { l: "Diagnostics", h: "#diagnostics" }] },
-  { crit: "Latency", why: "Speed, measured rather than claimed.", how: "~3–6 ms internal decision time, decomposed live per stage (ingest/risk/scan/rank/exec/publish) and per venue.", links: [{ l: "Speed panel", h: "#speed" }, { l: "Diagnostics", h: "#diagnostics" }] },
-  { crit: "Robustness", why: "It has to keep running under stress.", how: "A watchdog contains any fault without downtime (try the Engine-fault button), a feed guard rejects poisoned data, and fuzz + chaos suites verify no crash and no NaN.", links: [{ l: "Stress Lab", h: "#stress" }, { l: "Resilience", h: "#resilience" }] },
-  { crit: "Strategy & intelligence", why: "Depth of method behind each decision.", how: "Bellman-Ford negative-cycle detection, OU mean-reversion fitting, fractional-Kelly sizing, Bayesian calibration, EV scoring, an observation recorder, and a wide-net radar across 10 venues + XRP/LTC/SOL/AVAX.", links: [{ l: "Models", h: "#models" }, { l: "Research Lab", h: "#research" }, { l: "Wide-Net Radar", h: "#radar" }] },
-  { crit: "Real-world viability", why: "Whether it would actually work outside a demo.", how: "Live mode runs the identical engine on real venues and honestly reports that fees exceed edges — the measured finding, with a testnet order path and a documented route to real capital.", links: [{ l: "Live Observation", h: "#observation" }, { l: "Wide-Net Radar", h: "#radar" }, { l: "Execution gateway", h: "#execution" }] },
+  { crit: "Profundidad de parametrización", why: "Cuánto del comportamiento es realmente ajustable.", how: "47 parámetros ajustables en vivo en la Sala de control (7 grupos + presets Conservador/Balanceado/Agresivo/HFT). Un entrenador incluso los busca por ti.", links: [{ l: "Sala de control", h: "#control" }, { l: "Lab. de investigación", h: "#research" }] },
+  { crit: "Exactitud de la ganancia neta", why: "La ganancia debe sobrevivir a los costos reales.", how: "Cada oportunidad se carga con comisiones, deslizamiento por recorrido del libro, impacto de mercado, riesgo de latencia, rebalanceo de inventario y movimiento adverso. La conservación del P&L se prueba con tests de invariantes.", links: [{ l: "Decisión actual", h: "#decision" }, { l: "Costos reales", h: "#reality" }, { l: "Diagnósticos", h: "#diagnostics" }] },
+  { crit: "Latencia", why: "Velocidad, medida en lugar de afirmada.", how: "~3–6 ms de decisión interna, descompuesta en vivo por etapa (ingesta/riesgo/escaneo/ranking/ejec/publica) y por casa.", links: [{ l: "Panel Velocidad", h: "#speed" }, { l: "Diagnósticos", h: "#diagnostics" }] },
+  { crit: "Robustez", why: "Tiene que seguir funcionando bajo estrés.", how: "Un vigilante contiene cualquier falla sin caídas (prueba el botón Falla del motor), una guardia de datos rechaza datos corruptos, y las suites de fuzz + caos verifican que no hay crash ni NaN.", links: [{ l: "Lab. de estrés", h: "#stress" }, { l: "Resiliencia", h: "#resilience" }] },
+  { crit: "Estrategia e inteligencia", why: "Profundidad del método detrás de cada decisión.", how: "Detección de ciclos negativos Bellman-Ford, ajuste de reversión a la media OU, dimensionamiento Kelly fraccional, calibración bayesiana, puntuación por EV, un registro de observación y un radar de red amplia sobre 10 casas + XRP/LTC/SOL/AVAX.", links: [{ l: "Modelos", h: "#models" }, { l: "Lab. de investigación", h: "#research" }, { l: "Radar de red amplia", h: "#radar" }] },
+  { crit: "Viabilidad en el mundo real", why: "Si realmente funcionaría fuera de un demo.", how: "El modo en vivo corre el motor idéntico sobre casas reales y reporta con honestidad que las comisiones superan a los márgenes — el hallazgo medido, con una ruta de órdenes en testnet y un camino documentado hacia capital real.", links: [{ l: "Observación en vivo", h: "#observation" }, { l: "Radar de red amplia", h: "#radar" }, { l: "Pasarela de ejecución", h: "#execution" }] },
 ];
 
 // Standing, self-serve map of the system for an unattended visitor: what each
@@ -2092,10 +2100,10 @@ const JUDGE_CRITERIA = [
 function JudgeGuide() {
   return (
     <section className="surface judgeGuide" id="overview">
-      <PanelTitle icon={ListChecks} title="Overview" pill="map of this page" />
+      <PanelTitle icon={ListChecks} title="Resumen" pill="mapa de esta página" />
       <p className="radarNote">
-        Nothing on this page is hidden behind a click — every section below is open, live, and stacked on this same page.
-        Here is what each part demonstrates, and a direct link to it.
+        Nada en esta página está oculto tras un clic — cada sección abajo está abierta, en vivo y apilada en esta misma página.
+        Esto es lo que demuestra cada parte, y un enlace directo a ella.
       </p>
       <div className="judgeRows">
         {JUDGE_CRITERIA.map((row) => (
@@ -2110,8 +2118,8 @@ function JudgeGuide() {
         ))}
       </div>
       <div className="judgeClose">
-        Aurelion is analysis and paper-trading only — no real-money execution, no withdrawal-capable keys, by design.
-        It refuses trades that don't pay after real costs, and explains every call it makes.
+        Aurelion es solo análisis y paper trading — sin ejecución con dinero real, sin llaves con permiso de retiro, por diseño.
+        Rechaza las operaciones que no pagan tras los costos reales, y explica cada decisión que toma.
       </div>
     </section>
   );
@@ -2128,11 +2136,11 @@ function App() {
     try { localStorage.setItem("aurelion_intro_seen", "1"); } catch { /* private mode */ }
   }, []);
   if (!snapshot) {
-    return <main className="loading"><div className="sigil"><Sparkles size={24} /></div><span>Starting Aurelion</span></main>;
+    return <main className="loading"><div className="sigil"><Sparkles size={24} /></div><span>Iniciando Aurelion</span></main>;
   }
   return (
     <>
-      <a className="skipLink" href="#main">Skip to main content</a>
+      <a className="skipLink" href="#main">Saltar al contenido principal</a>
       {showIntro && <WelcomeOverlay snapshot={snapshot} onClose={dismissIntro} />}
       <Header snapshot={snapshot} connected={connected} control={control} reset={reset} exportSession={exportSession} onHelp={() => setShowIntro(true)} />
       <main className="layout" id="main">
@@ -2185,8 +2193,8 @@ class ErrorBoundary extends React.Component {
       return (
         <main className="loading">
           <div className="sigil"><ShieldAlert size={24} /></div>
-          <span>Something went wrong rendering the cockpit.</span>
-          <button type="button" className="iconButton" style={{ marginTop: 14, padding: "8px 16px" }} onClick={() => window.location.reload()}>Reload</button>
+          <span>Algo salió mal al renderizar el panel.</span>
+          <button type="button" className="iconButton" style={{ marginTop: 14, padding: "8px 16px" }} onClick={() => window.location.reload()}>Recargar</button>
         </main>
       );
     }

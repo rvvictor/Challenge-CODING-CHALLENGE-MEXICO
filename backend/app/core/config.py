@@ -290,15 +290,15 @@ class Settings:
 # ---------------------------------------------------------------------------
 
 PARAMETER_GROUPS: tuple[tuple[str, str], ...] = (
-    ("models", "Strategy & model selection"),
-    ("execution", "Execution & gates"),
-    ("costs", "Costs & rebalance"),
-    ("ev", "Expected-value & latency model"),
-    ("risk", "Risk & circuit breaker"),
-    ("triangular", "Triangular / cycles"),
-    ("venue", "Venue health"),
-    ("discovery", "Wide-net discovery"),
-    ("cadence", "Engine & demo cadence"),
+    ("models", "Estrategia y selección de modelos"),
+    ("execution", "Ejecución y filtros"),
+    ("costs", "Costos y rebalanceo"),
+    ("ev", "Valor esperado y latencia"),
+    ("risk", "Riesgo y disyuntor"),
+    ("triangular", "Triangular / ciclos"),
+    ("venue", "Salud de casas"),
+    ("discovery", "Descubrimiento amplio"),
+    ("cadence", "Cadencia del motor y demo"),
 )
 
 
@@ -317,68 +317,68 @@ class ParameterSpec:
 
 
 PARAMETER_REGISTRY: tuple[ParameterSpec, ...] = (
-    # Strategy / model selection
-    ParameterSpec("cycle_algo", "models", "Cycle detection", "DFS (fast, bounded) or Bellman-Ford negative-log-cycle detection (finds all profitable loops).", "choice", options=("dfs", "bellman_ford")),
-    ParameterSpec("slippage_model", "models", "Slippage model", "book_walk (level-by-level), sqrt_impact (square-root law) or almgren_lite (temporary+permanent impact).", "choice", options=("book_walk", "sqrt_impact", "almgren_lite")),
-    ParameterSpec("market_impact_k", "models", "Impact coefficient k", "Strength of the market-impact term for sqrt_impact / almgren_lite.", "float", 0.0, 50.0, 0.5, "bps"),
-    ParameterSpec("sizing_mode", "models", "Position sizing", "fixed (use max trade size) or kelly (fractional-Kelly sizing by edge quality).", "choice", options=("fixed", "kelly")),
-    ParameterSpec("kelly_fraction", "models", "Kelly fraction", "Fraction of full Kelly used when sizing is set to kelly.", "float", 0.0, 1.0, 0.05, ""),
-    ParameterSpec("volatility_model", "models", "Volatility model", "range (oldest->now %), ewma (exponentially weighted) or stddev (rolling sigma of returns).", "choice", options=("range", "ewma", "stddev")),
-    ParameterSpec("calibration_enabled", "models", "Bayesian calibration", "When on, a Beta-Bernoulli success rate per venue (learned from realized fills) multiplies into confidence, so the bot trusts failing venues less.", "bool"),
-    # Execution & gates
-    ParameterSpec("min_trade_btc", "execution", "Min trade size", "Smallest executable size; below this an opportunity is blocked.", "float", 0.0005, 0.05, 0.0005, "BTC"),
-    ParameterSpec("max_trade_btc", "execution", "Max trade size", "Largest size simulated per trade (position cap).", "float", 0.001, 0.1, 0.001, "BTC"),
-    ParameterSpec("min_net_profit_usd", "execution", "Min net profit", "Minimum absolute net profit (after all costs) to execute.", "float", 0.0, 20.0, 0.05, "USD"),
-    ParameterSpec("min_net_bps", "execution", "Min net edge", "Minimum net edge in basis points to execute a cross-exchange trade.", "float", 0.0, 25.0, 0.05, "bps"),
-    ParameterSpec("min_confidence", "execution", "Min confidence", "Confidence floor (venue + data freshness) required to execute.", "float", 0.0, 1.0, 0.01, ""),
-    ParameterSpec("max_executions_per_tick", "execution", "Max trades / tick", "How many trades the bot may fire in a single evaluation cycle.", "int", 1, 10, 1, ""),
-    ParameterSpec("pair_cooldown_ms", "execution", "Pair cooldown", "Quiet period on a pair after executing on it.", "int", 0, 120000, 500, "ms"),
-    # Costs & rebalance
-    ParameterSpec("withdrawal_fee_impact", "costs", "Rebalance cost weight", "Multiplier applied to withdrawal/settlement fees when pooling inventory.", "float", 0.0, 1.0, 0.01, ""),
-    ParameterSpec("inventory_rebalance_buffer", "costs", "Rebalance buffer", "Extra headroom pulled when rebalancing, to avoid repeated transfers.", "float", 0.0, 2.0, 0.05, ""),
-    # Expected-value & latency model
-    ParameterSpec("ev_latency_cost_weight", "ev", "EV latency weight", "How heavily latency risk is subtracted in the expected-value score.", "float", 0.0, 2.0, 0.05, ""),
-    ParameterSpec("volatility_ev_risk_bps", "ev", "EV volatility risk", "Flat volatility risk charged per notional in the EV score.", "float", 0.0, 5.0, 0.01, "bps"),
-    ParameterSpec("inventory_ev_penalty_weight", "ev", "EV inventory weight", "How heavily inventory-rebalance cost is penalised in the EV score.", "float", 0.0, 2.0, 0.05, ""),
-    ParameterSpec("latency_half_life_ms", "ev", "Capture half-life", "Latency at which the capture probability halves (exponential decay).", "float", 100.0, 5000.0, 50.0, "ms"),
-    ParameterSpec("latency_bps_per_second", "ev", "Latency cost rate", "Latency risk accrued per second of round-trip latency.", "float", 0.0, 10.0, 0.1, "bps/s"),
-    ParameterSpec("latency_risk_floor_bps", "ev", "Latency cost floor", "Minimum latency risk charged to any opportunity.", "float", 0.0, 5.0, 0.05, "bps"),
-    # Risk & circuit breaker
-    ParameterSpec("max_volatility_pct", "risk", "Volatility trip", "BTC move over the window that trips the circuit breaker.", "float", 0.1, 10.0, 0.1, "%"),
-    ParameterSpec("volatility_window_ms", "risk", "Volatility window", "Look-back window for volatility detection.", "int", 2000, 120000, 1000, "ms"),
-    ParameterSpec("volatility_min_samples", "risk", "Volatility samples", "Minimum price samples before volatility can trip.", "int", 2, 60, 1, ""),
-    ParameterSpec("volatility_rearm_ms", "risk", "Volatility re-arm", "Cooldown before volatility can trip again.", "int", 0, 180000, 1000, "ms"),
-    ParameterSpec("max_book_age_ms", "risk", "Stale-data limit", "Order-book age beyond which data is considered stale.", "int", 500, 30000, 250, "ms"),
-    ParameterSpec("max_loss_streak", "risk", "Loss streak limit", "Consecutive losing trades before the breaker pauses execution.", "int", 1, 20, 1, ""),
-    ParameterSpec("pause_after_loss_ms", "risk", "Pause cooldown", "How long the breaker stays paused after activating.", "int", 0, 600000, 1000, "ms"),
-    ParameterSpec("risk_budget_hour_usd", "risk", "Hourly loss budget", "Max loss per rolling hour before the breaker pauses.", "float", 1.0, 10000.0, 5.0, "USD"),
-    # Triangular / cycles
-    ParameterSpec("triangular_enabled", "triangular", "Triangular engine", "Enable triangular and dynamic-cycle detection.", "bool"),
-    ParameterSpec("triangular_quote_size", "triangular", "Cycle notional", "Starting quote notional used to evaluate each cycle.", "float", 50.0, 10000.0, 50.0, "USDT"),
-    ParameterSpec("triangular_min_net_profit_usd", "triangular", "Cycle min profit", "Minimum net profit to execute a cycle.", "float", 0.0, 20.0, 0.05, "USD"),
-    ParameterSpec("triangular_min_net_bps", "triangular", "Cycle min edge", "Minimum net edge to execute a cycle.", "float", 0.0, 25.0, 0.05, "bps"),
-    ParameterSpec("triangular_max_legs", "triangular", "Max cycle legs", "Maximum number of legs in a detected cycle.", "int", 3, 6, 1, ""),
-    ParameterSpec("triangular_max_cycles_per_exchange", "triangular", "Cycles / exchange", "Maximum cycles evaluated per exchange per tick.", "int", 1, 32, 1, ""),
-    # Venue health
-    ParameterSpec("exchange_demotion_ticks", "venue", "Demotion ticks", "Stale/error ticks before a venue is demoted.", "int", 1, 60, 1, ""),
-    ParameterSpec("exchange_recovery_ticks", "venue", "Recovery ticks", "Healthy ticks required for a venue to recover.", "int", 1, 120, 1, ""),
-    ParameterSpec("health_slow_latency_ms", "venue", "Slow latency", "Latency above which a venue is flagged slow.", "int", 100, 5000, 50, "ms"),
-    ParameterSpec("health_min_score", "venue", "Min health score", "Health score floor (0-100) below which a venue is demoted.", "float", 0.0, 100.0, 1.0, ""),
-    ParameterSpec("feed_guard_enabled", "venue", "Feed guard", "Reject poisoned live order books (non-finite prices, crossed books, fat-finger jumps) at the provider boundary.", "bool"),
-    ParameterSpec("feed_max_jump_pct", "venue", "Feed jump gate", "Max mid-price move between consecutive updates of one book before the update is rejected as bad data.", "float", 0.5, 50.0, 0.5, "%"),
-    # Wide-net discovery
-    ParameterSpec("discovery_enabled", "discovery", "Discovery lane", "Background scout that sweeps the full venue universe plus XRP/LTC/SOL/AVAX pairs off the hot loop.", "bool"),
-    ParameterSpec("discovery_interval_ms", "discovery", "Sweep interval", "How often the discovery lane sweeps the wide universe.", "int", 10000, 600000, 5000, "ms"),
-    ParameterSpec("discovery_min_persistence", "discovery", "Promotion streak", "Consecutive sweeps a route must clear the edge threshold before it is flagged promotable.", "int", 1, 20, 1, "sweeps"),
-    # Floor of -30 is deliberate: real edges on majors sit at -20..-25 bps after
-    # entry-tier fees, so tracking WHICH route is persistently closest requires a
-    # threshold below them. Promotion still demands netBps >= this value.
-    ParameterSpec("discovery_min_net_bps", "discovery", "Edge threshold", "Net edge a discovered route must show to build a persistence streak (set below 0 to track persistent near-misses).", "float", -30.0, 25.0, 0.25, "bps"),
-    # Engine & demo cadence
-    ParameterSpec("evaluation_interval_ms", "cadence", "Tick interval", "How often the engine evaluates the market.", "int", 100, 5000, 50, "ms"),
-    ParameterSpec("execution_adverse_bps_per_second", "cadence", "Adverse move rate", "Adverse price drift charged per second of execution latency.", "float", 0.0, 10.0, 0.1, "bps/s"),
-    ParameterSpec("execution_adverse_max_bps", "cadence", "Adverse move cap", "Ceiling on the adverse-move execution cost.", "float", 0.0, 10.0, 0.1, "bps"),
-    ParameterSpec("demo_min_execution_gap_ms", "cadence", "Demo trade gap", "Minimum spacing between simulated demo fills (presentation realism).", "int", 0, 120000, 1000, "ms"),
+    # Estrategia / selección de modelos
+    ParameterSpec("cycle_algo", "models", "Detección de ciclos", "DFS (rápido, acotado) o detección de ciclos de log negativo Bellman-Ford (encuentra todos los bucles rentables).", "choice", options=("dfs", "bellman_ford")),
+    ParameterSpec("slippage_model", "models", "Modelo de deslizamiento", "book_walk (nivel por nivel), sqrt_impact (ley de raíz cuadrada) o almgren_lite (impacto temporal+permanente).", "choice", options=("book_walk", "sqrt_impact", "almgren_lite")),
+    ParameterSpec("market_impact_k", "models", "Coeficiente de impacto k", "Fuerza del término de impacto de mercado para sqrt_impact / almgren_lite.", "float", 0.0, 50.0, 0.5, "bps"),
+    ParameterSpec("sizing_mode", "models", "Dimensionamiento", "fixed (usa el tamaño máximo) o kelly (dimensionamiento Kelly fraccional por calidad del margen).", "choice", options=("fixed", "kelly")),
+    ParameterSpec("kelly_fraction", "models", "Fracción de Kelly", "Fracción del Kelly completo usada cuando el dimensionamiento es kelly.", "float", 0.0, 1.0, 0.05, ""),
+    ParameterSpec("volatility_model", "models", "Modelo de volatilidad", "range (más antiguo->ahora %), ewma (ponderado exponencial) o stddev (sigma móvil de retornos).", "choice", options=("range", "ewma", "stddev")),
+    ParameterSpec("calibration_enabled", "models", "Calibración bayesiana", "Al activarse, una tasa de éxito Beta-Bernoulli por casa (aprendida de llenados reales) se multiplica en la confianza, para que el bot confíe menos en las casas que fallan.", "bool"),
+    # Ejecución y filtros
+    ParameterSpec("min_trade_btc", "execution", "Tamaño mín. de operación", "Tamaño ejecutable más pequeño; por debajo de esto una oportunidad se bloquea.", "float", 0.0005, 0.05, 0.0005, "BTC"),
+    ParameterSpec("max_trade_btc", "execution", "Tamaño máx. de operación", "Tamaño máximo simulado por operación (tope de posición).", "float", 0.001, 0.1, 0.001, "BTC"),
+    ParameterSpec("min_net_profit_usd", "execution", "Ganancia neta mín.", "Ganancia neta absoluta mínima (tras todos los costos) para ejecutar.", "float", 0.0, 20.0, 0.05, "USD"),
+    ParameterSpec("min_net_bps", "execution", "Margen neto mín.", "Margen neto mínimo en puntos base para ejecutar una operación entre casas.", "float", 0.0, 25.0, 0.05, "bps"),
+    ParameterSpec("min_confidence", "execution", "Confianza mín.", "Piso de confianza (casa + frescura de datos) requerido para ejecutar.", "float", 0.0, 1.0, 0.01, ""),
+    ParameterSpec("max_executions_per_tick", "execution", "Máx. operaciones / tick", "Cuántas operaciones puede disparar el bot en un solo ciclo de evaluación.", "int", 1, 10, 1, ""),
+    ParameterSpec("pair_cooldown_ms", "execution", "Enfriamiento por par", "Periodo de silencio en un par tras operar en él.", "int", 0, 120000, 500, "ms"),
+    # Costos y rebalanceo
+    ParameterSpec("withdrawal_fee_impact", "costs", "Peso del costo de rebalanceo", "Multiplicador aplicado a las comisiones de retiro/liquidación al agrupar inventario.", "float", 0.0, 1.0, 0.01, ""),
+    ParameterSpec("inventory_rebalance_buffer", "costs", "Margen de rebalanceo", "Holgura extra que se trae al rebalancear, para evitar transferencias repetidas.", "float", 0.0, 2.0, 0.05, ""),
+    # Valor esperado y latencia
+    ParameterSpec("ev_latency_cost_weight", "ev", "Peso de latencia en EV", "Cuánto se resta el riesgo de latencia en la puntuación de valor esperado.", "float", 0.0, 2.0, 0.05, ""),
+    ParameterSpec("volatility_ev_risk_bps", "ev", "Riesgo de volatilidad en EV", "Riesgo de volatilidad plano cobrado por nocional en la puntuación EV.", "float", 0.0, 5.0, 0.01, "bps"),
+    ParameterSpec("inventory_ev_penalty_weight", "ev", "Peso de inventario en EV", "Cuánto se penaliza el costo de rebalanceo de inventario en la puntuación EV.", "float", 0.0, 2.0, 0.05, ""),
+    ParameterSpec("latency_half_life_ms", "ev", "Vida media de captura", "Latencia a la que la probabilidad de captura se reduce a la mitad (decaimiento exponencial).", "float", 100.0, 5000.0, 50.0, "ms"),
+    ParameterSpec("latency_bps_per_second", "ev", "Tasa de costo de latencia", "Riesgo de latencia acumulado por segundo de latencia ida y vuelta.", "float", 0.0, 10.0, 0.1, "bps/s"),
+    ParameterSpec("latency_risk_floor_bps", "ev", "Piso de costo de latencia", "Riesgo de latencia mínimo cobrado a cualquier oportunidad.", "float", 0.0, 5.0, 0.05, "bps"),
+    # Riesgo y disyuntor
+    ParameterSpec("max_volatility_pct", "risk", "Disparo de volatilidad", "Movimiento de BTC en la ventana que dispara el disyuntor.", "float", 0.1, 10.0, 0.1, "%"),
+    ParameterSpec("volatility_window_ms", "risk", "Ventana de volatilidad", "Ventana de análisis retrospectivo para detectar volatilidad.", "int", 2000, 120000, 1000, "ms"),
+    ParameterSpec("volatility_min_samples", "risk", "Muestras de volatilidad", "Muestras de precio mínimas antes de que la volatilidad pueda disparar.", "int", 2, 60, 1, ""),
+    ParameterSpec("volatility_rearm_ms", "risk", "Rearme de volatilidad", "Enfriamiento antes de que la volatilidad pueda disparar de nuevo.", "int", 0, 180000, 1000, "ms"),
+    ParameterSpec("max_book_age_ms", "risk", "Límite de datos viejos", "Edad del libro más allá de la cual los datos se consideran viejos.", "int", 500, 30000, 250, "ms"),
+    ParameterSpec("max_loss_streak", "risk", "Límite de racha de pérdidas", "Operaciones perdedoras consecutivas antes de que el disyuntor pause la ejecución.", "int", 1, 20, 1, ""),
+    ParameterSpec("pause_after_loss_ms", "risk", "Enfriamiento de pausa", "Cuánto tiempo permanece pausado el disyuntor tras activarse.", "int", 0, 600000, 1000, "ms"),
+    ParameterSpec("risk_budget_hour_usd", "risk", "Presupuesto de pérdida por hora", "Pérdida máxima por hora móvil antes de que el disyuntor pause.", "float", 1.0, 10000.0, 5.0, "USD"),
+    # Triangular / ciclos
+    ParameterSpec("triangular_enabled", "triangular", "Motor triangular", "Habilita la detección triangular y de ciclos dinámicos.", "bool"),
+    ParameterSpec("triangular_quote_size", "triangular", "Nocional del ciclo", "Nocional inicial en la moneda de cotización usado para evaluar cada ciclo.", "float", 50.0, 10000.0, 50.0, "USDT"),
+    ParameterSpec("triangular_min_net_profit_usd", "triangular", "Ganancia mín. del ciclo", "Ganancia neta mínima para ejecutar un ciclo.", "float", 0.0, 20.0, 0.05, "USD"),
+    ParameterSpec("triangular_min_net_bps", "triangular", "Margen mín. del ciclo", "Margen neto mínimo para ejecutar un ciclo.", "float", 0.0, 25.0, 0.05, "bps"),
+    ParameterSpec("triangular_max_legs", "triangular", "Máx. tramos del ciclo", "Número máximo de tramos en un ciclo detectado.", "int", 3, 6, 1, ""),
+    ParameterSpec("triangular_max_cycles_per_exchange", "triangular", "Ciclos / casa", "Máximo de ciclos evaluados por casa por tick.", "int", 1, 32, 1, ""),
+    # Salud de casas
+    ParameterSpec("exchange_demotion_ticks", "venue", "Ticks para degradar", "Ticks viejos/con error antes de degradar una casa.", "int", 1, 60, 1, ""),
+    ParameterSpec("exchange_recovery_ticks", "venue", "Ticks para recuperar", "Ticks sanos requeridos para que una casa se recupere.", "int", 1, 120, 1, ""),
+    ParameterSpec("health_slow_latency_ms", "venue", "Latencia lenta", "Latencia por encima de la cual una casa se marca lenta.", "int", 100, 5000, 50, "ms"),
+    ParameterSpec("health_min_score", "venue", "Puntuación mín. de salud", "Piso de puntuación de salud (0-100) bajo el cual se degrada una casa.", "float", 0.0, 100.0, 1.0, ""),
+    ParameterSpec("feed_guard_enabled", "venue", "Guardia de datos", "Rechaza libros de órdenes en vivo corruptos (precios no finitos, libros cruzados, saltos de dedo gordo) en la frontera del proveedor.", "bool"),
+    ParameterSpec("feed_max_jump_pct", "venue", "Filtro de salto de datos", "Movimiento máximo del precio medio entre actualizaciones consecutivas de un libro antes de rechazar la actualización como dato malo.", "float", 0.5, 50.0, 0.5, "%"),
+    # Descubrimiento amplio
+    ParameterSpec("discovery_enabled", "discovery", "Carril de descubrimiento", "Explorador en segundo plano que barre todo el universo de casas más pares XRP/LTC/SOL/AVAX fuera del bucle principal.", "bool"),
+    ParameterSpec("discovery_interval_ms", "discovery", "Intervalo de barrido", "Con qué frecuencia el carril de descubrimiento barre el universo amplio.", "int", 10000, 600000, 5000, "ms"),
+    ParameterSpec("discovery_min_persistence", "discovery", "Racha de promoción", "Barridos consecutivos que una ruta debe superar el umbral de margen antes de marcarse promocionable.", "int", 1, 20, 1, "barridos"),
+    # El piso de -30 es deliberado: los márgenes reales en los majors están en
+    # -20..-25 bps tras las comisiones de nivel de entrada, así que rastrear CUÁL
+    # ruta está persistentemente más cerca requiere un umbral por debajo de ellos.
+    ParameterSpec("discovery_min_net_bps", "discovery", "Umbral de margen", "Margen neto que una ruta descubierta debe mostrar para construir una racha de persistencia (pon por debajo de 0 para rastrear casi-aciertos persistentes).", "float", -30.0, 25.0, 0.25, "bps"),
+    # Cadencia del motor y demo
+    ParameterSpec("evaluation_interval_ms", "cadence", "Intervalo de tick", "Con qué frecuencia el motor evalúa el mercado.", "int", 100, 5000, 50, "ms"),
+    ParameterSpec("execution_adverse_bps_per_second", "cadence", "Tasa de movimiento adverso", "Deriva adversa del precio cobrada por segundo de latencia de ejecución.", "float", 0.0, 10.0, 0.1, "bps/s"),
+    ParameterSpec("execution_adverse_max_bps", "cadence", "Tope de movimiento adverso", "Techo del costo de ejecución por movimiento adverso.", "float", 0.0, 10.0, 0.1, "bps"),
+    ParameterSpec("demo_min_execution_gap_ms", "cadence", "Espaciado de operaciones demo", "Espaciado mínimo entre llenados simulados del demo (realismo de presentación).", "int", 0, 120000, 1000, "ms"),
 )
 
 PARAMETER_PRESETS: dict[str, dict[str, float | int | bool]] = {

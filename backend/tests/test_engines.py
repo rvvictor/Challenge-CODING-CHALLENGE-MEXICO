@@ -838,7 +838,7 @@ class CoPilotTests(unittest.TestCase):
             "queuedOpportunities": [],
         }
         first = narrator.narrate(snapshot)
-        self.assertIn("circuit breaker", first["text"].lower())
+        self.assertIn("disyuntor", first["text"].lower())
         self.assertIn("venue_outage", first["text"])
         second = narrator.narrate(snapshot)
         self.assertTrue(second["cached"])
@@ -906,8 +906,8 @@ class CoPilotTests(unittest.TestCase):
         result = narrator.narrate(snapshot, trade_id="does-not-exist")
         self.assertEqual(result["source"], "deterministic")
         # Phrasing rotates between grounded variants; every idle variant explains
-        # that visible spreads do not survive costs.
-        self.assertIn("costs", result["text"].lower())
+        # that visible spreads do not survive costs (Spanish: "costos").
+        self.assertIn("costos", result["text"].lower())
 
     def test_narrator_streams_deterministic_chunks(self):
         import asyncio
@@ -2129,18 +2129,18 @@ class CoPilotModeAwarenessTests(unittest.TestCase):
 
     def test_demo_narration_says_it_is_a_showcase(self):
         text = self._narrator().narrate(self._snap("demo"))["text"].lower()
-        self.assertTrue("demo" in text or "showcase" in text or "simulated" in text)
+        self.assertTrue("demo" in text or "simulado" in text)
 
     def test_live_narration_explains_the_fee_wall_finding(self):
         obs = {"recording": True, "samples": 57, "routesObserved": 50, "capturableRoutes": 0}
         text = self._narrator().narrate(self._snap("auto", executed=0, observation=obs))["text"].lower()
         self.assertIn("real", text)
-        self.assertTrue("fee wall" in text or "not a fault" in text or "measured" in text)
+        self.assertTrue("muro de comisiones" in text or "no falla" in text or "hallazgo" in text)
         self.assertIn("57", text)  # grounded in the observation numbers
 
     def test_degraded_narration_warns_data_is_not_live(self):
         text = self._narrator().narrate(self._snap("auto", degraded=True))["text"].lower()
-        self.assertTrue("not live" in text or "fallback" in text)
+        self.assertTrue("no en vivo" in text or "respaldo" in text)
 
     def test_mode_change_invalidates_cache(self):
         narrator = self._narrator()

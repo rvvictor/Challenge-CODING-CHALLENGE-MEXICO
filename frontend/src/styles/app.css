@@ -84,7 +84,7 @@ button {
   grid-template-columns: minmax(250px, 0.9fr) auto minmax(310px, auto) auto;
   align-items: center;
   gap: 12px;
-  padding: 12px 20px;
+  padding: 7px 18px;
   border-bottom: 1px solid rgba(215, 223, 211, 0.9);
   background: rgba(238, 242, 236, 0.9);
   backdrop-filter: blur(18px);
@@ -105,8 +105,8 @@ button {
 
 .sigil {
   display: grid;
-  width: 44px;
-  height: 44px;
+  width: 38px;
+  height: 38px;
   place-items: center;
   border: 1px solid rgba(17, 24, 22, 0.72);
   border-radius: 8px;
@@ -122,7 +122,7 @@ p {
 }
 
 h1 {
-  font-size: 22px;
+  font-size: 19px;
   font-weight: 850;
 }
 
@@ -137,8 +137,8 @@ small,
 }
 
 .identity p {
-  margin-top: 2px;
-  font-size: 13px;
+  margin-top: 1px;
+  font-size: 11.5px;
 }
 
 .controls {
@@ -163,25 +163,29 @@ small,
 
 .pulseItem {
   display: grid;
-  min-height: 38px;
+  min-height: 30px;
   align-content: center;
-  gap: 1px;
-  padding: 6px 10px;
+  gap: 0;
+  padding: 3px 9px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 7px;
   background: var(--paper);
+  min-width: 0;
 }
 
 .pulseItem b {
-  font-size: 12px;
+  font-size: 11.5px;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .pulseItem small {
   color: var(--muted);
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 850;
   text-transform: uppercase;
+  letter-spacing: 0.02em;
 }
 
 .pulseItem.good {
@@ -204,7 +208,7 @@ small,
 .stressButton,
 .iconButton,
 .segmented {
-  min-height: 38px;
+  min-height: 32px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--paper);
@@ -288,20 +292,20 @@ small,
 
 .iconButton {
   display: grid;
-  width: 38px;
+  width: 32px;
   place-items: center;
 }
 
 .layout {
-  width: min(1520px, calc(100% - 28px));
-  margin: 14px auto 34px;
+  width: min(1560px, calc(100% - 24px));
+  margin: 10px auto 28px;
 }
 
 .overview {
   display: grid;
   grid-template-columns: repeat(6, minmax(135px, 1fr));
   gap: 8px;
-  margin-bottom: 10px;
+  margin-bottom: 0;
 }
 
 .metric,
@@ -315,26 +319,33 @@ small,
 
 .metric {
   display: grid;
-  grid-template-columns: 26px 1fr;
-  min-height: 100px;
-  gap: 6px 10px;
-  padding: 14px 15px;
+  grid-template-columns: 22px 1fr;
+  min-height: 74px;
+  gap: 3px 9px;
+  padding: 10px 12px;
+  min-width: 0;
 }
 
 .metric span {
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: 10.5px;
   font-weight: 850;
   text-transform: uppercase;
   letter-spacing: 0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .metric strong {
   grid-column: 1 / -1;
-  margin-top: 3px;
-  font-size: 27px;
+  margin-top: 1px;
+  font-size: 21px;
   font-weight: 850;
   letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .metric small {
@@ -342,6 +353,7 @@ small,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 11px;
 }
 
 .metric.good svg,
@@ -358,7 +370,7 @@ small,
 .layout > .cockpit,
 .layout > .secondary,
 .layout > .deep {
-  margin-top: 12px;
+  margin-top: 8px;
 }
 
 /* --- Tier 1: cockpit — the most important panels, sized and placed so most
@@ -370,12 +382,12 @@ small,
   grid-template-areas:
     "control decision copilot"
     "control stress   models";
-  gap: 14px;
+  gap: 10px;
   align-items: start;
 }
 
 .cockpitControl { grid-area: control; }
-.cockpitDecision { grid-area: decision; display: grid; gap: 14px; align-content: start; }
+.cockpitDecision { grid-area: decision; display: grid; gap: 10px; align-content: start; }
 .cockpitCopilot { grid-area: copilot; }
 .cockpitStress { grid-area: stress; }
 .cockpitModels { grid-area: models; }
@@ -408,7 +420,7 @@ small,
 .deep {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  gap: 14px;
+  gap: 10px;
   align-items: start;
 }
 
@@ -425,8 +437,8 @@ small,
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 14px 16px;
+  gap: 12px;
+  padding: 10px 13px;
   border-bottom: 1px solid var(--line);
   background: var(--paper-2);
 }
@@ -434,31 +446,37 @@ small,
 .panelTitle h2 {
   display: inline-flex;
   align-items: center;
-  gap: 9px;
-  font-size: 16.5px;
+  gap: 8px;
+  font-size: 14.5px;
   font-weight: 850;
+  min-width: 0;
 }
 
+.panelTitle h2 svg { flex-shrink: 0; }
+
 .panelTitle span {
-  min-height: 30px;
-  padding: 7px 9px;
-  border-radius: 7px;
+  min-height: 26px;
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 6px;
   background: #e9eee5;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 850;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .bookGrid {
   display: grid;
   grid-template-columns: repeat(5, minmax(140px, 1fr));
-  gap: 8px;
-  padding: 11px;
+  gap: 7px;
+  padding: 9px;
 }
 
 .book {
-  padding: 11px;
+  padding: 9px 10px;
   box-shadow: none;
 }
 
@@ -1138,22 +1156,23 @@ small,
 
 .coverageGrid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
   gap: 6px;
   padding: 9px;
 }
 
 .coverageGrid button {
   display: grid;
-  gap: 2px;
-  min-height: 54px;
-  padding: 8px;
+  gap: 1px;
+  min-height: 42px;
+  padding: 6px 8px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 7px;
   background: #fcfdf9;
   color: var(--ink);
   cursor: pointer;
   text-align: left;
+  min-width: 0;
 }
 
 .coverageGrid button.active {
@@ -1177,13 +1196,19 @@ small,
 }
 
 .coverageGrid b {
-  font-size: 12.5px;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .coverageGrid span {
   color: var(--muted);
-  font-size: 10.5px;
-  line-height: 1.25;
+  font-size: 10px;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .globalGrid article {
@@ -1771,6 +1796,8 @@ small,
 .coPilotText {
   margin: 0;
   min-height: 40px;
+  max-height: 132px;
+  overflow-y: auto;
   color: var(--ink);
   font-size: 13.5px;
   line-height: 1.5;
