@@ -255,6 +255,13 @@ class Settings:
     database_url: str = os.getenv("DATABASE_URL", "")
     persistence_enabled: bool = bool_env("PERSISTENCE_ENABLED", True)
     sqlite_path: str = os.getenv("SQLITE_PATH", ".aurelion/aurelion.db")
+    # Durable-store housekeeping: the "opportunity" event kind is by far the
+    # highest-volume write (measured: ~2.6 KB/row, ~98% of durable bytes) and had
+    # no retention at all, so the store grew unbounded on a long-running host.
+    # Both knobs are enforced (whichever is hit first) so disk use stays bounded
+    # on a small/free hosting plan regardless of tick rate or uptime.
+    persistence_retention_hours: float = number_env("PERSISTENCE_RETENTION_HOURS", 24)
+    persistence_max_rows: int = int_env("PERSISTENCE_MAX_ROWS", 50000)
     starting_usdt: float = number_env("STARTING_USDT_PER_EXCHANGE", 35000)
     starting_btc: float = number_env("STARTING_BTC_PER_EXCHANGE", 0.25)
     starting_eth: float = number_env("STARTING_ETH_PER_EXCHANGE", 6)

@@ -740,6 +740,88 @@ class BacktestAndLearningTests(unittest.TestCase):
         sink.close()
 
 
+class PersistenceRetentionTests(unittest.TestCase):
+    """The durable store must self-bound: the 'opportunity' kind is the
+    dominant write volume in production and previously had no retention at
+    all, which is what grew the on-disk DB unbounded on a long-running host."""
+
+    def _sink(self, **overrides):
+        import os
+        import tempfile
+
+        from backend.app.integrations.persistence import DurableEventSink
+
+        tmp = os.path.join(tempfile.mkdtemp(), "aurelion-retention-test.db")
+        settings = Settings(persistence_enabled=True, sqlite_path=tmp, **overrides)
+        sink = DurableEventSink(settings)
+        if sink.status != "connected":
+            self.skipTest("sqlite sink unavailable in this environment")
+        return sink
+
+    def test_row_cap_keeps_only_the_newest_rows(self):
+        sink = self._sink(persistence_max_rows=50)
+        for index in range(30):
+            sink.append("opportunity", {"i": index})
+        self.assertEqual(sink.count(), 30)  # under the cap: nothing to prune yet
+        pruned = sink.prune_now()
+        self.assertEqual(pruned, 0)
+        sink.close()
+
+    def test_row_cap_prunes_oldest_first(self):
+        sink = self._sink(persistence_max_rows=10)
+        for index in range(30):
+            sink.append("opportunity", {"i": index})
+        pruned = sink.prune_now()
+        self.assertGreater(pruned, 0)
+        remaining = sink.read(kind="opportunity", limit=50)
+        self.assertEqual(len(remaining), 10)
+        # Newest-first read: the surviving rows must be the LAST ones written.
+        self.assertEqual(remaining[0]["payload"]["i"], 29)
+        self.assertEqual(remaining[-1]["payload"]["i"], 20)
+        sink.close()
+
+    def test_time_retention_prunes_old_rows(self):
+        import time as time_module
+
+        # A ~100ms retention window: comfortably longer than the sub-millisecond
+        # gap between the insert and append_many's own immediate (unforced, but
+        # unthrottled on a fresh instance) prune call, so that call doesn't
+        # already delete the row — and comfortably shorter than the 150ms sleep
+        # below, so the row is unambiguously stale by the time this test prunes.
+        sink = self._sink(persistence_retention_hours=100 / 3600000)
+        sink.append("opportunity", {"i": "old"})
+        time_module.sleep(0.15)
+        pruned = sink.prune_now()
+        self.assertGreaterEqual(pruned, 1)
+        self.assertEqual(sink.count(), 0)
+        sink.close()
+
+    def test_prune_is_throttled_unless_forced(self):
+        sink = self._sink(persistence_max_rows=5)
+        sink.prune_now()  # prime _last_prune_at so the throttle window is fresh
+        for index in range(20):
+            sink.append("opportunity", {"i": index})
+        # The tick path's unforced call must be a no-op: PRUNE_CHECK_SECONDS
+        # hasn't elapsed since the priming call above, so nothing should have
+        # been pruned by the 20 inserts despite being well over the cap of 5.
+        self.assertEqual(sink.count(), 20)
+        self.assertEqual(sink._maybe_prune(force=False), 0)
+        self.assertEqual(sink.count(), 20)
+        # A forced call always runs regardless of the throttle window.
+        forced = sink.prune_now()
+        self.assertGreater(forced, 0)
+        self.assertEqual(sink.count(), 5)
+        sink.close()
+
+    def test_snapshot_reports_retention_config(self):
+        sink = self._sink(persistence_retention_hours=6, persistence_max_rows=12345)
+        snap = sink.snapshot()
+        self.assertEqual(snap["retentionHours"], 6)
+        self.assertEqual(snap["maxRows"], 12345)
+        self.assertIn("lastPrunedRows", snap)
+        sink.close()
+
+
 class StressLabTests(unittest.TestCase):
     def _sim(self):
         settings = Settings()
