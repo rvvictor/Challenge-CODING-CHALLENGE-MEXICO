@@ -641,6 +641,28 @@ class MarketService:
 
         return BacktestRunner(self.settings).run(ticks, regime, source)
 
+    def run_validation(self, windows: int = 4, ticks: int = 200, regime: str = "normal", source: str = "historical") -> dict:
+        """Statistical edge-validation across independent out-of-sample windows:
+        the honest, quantified answer to 'is the edge real after costs?'. CPU/
+        network-bound — called via to_thread so it never blocks the live loop."""
+        from backend.app.engines.validation import ValidationEngine
+
+        result = ValidationEngine(self.settings).run(windows, ticks, regime, source)
+        try:
+            from backend.app.integrations.research_store import save_research
+
+            save_research("validation", result)
+            self.edge_ledger.append("research", {
+                "kind": "validation",
+                "classification": result.get("verdict", {}).get("classification"),
+                "pooledTrades": result.get("pooledTrades"),
+                "dataProvenance": result.get("dataProvenance"),
+            })
+        except Exception:
+            # Persistence is best-effort; a validation result is still returned.
+            pass
+        return result
+
     # ---- Research & Training Lab (off the hot loop, called via to_thread) ------
     def run_spread_study(self, timeframe: str = "1m", limit: int = 300) -> dict:
         from backend.app.engines.spread_model import SpreadDynamicsLab

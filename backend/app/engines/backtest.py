@@ -224,6 +224,10 @@ class BacktestRunner:
             "maxDrawdown": round(max_drawdown, 4),
             "sharpeLike": sharpe_like,
             "finalEquity": equity[-1] if equity else 0.0,
+            # Raw per-trade realized P&L, so the validation engine can compute a
+            # bootstrap CI and a significance test on the edge (small list —
+            # bounded by executed trades, not ticks).
+            "tradePnls": [round(value, 4) for value in trade_pnls],
             "equityCurve": [{"t": position, "pnl": value} for position, value in enumerate(equity[-240:])],
             "params": {
                 "minNetBps": self.settings.min_net_bps,

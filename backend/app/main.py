@@ -276,6 +276,17 @@ async def backtest(ticks: int = 250, regime: str = "normal", source: str = "simu
     return await asyncio.to_thread(market_service.run_backtest, ticks, regime, source)
 
 
+@app.get("/api/validation")
+async def validation(windows: int = 4, ticks: int = 200, regime: str = "normal", source: str = "historical") -> dict:
+    # Statistical edge-validation: replays the same engines across independent
+    # out-of-sample windows and reports a bootstrap CI + significance test on the
+    # post-cost edge — the honest, quantified answer to "is the edge real?".
+    # Bounded and read-only; off-loaded (CPU + one real-history fetch).
+    return await asyncio.to_thread(
+        market_service.run_validation, min(max(windows, 1), 12), min(max(ticks, 30), 1000), regime, source
+    )
+
+
 @app.get("/api/narrate")
 async def narrate(question: str = "", model: str = "", tradeId: str = "") -> dict:
     # Advisory, explanation-only co-pilot. Off-loaded so a (possibly slow) LLM

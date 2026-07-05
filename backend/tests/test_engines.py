@@ -2185,5 +2185,131 @@ class EnsembleCaptureConfidenceTests(unittest.TestCase):
             self.assertTrue(math.isfinite(value))
 
 
+class PerformanceStatisticsTests(unittest.TestCase):
+    """Pure statistics primitives, checked against known series."""
+
+    def test_max_drawdown_known_series(self):
+        from backend.app.engines.statistics import max_drawdown
+
+        self.assertAlmostEqual(max_drawdown([0, 5, 3, 8, 2]), 6.0)
+        self.assertAlmostEqual(max_drawdown([1, 2, 3, 4]), 0.0)  # monotone up
+
+    def test_profit_factor_and_hit_rate(self):
+        from backend.app.engines.statistics import hit_rate, profit_factor
+
+        self.assertAlmostEqual(profit_factor([2, -1, 3, -1]), 2.5)
+        self.assertEqual(profit_factor([-1, -2]), 0.0)  # no gains
+        self.assertAlmostEqual(hit_rate([1, -1, 2, 0]), 0.75)
+
+    def test_sharpe_zero_without_dispersion(self):
+        from backend.app.engines.statistics import sharpe_ratio
+
+        self.assertEqual(sharpe_ratio([1.0, 1.0, 1.0]), 0.0)
+        self.assertEqual(sharpe_ratio([1.0]), 0.0)  # too few
+
+    def test_sortino_penalizes_only_downside(self):
+        from backend.app.engines.statistics import sharpe_ratio, sortino_ratio
+
+        # An all-positive series has no downside deviation -> sortino 0 by design,
+        # while sharpe is defined; the two are intentionally different measures.
+        returns = [0.5, 1.0, 0.8, 1.2]
+        self.assertGreater(sharpe_ratio(returns), 0.0)
+        self.assertEqual(sortino_ratio(returns), 0.0)
+
+    def test_bootstrap_ci_is_ordered_and_deterministic(self):
+        from backend.app.engines.statistics import bootstrap_mean_ci
+
+        series = [1.0, 1.1, 0.9, 1.2, 0.8, 1.05, 0.95, 1.15]
+        a = bootstrap_mean_ci(series, iterations=500, seed=42)
+        b = bootstrap_mean_ci(series, iterations=500, seed=42)
+        self.assertEqual(a, b)  # same seed -> identical
+        self.assertLessEqual(a["low"], a["point"])
+        self.assertLessEqual(a["point"], a["high"])
+        self.assertGreater(a["low"], 0.0)  # clearly-positive series excludes zero
+
+    def test_significance_detects_real_edge(self):
+        from backend.app.engines.statistics import edge_significance
+
+        strong = edge_significance([1.0, 1.1, 0.9, 1.2, 0.8, 1.0, 1.1, 0.9])
+        self.assertTrue(strong["significant"])
+        self.assertLess(strong["pValue"], 0.05)
+
+    def test_significance_rejects_zero_mean_noise(self):
+        from backend.app.engines.statistics import edge_significance
+
+        noise = edge_significance([1.0, -1.0, 1.0, -1.0, 1.0, -1.0])
+        self.assertFalse(noise["significant"])
+        self.assertAlmostEqual(noise["pValue"], 0.5, places=3)
+
+    def test_performance_stats_shape_and_values(self):
+        from backend.app.engines.statistics import performance_stats
+
+        stats = performance_stats([1.0, -0.5, 0.75, -0.25, 0.5], bootstrap_iterations=300)
+        for key in ("trades", "totalPnl", "sharpe", "sortino", "calmar", "maxDrawdown", "meanCi", "significance"):
+            self.assertIn(key, stats)
+        self.assertEqual(stats["trades"], 5)
+        self.assertAlmostEqual(stats["totalPnl"], 1.5, places=6)
+
+
+class ValidationEngineTests(unittest.TestCase):
+    """The multi-window edge-validation engine and its honest verdict logic."""
+
+    def _engine(self):
+        from backend.app.engines.validation import ValidationEngine
+
+        return ValidationEngine(Settings())
+
+    def test_verdict_classifications(self):
+        engine = self._engine()
+
+        positive = engine._verdict(
+            {"trades": 40, "meanPnl": 0.5, "significance": {"significant": True, "pValue": 0.001},
+             "meanCi": {"low": 0.2, "high": 0.8}}, 3, 4, "real-exchange-history", [1.0],
+        )
+        self.assertEqual(positive["classification"], "edge-positive")
+        self.assertTrue(positive["edgeIsReal"])
+
+        inconclusive = engine._verdict(
+            {"trades": 40, "meanPnl": 0.05, "significance": {"significant": False, "pValue": 0.3},
+             "meanCi": {"low": -0.1, "high": 0.2}}, 2, 4, "real-exchange-history", [-5.0],
+        )
+        self.assertEqual(inconclusive["classification"], "edge-inconclusive")
+        self.assertFalse(inconclusive["edgeIsReal"])
+
+        negative = engine._verdict(
+            {"trades": 40, "meanPnl": -0.4, "significance": {"significant": False, "pValue": 0.9},
+             "meanCi": {"low": -0.8, "high": -0.1}}, 0, 4, "real-exchange-history", [-22.0],
+        )
+        self.assertEqual(negative["classification"], "edge-negative")
+        self.assertFalse(negative["edgeIsReal"])
+
+        thin = engine._verdict(
+            {"trades": 2, "meanPnl": 0.1, "significance": {"significant": False, "pValue": 0.4},
+             "meanCi": {"low": -0.2, "high": 0.4}}, 1, 4, "simulated", [],
+        )
+        self.assertEqual(thin["classification"], "insufficient-data")
+
+    def test_end_to_end_simulated_is_bounded_and_deterministic(self):
+        engine = self._engine()
+        # source=simulated never touches the network; small windows/ticks keep it fast.
+        result = engine.run(windows=2, ticks=40, regime="normal", source="simulated", bootstrap_iterations=300)
+        self.assertEqual(result["dataProvenance"], "simulated")
+        self.assertEqual(result["windows"], 2)
+        self.assertIn(result["verdict"]["classification"],
+                      {"edge-positive", "edge-inconclusive", "edge-negative", "insufficient-data"})
+        self.assertGreaterEqual(result["windowConsistency"], 0.0)
+        self.assertLessEqual(result["windowConsistency"], 1.0)
+        # Deterministic: identical inputs -> identical verdict + pooled trades.
+        again = engine.run(windows=2, ticks=40, regime="normal", source="simulated", bootstrap_iterations=300)
+        self.assertEqual(result["pooledTrades"], again["pooledTrades"])
+        self.assertEqual(result["verdict"]["classification"], again["verdict"]["classification"])
+
+    def test_run_clamps_out_of_range_windows(self):
+        engine = self._engine()
+        result = engine.run(windows=99, ticks=5, source="simulated", bootstrap_iterations=200)
+        self.assertLessEqual(result["windows"], 12)
+        self.assertGreaterEqual(result["ticksPerWindow"], 30)
+
+
 if __name__ == "__main__":
     unittest.main()

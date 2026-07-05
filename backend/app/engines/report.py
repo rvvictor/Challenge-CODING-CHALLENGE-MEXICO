@@ -58,6 +58,40 @@ def _radar_rows(discovery: dict) -> str:
     return "".join(rows)
 
 
+def _validation_section(research: list[dict]) -> str:
+    """Surfaces the most recent statistical edge-validation: the honest,
+    quantified answer to 'is the edge real after costs?'. Reads the latest
+    persisted validation artifact (run via /api/validation)."""
+    entry = next((item for item in (research or []) if item.get("kind") == "validation"), None)
+    if not entry:
+        return (
+            "<h2>Validación estadística del edge</h2>"
+            "<p class='muted'>Aún no se ha ejecutado una validación. Ejecuta <code>/api/validation</code> "
+            "para replicar los mismos motores sobre varias ventanas fuera de muestra y obtener un "
+            "intervalo de confianza y una prueba de significancia sobre el edge después de costos.</p>"
+        )
+    payload = entry.get("payload") or {}
+    verdict = payload.get("verdict") or {}
+    stats = payload.get("stats") or {}
+    ci = stats.get("meanCi") or {}
+    sig = stats.get("significance") or {}
+    klass = verdict.get("classification", "n/a")
+    tone = "good" if klass == "edge-positive" else "bad" if klass == "edge-negative" else "muted"
+    return (
+        "<h2>Validación estadística del edge</h2>"
+        f"<p class='{tone}' style='font-size:14px'>{_esc(verdict.get('headline'))}</p>"
+        "<div class='cards'>"
+        f"<div class='card'><span>Operaciones agrupadas</span><b>{_esc(payload.get('pooledTrades'))}</b></div>"
+        f"<div class='card'><span>Ventanas rentables</span><b>{_esc(payload.get('profitableWindows'))} / {_esc(payload.get('windows'))}</b></div>"
+        f"<div class='card'><span>Media P&amp;L / trade</span><b>{_fmt(stats.get('meanPnl'), 4)}</b></div>"
+        f"<div class='card'><span>IC 95% de la media</span><b>[{_fmt(ci.get('low'), 4)}, {_fmt(ci.get('high'), 4)}]</b></div>"
+        f"<div class='card'><span>Sharpe / Sortino</span><b>{_fmt(stats.get('sharpe'), 2)} / {_fmt(stats.get('sortino'), 2)}</b></div>"
+        f"<div class='card'><span>p-valor (edge &gt; 0)</span><b>{_fmt(sig.get('pValue'), 4)}</b></div>"
+        "</div>"
+        f"<p class='muted'>Datos: <b>{_esc(payload.get('dataProvenance'))}</b>. {_esc(verdict.get('method'))}</p>"
+    )
+
+
 def _research_section(research: list[dict]) -> str:
     if not research:
         return "<p class='muted'>Aún no hay sesiones de investigación persistidas.</p>"
@@ -171,6 +205,8 @@ def build_report_html(snapshot: dict, research: list[dict]) -> str:
 
 <h2>Curva de P&amp;L</h2>
 {_pnl_svg(snapshot.get('pnlSeries') or [])}
+
+{_validation_section(research)}
 
 {_stages_table(slo)}
 

@@ -11,7 +11,7 @@ from pathlib import Path
 # re-applied in one click. Best-effort disk IO — never raises into the caller.
 
 RESEARCH_DIR = Path(".aurelion/research")
-KINDS = ("spread-study", "autotune")
+KINDS = ("spread-study", "autotune", "validation")
 
 
 def save_research(kind: str, payload: dict) -> str | None:
@@ -28,6 +28,12 @@ def save_research(kind: str, payload: dict) -> str | None:
 
 
 def _headline(kind: str, payload: dict) -> str:
+    if kind == "validation":
+        verdict = payload.get("verdict") or {}
+        return (
+            f"{verdict.get('classification', 'n/a')} · {payload.get('pooledTrades', 0)} trades pooled "
+            f"across {payload.get('windows', 0)} windows ({payload.get('dataProvenance', 'n/a')})"
+        )
     if kind == "autotune":
         baseline = payload.get("baseline") or {}
         best = payload.get("best") or {}
