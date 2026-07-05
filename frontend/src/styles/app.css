@@ -2140,3 +2140,55 @@ input:focus-visible,
   color: var(--amber);
   font-weight: 800;
 }
+
+/* --- Mode truth badge (header) + live/degraded banner --------------------- */
+.modeTruth {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 10px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 850;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.modeTruth.livedata {
+  color: var(--green);
+  background: var(--green-soft);
+  border: 1px solid rgba(13, 125, 103, 0.35);
+}
+
+.modeTruth.degraded {
+  color: var(--red);
+  background: var(--red-soft);
+  border: 1px solid rgba(178, 60, 60, 0.4);
+}
+
+.modeBanner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  margin-top: 2px;
+}
+
+.modeBanner b { font-weight: 850; }
+
+.modeBanner.live {
+  color: var(--ink);
+  background: var(--green-soft);
+  border: 1px solid rgba(13, 125, 103, 0.3);
+}
+
+.modeBanner.degraded {
+  color: var(--ink);
+  background: var(--red-soft);
+  border: 1px solid rgba(178, 60, 60, 0.4);
+}
+
+.modeBanner svg { flex-shrink: 0; }

@@ -381,6 +381,29 @@ describí al comité: observar → paper-live → testnet → (a futuro) capital
 
 ## Para el jurado
 
+### Demo vs. auto/live — por qué se ven distintos (a propósito)
+
+**El motor es el mismo en ambos modos.** Lo que cambia es la fuente de datos:
+
+- **Demo** usa un mercado **simulado determinístico** que inyecta dislocaciones
+  rentables de forma controlada, para poder mostrar *toda* la funcionalidad
+  (ejecuciones, ciclos triangulares, recuperación de fills fallidos, stress lab)
+  bajo demanda y en el tiempo de una evaluación. Por eso el feed de trades y el
+  P&L están siempre activos.
+- **Auto/live** corre el **mismo motor sobre venues reales**. Ahí el resultado
+  honesto y medido — por el radar, el estudio OU y el grabador de observación —
+  es que **ninguna ruta sobrevive las comisiones** (los mejores edges rondan
+  −20 bps neto). El bot entonces **se niega a operar**, y el feed de trades queda
+  tranquilo. Eso **no es una falla: es el hallazgo**, y es la tesis que planteé al
+  comité (BTC/ETH son demasiado eficientes; las alts tampoco alcanzan con
+  comisiones de nivel de entrada).
+
+Cómo verlo sin confundirlo: el header muestra **"real market data"** (verde) o
+**"simulated fallback · not live"** (rojo, si los venues no son alcanzables); un
+banner bajo las tarjetas resume el hallazgo en vivo; y el co-piloto ahora explica
+explícitamente en qué modo estás y por qué. La inteligencia real en modo live se
+ve en **Wide-Net Radar** y **Live Observation**, no en el feed de trades.
+
 Ruta recomendada de evaluación (modo demo, determinístico):
 
 1. Iniciar: `npm run dev` y abrir `http://localhost:8000`.

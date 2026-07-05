@@ -247,6 +247,11 @@ function Header({ snapshot, connected, control, reset, exportSession }) {
             <button key={mode} className={snapshot?.mode === mode ? "active" : ""} onClick={() => control({ mode })}>{mode[0].toUpperCase() + mode.slice(1)}</button>
           ))}
         </div>
+        {snapshot?.mode !== "demo" && (
+          snapshot?.degradedDemo
+            ? <span className="modeTruth degraded" role="status" title="Live requested but real venues are unreachable — data on screen is the simulated fallback">simulated fallback · not live</span>
+            : <span className="modeTruth livedata" role="status" title="Real market data from live venues">real market data</span>
+        )}
       </div>
       <div className="topPulse">
         <span className="pulseItem good"><b>{formatMoney(metrics.cumulativePnl)}</b><small>P&L</small></span>
@@ -296,6 +301,38 @@ function Overview({ snapshot }) {
       <Metric icon={Gauge} label="Speed" value={`${Math.round(freshness)} ms`} note={`freshness p95 ${Math.max(0, Math.round(metrics.p95FreshnessMs || freshness))} ms`} tone={(metrics.staleBooks || 0) > 0 ? "bad" : "neutral"} />
       <Metric icon={DatabaseZap} label="Data Health" value={dataFeedLabel(snapshot.streams, snapshot.books, snapshot.exchangeCoverage)} note={`${metrics.demotedVenues || 0} venues demoted`} tone={(metrics.staleBooks || 0) > 0 || (metrics.demotedVenues || 0) > 0 ? "bad" : "neutral"} />
     </section>
+  );
+}
+
+// Keeps the top of the dashboard meaningful in live mode. Demo is self-evidently
+// active (trades stream constantly); live can be legitimately quiet because real
+// edges rarely survive fees, so this states the real, measured situation instead
+// of leaving the viewer wondering why nothing is happening.
+function ModeBanner({ snapshot }) {
+  const mode = snapshot.mode;
+  if (mode === "demo") return null;
+  if (snapshot.degradedDemo) {
+    return (
+      <div className="modeBanner degraded" role="status">
+        <ShieldAlert size={15} />
+        <span><b>Live requested, but real venues are unreachable here</b> — the market on screen is the deterministic simulated fallback, not live data. Everything still functions; the numbers are simulated.</span>
+      </div>
+    );
+  }
+  const obs = snapshot.observation || {};
+  const sweep = snapshot.discovery?.lastSweep || {};
+  const bestReal = snapshot.metrics?.bestObservedNetBps;
+  const venues = sweep.venuesLive ?? snapshot.exchangeCoverage?.activeCount;
+  return (
+    <div className="modeBanner live" role="status">
+      <Activity size={15} />
+      <span>
+        <b>Live on real venues.</b> The engine only trades when an edge survives fees, slippage and latency.
+        {obs.recording ? ` Observation: ${obs.routesObserved || 0} routes tracked, ${obs.capturableRoutes || 0} clearing the fee wall` : " Warming up the observation recorder"}
+        {bestReal != null ? ` · best real edge ${formatNumber(bestReal, 1)} bps net` : ""}
+        {(obs.capturableRoutes === 0) ? " — this is the measured finding, not a fault. See Wide-Net Radar & Live Observation." : "."}
+      </span>
+    </div>
   );
 }
 
@@ -1917,6 +1954,7 @@ function App() {
       <Header snapshot={snapshot} connected={connected} control={control} reset={reset} exportSession={exportSession} />
       <main className="layout">
         <Overview snapshot={snapshot} />
+        <ModeBanner snapshot={snapshot} />
         <section className="mainGrid">
           <div className="primary">
             <Books books={snapshot.books} />

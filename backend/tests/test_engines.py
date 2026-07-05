@@ -2103,5 +2103,52 @@ class LiveSafetyHardeningTests(unittest.TestCase):
             os.environ.pop("AURELION_ENABLE_LIVE", None)
 
 
+class CoPilotModeAwarenessTests(unittest.TestCase):
+    """The co-pilot must distinguish demo (scripted) from live (real markets)."""
+
+    def _narrator(self):
+        import os
+        from backend.app.integrations.llm_narrator import DecisionNarrator
+
+        previous = os.environ.pop("ANTHROPIC_API_KEY", None)
+        narrator = DecisionNarrator(Settings())
+        if previous is not None:
+            os.environ["ANTHROPIC_API_KEY"] = previous
+        return narrator
+
+    def _snap(self, mode, degraded=False, executed=0, observation=None):
+        return {
+            "mode": mode, "degradedDemo": degraded,
+            "risk": {"paused": False},
+            "models": {"cycleAlgo": "dfs", "slippageModel": "book_walk", "sizingMode": "fixed"},
+            "scenarios": {"active": []},
+            "metrics": {"executedCount": executed, "cumulativePnl": 0, "detectedCount": 5, "bestObservedNetBps": -21.0},
+            "queuedOpportunities": [],
+            "observation": observation or {},
+        }
+
+    def test_demo_narration_says_it_is_a_showcase(self):
+        text = self._narrator().narrate(self._snap("demo"))["text"].lower()
+        self.assertTrue("demo" in text or "showcase" in text or "simulated" in text)
+
+    def test_live_narration_explains_the_fee_wall_finding(self):
+        obs = {"recording": True, "samples": 57, "routesObserved": 50, "capturableRoutes": 0}
+        text = self._narrator().narrate(self._snap("auto", executed=0, observation=obs))["text"].lower()
+        self.assertIn("real", text)
+        self.assertTrue("fee wall" in text or "not a fault" in text or "measured" in text)
+        self.assertIn("57", text)  # grounded in the observation numbers
+
+    def test_degraded_narration_warns_data_is_not_live(self):
+        text = self._narrator().narrate(self._snap("auto", degraded=True))["text"].lower()
+        self.assertTrue("not live" in text or "fallback" in text)
+
+    def test_mode_change_invalidates_cache(self):
+        narrator = self._narrator()
+        demo = narrator.narrate(self._snap("demo"))
+        live = narrator.narrate(self._snap("auto"))
+        self.assertNotEqual(demo["text"], live["text"])
+        self.assertFalse(live.get("cached"))
+
+
 if __name__ == "__main__":
     unittest.main()

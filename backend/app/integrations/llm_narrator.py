@@ -15,7 +15,12 @@ SYSTEM_PROMPT = (
     "predict prices, and never decide trades — the engine decides; you describe. "
     "Keep answers to 2-4 short sentences, grounded only in the facts provided. Do "
     "not invent numbers. Vary your phrasing naturally between updates so consecutive "
-    "explanations do not sound identical."
+    "explanations do not sound identical. IMPORTANT: distinguish the mode. When "
+    "facts.mode is 'demo', say it is a scripted/simulated showcase. When it is "
+    "'auto'/'live', it is REAL markets — if few or no trades happen, explain that "
+    "this is the correct, measured result (fees exceed the edge), not a malfunction, "
+    "and point to the observation data. If facts.degraded is true, warn that live "
+    "was requested but the data on screen is the simulated fallback, not real."
 )
 
 ALLOWED_MODELS = (
@@ -118,8 +123,17 @@ class DecisionNarrator:
                 "bestNetBps": radar_top.get("netBps"),
                 "promotableCount": sum(1 for route in last_sweep.get("topRoutes") or [] if route.get("promotable")),
             }
+        observation_raw = snapshot.get("observation") or {}
+        observation = None
+        if observation_raw.get("recording"):
+            observation = {
+                "samples": observation_raw.get("samples"),
+                "routes": observation_raw.get("routesObserved"),
+                "capturable": observation_raw.get("capturableRoutes"),
+            }
         return {
             "mode": snapshot.get("mode"),
+            "degraded": bool(snapshot.get("degradedDemo")),
             "paused": risk.get("paused"),
             "riskReason": risk.get("reason"),
             "models": snapshot.get("models", {}),
@@ -128,8 +142,10 @@ class DecisionNarrator:
             "executed": metrics.get("executedCount"),
             "detected": metrics.get("detectedCount"),
             "bestNetBps": metrics.get("bestNetBps"),
+            "bestObservedNetBps": metrics.get("bestObservedNetBps"),
             "autonomy": (snapshot.get("inventoryAutonomy") or {}).get("sessionAutonomy"),
             "radar": radar,
+            "observation": observation,
             "engineFaultsContained": (snapshot.get("engineHealth") or {}).get("tickErrors") or 0,
             "decision": decision,
             "focusTrade": self._focus_trade(snapshot, trade_id),
@@ -139,6 +155,8 @@ class DecisionNarrator:
         decision = ctx.get("decision") or {}
         focus = ctx.get("focusTrade") or {}
         return "|".join(str(part) for part in (
+            ctx.get("mode"),
+            ctx.get("degraded"),
             ctx.get("paused"),
             decision.get("route"),
             decision.get("status"),
@@ -180,12 +198,55 @@ class DecisionNarrator:
             )
         return " ".join(parts)
 
+    def _mode_context(self, ctx: dict) -> str:
+        """One grounded sentence framing WHAT the viewer is looking at, so demo
+        and live never read the same. Demo is a scripted showcase; live is real
+        markets where the honest, measured result is that fees exceed edges."""
+        mode = ctx.get("mode")
+        if mode == "demo":
+            return self._pick([
+                "This is demo mode: a deterministic simulated market that exercises the full engine so every feature is visible on demand.",
+                "You're watching the deterministic demo — a scripted market built to showcase the whole system end to end.",
+            ])
+        if ctx.get("degraded"):
+            return (
+                "Heads up: live mode requested real venues but the feed is unavailable here, so the engine is running on the "
+                "simulated fallback — the data on screen is NOT live. Check Data Health / streams."
+            )
+        # Real live/auto mode. Prefer the observation recorder's own numbers — its
+        # capturable count is the honest signal, independent of any cumulative
+        # trade count carried over from a prior demo session.
+        obs = ctx.get("observation")
+        if obs and obs.get("samples"):
+            capturable = obs.get("capturable") or 0
+            base = (
+                f"This is live mode on real venues. Across {obs.get('samples')} samples the observation recorder has seen "
+                f"{obs.get('routes')} routes and {capturable} that cleared the fee wall"
+            )
+            if capturable == 0:
+                best = ctx.get("bestObservedNetBps")
+                tail = f" — the best real edge sits around {best} bps net, short of profitable" if best is not None else ""
+                return (
+                    base + f"{tail}. The engine is correctly refusing to trade: this is the measured finding, not a fault. "
+                    "Watch Live Observation and Wide-Net Radar to see the intelligence working in real time."
+                )
+            return base + ". Those are the routes worth acting on; everything else is below its own costs."
+        if mode in ("auto", "live"):
+            return (
+                "This is live mode on real venues — real books, real costs. The engine only trades when an edge survives "
+                "fees, slippage and latency, so quiet stretches mean the market is efficient, not that the bot is idle."
+            )
+        return ""
+
     def _fallback(self, ctx: dict) -> str:
         # Phrasing rotates between grounded variants so consecutive template
         # narrations don't read identically; every variant carries the same facts.
         if ctx.get("focusTrade"):
             return self._fallback_focus_trade(ctx["focusTrade"])
         parts: list[str] = []
+        mode_context = self._mode_context(ctx)
+        if mode_context:
+            parts.append(mode_context)
         if ctx.get("paused"):
             reason = ctx.get("riskReason")
             parts.append(self._pick([
