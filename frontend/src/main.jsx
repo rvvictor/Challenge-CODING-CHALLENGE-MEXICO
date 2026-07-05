@@ -1077,9 +1077,13 @@ function WalletsPanel({ snapshot }) {
   );
 }
 
-function SideRail({ snapshot, control }) {
+// Second tier: operational and portfolio panels, tiled in an auto-fit grid
+// right below the cockpit so most of them sit one short scroll (or none, on
+// a tall screen) away from the fold.
+function SecondaryGrid({ snapshot, control, onExplainTrade }) {
   return (
-    <aside className="sideRail">
+    <section className="secondary">
+      <OpportunityTable opportunities={snapshot.queuedOpportunities} queue={snapshot.queue} now={snapshot.now} />
       <section className="surface pnlCard" id="pnl">
         <PanelTitle icon={ChartNoAxesCombined} title="P&L" pill={formatMoney(snapshot.metrics.cumulativePnl)} />
         <PnlChart series={snapshot.pnlSeries} />
@@ -1087,8 +1091,10 @@ function SideRail({ snapshot, control }) {
       </section>
       <WalletsPanel snapshot={snapshot} />
       <ExchangeCoverage coverage={snapshot.exchangeCoverage} quality={snapshot.venueQuality} health={snapshot.venueHealth} control={control} />
+      <Trades trades={snapshot.trades} metrics={snapshot.metrics} onExplainTrade={onExplainTrade} />
+      <OpportunityHistory opportunities={snapshot.opportunityHistory || snapshot.opportunities} metrics={snapshot.metrics} now={snapshot.now} />
       <CalibrationPanel calibration={snapshot.calibration} enabled={snapshot.models?.calibrationEnabled} />
-    </aside>
+    </section>
   );
 }
 
@@ -1835,56 +1841,36 @@ function ModelsPanel({ models = {}, metrics = {} }) {
 // click. The nav is a plain anchor list (native, keyboard- and screen-reader-
 // friendly) that jumps to a section already on the page; a scrollspy just
 // keeps it honest about where you are.
-const WORKBENCH_SECTIONS = ["overview", "opportunities", "control", "stress", "models", "trades", "signals", "radar", "research", "backtest", "diagnostics"];
-
-function ResultsWorkbench({ snapshot, loadParams, applyParams, runBacktest, control, sweepDiscovery, runSpreadStudy, runAutotune, loadResearchHistory, onExplainTrade, triggerScenario }) {
-  const radarPositive = snapshot.discovery?.lastSweep?.positiveCount;
-  const [activeId, setActiveId] = React.useState(WORKBENCH_SECTIONS[0]);
-
-  React.useEffect(() => {
-    const targets = WORKBENCH_SECTIONS.map((id) => document.getElementById(id)).filter(Boolean);
-    if (!targets.length) return undefined;
-    const observer = new IntersectionObserver((entries) => {
-      const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
-      if (visible[0]) setActiveId(visible[0].target.id);
-    }, { rootMargin: "-140px 0px -65% 0px", threshold: 0 });
-    targets.forEach((el) => observer.observe(el));
-    return () => observer.disconnect();
-  }, []);
-
-  const nav = [
-    ["overview", "Overview", null],
-    ["opportunities", "Opportunities", snapshot.queue?.queued || 0],
-    ["control", "Control Room", "live"],
-    ["stress", "Stress Lab", (snapshot.scenarios?.active || []).length || "stable"],
-    ["models", "Models", "quant"],
-    ["trades", "Trades", snapshot.trades?.length || 0],
-    ["signals", "Signals", snapshot.opportunityHistory?.length || snapshot.opportunities?.length || 0],
-    ["radar", "Wide-Net Radar", radarPositive != null ? radarPositive : "scout"],
-    ["research", "Research Lab", "learn"],
-    ["backtest", "Backtest", "replay"],
-    ["diagnostics", "Diagnostics", snapshot.streams?.streams?.length || snapshot.books?.length || 0],
-  ];
+// Tier 1 — the cockpit. Everything a visitor should see first, without
+// scrolling: the live parametrization (the committee's #1 factor), what the
+// engine is deciding right now and why, and the proof it's robust and
+// sophisticated. Control Room gets the largest, tallest cell on purpose.
+function Cockpit({ snapshot, loadParams, applyParams, triggerScenario, focusTrade }) {
   return (
-    <section className="workbench">
-      <nav className="workbenchTabs" aria-label="Jump to section">
-        {nav.map(([id, label, count]) => (
-          <a key={id} href={`#${id}`} className={activeId === id ? "active" : ""} aria-current={activeId === id ? "location" : undefined}>
-            {label}{count != null && <span>{count}</span>}
-          </a>
-        ))}
-      </nav>
-      <JudgeGuide />
-      <OpportunityTable opportunities={snapshot.queuedOpportunities} queue={snapshot.queue} now={snapshot.now} />
-      <ControlRoom loadParams={loadParams} applyParams={applyParams} />
-      <StressLab scenarios={snapshot.scenarios} triggerScenario={triggerScenario} />
-      <ModelsPanel models={snapshot.models} metrics={snapshot.metrics} />
-      <Trades trades={snapshot.trades} metrics={snapshot.metrics} onExplainTrade={onExplainTrade} />
-      <OpportunityHistory opportunities={snapshot.opportunityHistory || snapshot.opportunities} metrics={snapshot.metrics} now={snapshot.now} />
+    <section className="cockpit">
+      <div className="cockpitControl"><ControlRoom loadParams={loadParams} applyParams={applyParams} /></div>
+      <div className="cockpitDecision">
+        <EdgeExplainability opportunities={snapshot.queuedOpportunities} />
+        <RealityCheck opportunities={snapshot.queuedOpportunities} />
+      </div>
+      <div className="cockpitCopilot"><CoPilot snapshot={snapshot} focusTrade={focusTrade} /></div>
+      <div className="cockpitStress"><StressLab scenarios={snapshot.scenarios} triggerScenario={triggerScenario} /></div>
+      <div className="cockpitModels"><ModelsPanel models={snapshot.models} metrics={snapshot.metrics} /></div>
+    </section>
+  );
+}
+
+// Tier 3 — the deep dives: wide-net discovery, research/training, replay,
+// full diagnostics, and the evaluation map. Worth having, not worth
+// front-loading; a short scroll below the cockpit and the secondary grid.
+function DeepGrid({ snapshot, runBacktest, sweepDiscovery, runSpreadStudy, runAutotune, loadResearchHistory, applyParams, control }) {
+  return (
+    <section className="deep">
       <WideNetRadarPanel discovery={snapshot.discovery} sweepDiscovery={sweepDiscovery} />
-      <ResearchLab runSpreadStudy={runSpreadStudy} runAutotune={runAutotune} applyParams={applyParams} loadResearchHistory={loadResearchHistory} />
       <Backtest runBacktest={runBacktest} />
+      <ResearchLab runSpreadStudy={runSpreadStudy} runAutotune={runAutotune} applyParams={applyParams} loadResearchHistory={loadResearchHistory} />
       <InfrastructurePanel snapshot={snapshot} control={control} />
+      <JudgeGuide />
     </section>
   );
 }
@@ -1915,23 +1901,16 @@ function CoPilot({ snapshot, focusTrade }) {
   const [source, setSource] = React.useState("");
   const [streaming, setStreaming] = React.useState(false);
   const esRef = React.useRef(null);
-  const activeRef = React.useRef(false);
   const lastKeyRef = React.useRef("");
-  const pendingKeyRef = React.useRef("");
   const lastRunRef = React.useRef(0);
   const lastFocusNonceRef = React.useRef(0);
-  const catchUpRef = React.useRef(null);
+  const timerRef = React.useRef(null);
 
-  // In demo mode the market re-ticks faster than a narration can finish, so a
-  // naive "restart on any change" thrashes the stream (opens, then aborts it
-  // mid-flight, over and over). Instead: never tear down an in-flight stream —
-  // let it finish, then catch up once to whatever the latest context is.
   const startStream = React.useCallback((askText, tradeId) => {
     if (esRef.current) { esRef.current.close(); esRef.current = null; }
     setText("");
     setSource("");
     setStreaming(true);
-    activeRef.current = true;
     lastRunRef.current = Date.now();
     const params = new URLSearchParams();
     if (askText) params.set("q", askText);
@@ -1941,13 +1920,8 @@ function CoPilot({ snapshot, focusTrade }) {
     const finish = (src) => {
       setSource(src || "");
       setStreaming(false);
-      activeRef.current = false;
       events.close();
       esRef.current = null;
-      if (pendingKeyRef.current !== lastKeyRef.current) {
-        lastKeyRef.current = pendingKeyRef.current;
-        catchUpRef.current = setTimeout(() => startStream(""), 700);
-      }
     };
     events.onmessage = (event) => {
       try {
@@ -1959,26 +1933,33 @@ function CoPilot({ snapshot, focusTrade }) {
     events.onerror = () => finish("");
   }, []);
 
+  // In demo mode the market re-ticks faster than a narration can finish, so
+  // two independent triggers (a changed context, and a just-finished stream)
+  // could each schedule their own restart and abort one another mid-flight.
+  // This is the ONLY place that ever schedules a startStream call: while a
+  // stream is active it just bails, and the `streaming` dependency makes it
+  // re-run the moment that stream ends, re-checking the latest context then —
+  // one scheduler, so nothing can race itself.
   const contextKey = coPilotContextKey(snapshot);
   React.useEffect(() => {
-    pendingKeyRef.current = contextKey;
-    if (contextKey === lastKeyRef.current || activeRef.current) return undefined;
+    if (contextKey === lastKeyRef.current || streaming) return undefined;
     const first = !lastKeyRef.current;
     const elapsed = Date.now() - lastRunRef.current;
     // Snappier than before: react to a changed decision within ~3s (was 5s).
     const delay = first ? 250 : Math.max(700, 3000 - elapsed);
-    const timer = setTimeout(() => {
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null;
       lastKeyRef.current = contextKey;
       startStream("");
     }, delay);
-    return () => clearTimeout(timer);
-  }, [contextKey, startStream]);
+    return () => { clearTimeout(timerRef.current); timerRef.current = null; };
+  }, [contextKey, streaming, startStream]);
 
   // Heartbeat: even in a stable market, refresh every ~10s so the panel always
   // reads as live (phrasing varies server-side).
   React.useEffect(() => {
     const beat = setInterval(() => {
-      if (!esRef.current && Date.now() - lastRunRef.current > 9000) {
+      if (!esRef.current && !timerRef.current && Date.now() - lastRunRef.current > 9000) {
         startStream("");
       }
     }, 10000);
@@ -1989,12 +1970,13 @@ function CoPilot({ snapshot, focusTrade }) {
     if (!focusTrade?.nonce || focusTrade.nonce === lastFocusNonceRef.current) return;
     lastFocusNonceRef.current = focusTrade.nonce;
     lastKeyRef.current = `trade:${focusTrade.id}`;
+    if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
     startStream("", focusTrade.id);
   }, [focusTrade, startStream]);
 
   React.useEffect(() => () => {
     if (esRef.current) esRef.current.close();
-    if (catchUpRef.current) clearTimeout(catchUpRef.current);
+    if (timerRef.current) clearTimeout(timerRef.current);
   }, []);
 
   return (
@@ -2156,30 +2138,29 @@ function App() {
       <main className="layout" id="main">
         <Overview snapshot={snapshot} />
         <ModeBanner snapshot={snapshot} />
-        <section className="mainGrid">
-          <div className="primary">
-            <Books books={snapshot.books} />
-            <div className="decisionDeck">
-              <EdgeExplainability opportunities={snapshot.queuedOpportunities} />
-              <RealityCheck opportunities={snapshot.queuedOpportunities} />
-            </div>
-            <CoPilot snapshot={snapshot} focusTrade={explainTrade} />
-            <ResultsWorkbench
-              snapshot={snapshot}
-              loadParams={loadParams}
-              applyParams={applyParams}
-              runBacktest={runBacktest}
-              control={control}
-              sweepDiscovery={sweepDiscovery}
-              runSpreadStudy={runSpreadStudy}
-              runAutotune={runAutotune}
-              loadResearchHistory={loadResearchHistory}
-              onExplainTrade={(id) => setExplainTrade({ id, nonce: Date.now() })}
-              triggerScenario={triggerScenario}
-            />
-          </div>
-          <SideRail snapshot={snapshot} control={control} />
-        </section>
+        <Books books={snapshot.books} />
+        <Cockpit
+          snapshot={snapshot}
+          loadParams={loadParams}
+          applyParams={applyParams}
+          triggerScenario={triggerScenario}
+          focusTrade={explainTrade}
+        />
+        <SecondaryGrid
+          snapshot={snapshot}
+          control={control}
+          onExplainTrade={(id) => setExplainTrade({ id, nonce: Date.now() })}
+        />
+        <DeepGrid
+          snapshot={snapshot}
+          runBacktest={runBacktest}
+          sweepDiscovery={sweepDiscovery}
+          runSpreadStudy={runSpreadStudy}
+          runAutotune={runAutotune}
+          loadResearchHistory={loadResearchHistory}
+          applyParams={applyParams}
+          control={control}
+        />
       </main>
     </>
   );
