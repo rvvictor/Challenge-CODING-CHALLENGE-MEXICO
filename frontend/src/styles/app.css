@@ -32,6 +32,46 @@ body {
   letter-spacing: 0;
 }
 
+/* --- Accessibility: skip link, scroll targets, motion, jump-nav ---------- */
+.skipLink {
+  position: absolute;
+  top: -48px;
+  left: 12px;
+  z-index: 300;
+  padding: 10px 16px;
+  border-radius: 8px;
+  background: var(--galaxy);
+  color: #fff;
+  font-weight: 800;
+  font-size: 13px;
+  text-decoration: none;
+  transition: top 0.15s ease;
+}
+
+.skipLink:focus {
+  top: 12px;
+}
+
+[id] {
+  scroll-margin-top: 136px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 button {
   font: inherit;
 }
@@ -971,8 +1011,8 @@ small,
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  min-height: 22px;
-  padding: 2px 8px;
+  min-height: 24px;
+  padding: 4px 8px;
   border: 1px solid rgba(96, 87, 186, 0.35);
   border-radius: 6px;
   background: rgba(96, 87, 186, 0.1);
@@ -1158,7 +1198,7 @@ small,
   backdrop-filter: blur(14px);
 }
 
-.workbenchTabs button {
+.workbenchTabs a {
   display: inline-flex;
   min-height: 34px;
   align-items: center;
@@ -1171,9 +1211,10 @@ small,
   cursor: pointer;
   font-size: 12px;
   font-weight: 900;
+  text-decoration: none;
 }
 
-.workbenchTabs button.active {
+.workbenchTabs a.active {
   border-color: rgba(13, 125, 103, 0.34);
   background: var(--green-soft);
   color: var(--green);
@@ -1521,6 +1562,12 @@ small,
   align-self: stretch;
   margin: 2px 2px;
   background: var(--line);
+}
+
+.btGroup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: inherit;
 }
 
 .backtestBody {
@@ -2236,14 +2283,23 @@ input:focus-visible,
 
 .introClose {
   position: absolute;
-  top: 14px;
-  right: 16px;
+  top: 10px;
+  right: 12px;
+  display: grid;
+  place-items: center;
+  min-width: 32px;
+  min-height: 32px;
   border: none;
+  border-radius: 8px;
   background: none;
-  font-size: 26px;
+  font-size: 22px;
   line-height: 1;
   color: var(--muted);
   cursor: pointer;
+}
+
+.introClose:hover {
+  background: var(--paper-2);
 }
 
 .introHead {
@@ -2346,7 +2402,9 @@ input:focus-visible,
 .judgeCrit b { display: block; font-size: 13.5px; }
 .judgeCrit small { color: var(--muted); font-size: 11.5px; }
 .judgeHow { grid-area: how; font-size: 12.5px; line-height: 1.5; }
-.judgeWhere { grid-area: where; font-size: 11.5px; color: var(--green); font-weight: 700; }
+.judgeWhere { grid-area: where; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 11.5px; font-weight: 700; }
+.judgeWhere a { color: var(--green); text-decoration: none; }
+.judgeWhere a:hover, .judgeWhere a:focus-visible { text-decoration: underline; }
 
 .judgeClose {
   margin-top: 14px;

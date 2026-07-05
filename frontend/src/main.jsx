@@ -242,9 +242,9 @@ function Header({ snapshot, connected, control, reset, exportSession, onHelp }) 
         <span className={`conn ${connected ? "online" : "offline"}`} role="status" aria-live="polite" title="Live data-feed connection (SSE)"><i aria-hidden="true" />{connected ? "connected" : "syncing"}</span>
       </div>
       <div className="modeDock">
-        <div className="segmented">
+        <div className="segmented" role="group" aria-label="Mode">
           {["auto", "live", "demo"].map((mode) => (
-            <button key={mode} className={snapshot?.mode === mode ? "active" : ""} onClick={() => control({ mode })}>{mode[0].toUpperCase() + mode.slice(1)}</button>
+            <button key={mode} className={snapshot?.mode === mode ? "active" : ""} aria-pressed={snapshot?.mode === mode} onClick={() => control({ mode })}>{mode[0].toUpperCase() + mode.slice(1)}</button>
           ))}
         </div>
         {snapshot?.mode !== "demo" && (
@@ -268,9 +268,9 @@ function Header({ snapshot, connected, control, reset, exportSession, onHelp }) 
           <Zap size={16} />
           {risk?.paused ? "risk active" : "volatility"}
         </button>
-        <button type="button" className="iconButton helpButton" title="What is this? (intro)" aria-label="Open the intro" onClick={onHelp}>?</button>
+        <button type="button" className="iconButton helpButton" title="¿Qué es esto? (introducción)" aria-label="Abrir la introducción" onClick={onHelp}>?</button>
         <button type="button" className="iconButton" title="Export audit session" aria-label="Export audit session" onClick={exportSession}><FileDown size={17} /></button>
-        <a className="iconButton" title="Judge report (HTML)" aria-label="Open judge report" href={`${API_BASE}/api/export/report`} target="_blank" rel="noreferrer"><ListChecks size={17} /></a>
+        <a className="iconButton" title="Session report (HTML)" aria-label="Open session report" href={`${API_BASE}/api/export/report`} target="_blank" rel="noreferrer"><ListChecks size={17} /></a>
         <button type="button" className="iconButton" title="Reset session" aria-label="Reset session" onClick={reset}><RefreshCw size={17} /></button>
       </div>
     </header>
@@ -339,7 +339,7 @@ function ModeBanner({ snapshot }) {
 
 function Books({ books }) {
   return (
-    <section className="surface books">
+    <section className="surface books" id="market">
       <PanelTitle icon={Activity} title="Live Market" pill={`${books.length} venues`} />
       <div className="bookGrid">
         {books.map((book) => (
@@ -449,7 +449,7 @@ function OpportunityTable({ opportunities, queue = {}, now }) {
   const fallback = visible.length ? visible : opportunities;
   const rows = fallback.slice(0, 7);
   return (
-    <section className="surface queue">
+    <section className="surface queue" id="opportunities">
       <PanelTitle icon={Triangle} title="Priority Queue" pill={queue.paused ? "risk paused" : `${queue.executable || 0} executable`} />
       <div className="queueStats">
         <span><b>{queue.received || 0}</b> analyzed</span>
@@ -503,7 +503,7 @@ function EdgeExplainability({ opportunities = [] }) {
   const item = topDecision(opportunities);
   if (!item) {
     return (
-      <section className="surface edgePanel">
+      <section className="surface edgePanel" id="decision">
         <PanelTitle icon={Radar} title="Current Decision" pill="waiting" />
         <div className="empty">No ranked routes yet</div>
       </section>
@@ -512,7 +512,7 @@ function EdgeExplainability({ opportunities = [] }) {
   const decision = item.decision || {};
   const breakdown = item.edgeBreakdown || {};
   return (
-    <section className="surface edgePanel">
+    <section className="surface edgePanel" id="decision">
       <PanelTitle icon={Radar} title="Current Decision" pill={`grade ${decision.scoreGrade || "D"}`} />
       <div className="edgeBody">
         <div className={`decisionStamp ${statusClass(item)}`}>
@@ -552,14 +552,14 @@ function RealityCheck({ opportunities = [] }) {
   const reality = item?.paperVsSettlement;
   if (!item || !reality) {
     return (
-      <section className="surface realityPanel">
+      <section className="surface realityPanel" id="reality">
         <PanelTitle icon={ArrowRightLeft} title="Real Costs" pill="no route" />
         <div className="empty">No route to review</div>
       </section>
     );
   }
   return (
-    <section className="surface realityPanel">
+    <section className="surface realityPanel" id="reality">
       <PanelTitle icon={ArrowRightLeft} title="Real Costs" pill={reality.verdict} />
       <div className="realityGrid">
         <article>
@@ -604,11 +604,11 @@ function OpportunityHistory({ opportunities = [], metrics = {}, now }) {
   });
   const rows = filtered.slice(0, 18);
   return (
-    <section className="surface history">
+    <section className="surface history" id="signals">
       <PanelTitle icon={ListChecks} title="Signal History" pill={`${rows.length} recent`} />
-      <div className="historyToolbar">
+      <div className="historyToolbar" role="group" aria-label="Filter signals">
         {filters.map(([id, label]) => (
-          <button className={filter === id ? "active" : ""} key={id} onClick={() => setFilter(id)} type="button">{label}</button>
+          <button className={filter === id ? "active" : ""} aria-pressed={filter === id} key={id} onClick={() => setFilter(id)} type="button">{label}</button>
         ))}
       </div>
       <div className="historyList">
@@ -683,7 +683,7 @@ function LatencySloPanel({ slo = {} }) {
   const update = slo.updateLatencyMs || {};
   const decision = slo.decisionMs;
   return (
-    <section className={`surface sloPanel ${slo.status || "green"}`}>
+    <section className={`surface sloPanel ${slo.status || "green"}`} id="speed">
       <PanelTitle icon={Gauge} title="Speed" pill={slo.summary || "loading"} />
       <div className="sloGrid">
         <article>
@@ -759,15 +759,15 @@ function ExchangeCoverage({ coverage = {}, quality = [], health = {}, control })
     control({ activeExchanges: next });
   };
   return (
-    <section className="surface">
+    <section className="surface" id="exchanges">
       <PanelTitle icon={Network} title="Exchanges" pill={`${coverage.activeCount || active.size} active / ${health.demotedCount || 0} demoted`} />
-      <div className="coverageGrid">
+      <div className="coverageGrid" role="group" aria-label="Active exchanges (2-5)">
         {universe.map((exchange) => {
           const venue = qualityById.get(exchange.id);
           const healthRow = healthById.get(exchange.id);
           const healthStatus = healthRow?.status || venue?.healthStatus || (active.has(exchange.id) ? "healthy" : "catalog");
           return (
-            <button className={`${active.has(exchange.id) ? "active" : ""} ${healthStatus}`} disabled={!active.has(exchange.id) && active.size >= 5} key={exchange.id} onClick={() => toggle(exchange)} type="button">
+            <button className={`${active.has(exchange.id) ? "active" : ""} ${healthStatus}`} aria-pressed={active.has(exchange.id)} disabled={!active.has(exchange.id) && active.size >= 5} key={exchange.id} onClick={() => toggle(exchange)} type="button">
               <b>{exchange.name}</b>
               <span>{venue ? `${healthStatus} / ${venue.latencyMs} ms / q ${venue.score}` : active.has(exchange.id) ? "speed profile" : "coverage catalog"}</span>
             </button>
@@ -916,7 +916,7 @@ function ResiliencePanel({ engineHealth = {}, continuity = {} }) {
   const faults = engineHealth.tickErrors || 0;
   const armed = engineHealth.watchdog === "armed";
   return (
-    <section className="surface resiliencePanel">
+    <section className="surface resiliencePanel" id="resilience">
       <PanelTitle icon={ShieldAlert} title="Resilience" pill={armed ? "watchdog armed" : "—"} />
       <div className="systemGrid">
         <article>
@@ -951,7 +951,7 @@ function ResiliencePanel({ engineHealth = {}, continuity = {} }) {
 function LiveObservationPanel({ observation = {}, mode }) {
   const routes = observation.topRoutes || [];
   return (
-    <section className="surface radarPanel">
+    <section className="surface radarPanel" id="observation">
       <PanelTitle icon={History} title="Live Observation" pill={observation.recording ? `${observation.samples} samples` : "live only"} />
       <p className="radarNote">
         On real books and real costs, per route: how often it appears, what fraction clears the fee wall, and the
@@ -1033,11 +1033,11 @@ function StressLab({ scenarios = {}, triggerScenario }) {
     }
   };
   return (
-    <section className="surface stressLab">
+    <section className="surface stressLab" id="stress">
       <PanelTitle icon={FlaskConical} title="Stress Lab" pill={active.length ? `${active.length} active` : "stable"} />
-      <div className="stressGrid">
+      <div className="stressGrid" role="group" aria-label="Inject a stress scenario">
         {available.map((name) => (
-          <button key={name} type="button" className={active.includes(name) ? "active" : ""} disabled={busy === name} onClick={() => fire(name)}>
+          <button key={name} type="button" className={active.includes(name) ? "active" : ""} aria-pressed={active.includes(name)} disabled={busy === name} onClick={() => fire(name)}>
             {SCENARIO_LABELS[name] || name}
           </button>
         ))}
@@ -1055,7 +1055,7 @@ function WalletsPanel({ snapshot }) {
   const lowSet = new Set(venueRows.filter((venue) => venue.low).map((venue) => venue.exchangeId));
   const fundableById = Object.fromEntries(venueRows.map((venue) => [venue.exchangeId, venue.tradesFundable]));
   return (
-    <section className="surface">
+    <section className="surface" id="wallets">
       <PanelTitle icon={DatabaseZap} title="Wallets" pill={formatMoney(snapshot.totals.markToMarket)} />
       {autonomy.sessionAutonomy != null && (
         <div className="autonomyBar">
@@ -1077,10 +1077,10 @@ function WalletsPanel({ snapshot }) {
   );
 }
 
-function SideRail({ snapshot, control, triggerScenario }) {
+function SideRail({ snapshot, control }) {
   return (
     <aside className="sideRail">
-      <section className="surface pnlCard">
+      <section className="surface pnlCard" id="pnl">
         <PanelTitle icon={ChartNoAxesCombined} title="P&L" pill={formatMoney(snapshot.metrics.cumulativePnl)} />
         <PnlChart series={snapshot.pnlSeries} />
         <PnlBreakdown totals={snapshot.totals} />
@@ -1088,7 +1088,6 @@ function SideRail({ snapshot, control, triggerScenario }) {
       <WalletsPanel snapshot={snapshot} />
       <ExchangeCoverage coverage={snapshot.exchangeCoverage} quality={snapshot.venueQuality} health={snapshot.venueHealth} control={control} />
       <CalibrationPanel calibration={snapshot.calibration} enabled={snapshot.models?.calibrationEnabled} />
-      <StressLab scenarios={snapshot.scenarios} triggerScenario={triggerScenario} />
     </aside>
   );
 }
@@ -1137,11 +1136,11 @@ function Trades({ trades, metrics = {}, onExplainTrade }) {
     return true;
   });
   return (
-    <section className="surface trades">
+    <section className="surface trades" id="trades">
       <PanelTitle icon={ArrowRightLeft} title="Executed Trades" pill={`${visibleTrades.length}/${trades.length} visible`} />
-      <div className="tradeToolbar">
+      <div className="tradeToolbar" role="group" aria-label="Filter trades">
         {filters.map(([id, label]) => (
-          <button className={filter === id ? "active" : ""} key={id} onClick={() => setFilter(id)} type="button">{label}</button>
+          <button className={filter === id ? "active" : ""} aria-pressed={filter === id} key={id} onClick={() => setFilter(id)} type="button">{label}</button>
         ))}
       </div>
       <div className="tradeList">
@@ -1185,7 +1184,7 @@ function ExecutionPanel({ execution = {}, control }) {
   const guard = execution.guard || {};
   const modes = execution.available || [];
   return (
-    <section className="surface executionPanel">
+    <section className="surface executionPanel" id="execution">
       <PanelTitle icon={Network} title="Execution gateway" pill={execution.mode || "paper"} />
       <div className="execBody">
         <div className="execCaps">
@@ -1196,9 +1195,9 @@ function ExecutionPanel({ execution = {}, control }) {
           <span>Withdrawal<b className="red">never</b></span>
           <span>Live exec<b>{execution.liveEnabled ? "enabled" : "disabled (stub)"}</b></span>
         </div>
-        <div className="execModes">
+        <div className="execModes" role="group" aria-label="Execution gateway mode">
           {modes.map((mode) => (
-            <button key={mode} type="button" className={execution.mode === mode ? "active" : ""} onClick={() => control({ executionGateway: mode })}>{mode}</button>
+            <button key={mode} type="button" className={execution.mode === mode ? "active" : ""} aria-pressed={execution.mode === mode} onClick={() => control({ executionGateway: mode })}>{mode}</button>
           ))}
         </div>
         <div className="execGuard">
@@ -1214,7 +1213,7 @@ function ExecutionPanel({ execution = {}, control }) {
 
 function InfrastructurePanel({ snapshot, control }) {
   return (
-    <div className="infraDeck">
+    <div className="infraDeck" id="diagnostics">
       <ExecutionPanel execution={snapshot.execution} control={control} />
       <SystemStatus snapshot={snapshot} />
       <ResiliencePanel engineHealth={snapshot.engineHealth} continuity={snapshot.continuity} />
@@ -1357,7 +1356,7 @@ function ControlRoom({ loadParams, applyParams }) {
 
   if (!data) {
     return (
-      <section className="surface controlRoom">
+      <section className="surface controlRoom" id="control">
         <PanelTitle icon={SlidersHorizontal} title="Control Room" pill="loading" />
         <div className="empty">Loading parameters…</div>
       </section>
@@ -1367,12 +1366,12 @@ function ControlRoom({ loadParams, applyParams }) {
   const changedKeys = changed ? Object.keys(changed) : [];
 
   return (
-    <section className="surface controlRoom">
+    <section className="surface controlRoom" id="control">
       <PanelTitle icon={SlidersHorizontal} title="Control Room" pill={`${data.specs.length} live params`} />
-      <div className="crPresets tradeToolbar">
+      <div className="crPresets tradeToolbar" role="group" aria-label="Parameter presets">
         <span className="crPresetLabel">Presets</span>
         {data.presets.map((name) => (
-          <button key={name} type="button" className={activePreset === name ? "active" : ""} onClick={() => { setActivePreset(name); commit({ preset: name }); }}>{name}</button>
+          <button key={name} type="button" className={activePreset === name ? "active" : ""} aria-pressed={activePreset === name} onClick={() => { setActivePreset(name); commit({ preset: name }); }}>{name}</button>
         ))}
         <button type="button" className="crReset" onClick={() => { setActivePreset(null); commit({ reset: true }); }}><RotateCcw size={13} /> reset</button>
         {busy && <span className="crBusy">applying…</span>}
@@ -1427,20 +1426,26 @@ function Backtest({ runBacktest }) {
   const fellBack = dq?.actual === "simulated-fallback";
 
   return (
-    <section className="surface backtest">
+    <section className="surface backtest" id="backtest">
       <PanelTitle icon={History} title="Backtest / Replay" pill={result ? `${result.executed} trades` : "idle"} />
       <div className="backtestToolbar tradeToolbar">
-        {BACKTEST_SOURCES.map(([id, label]) => (
-          <button key={id} type="button" className={source === id ? "active" : ""} onClick={() => setSource(id)}>{label}</button>
-        ))}
+        <span role="group" aria-label="Data source" className="btGroup">
+          {BACKTEST_SOURCES.map(([id, label]) => (
+            <button key={id} type="button" className={source === id ? "active" : ""} aria-pressed={source === id} onClick={() => setSource(id)}>{label}</button>
+          ))}
+        </span>
         <span className="btDivider" aria-hidden="true" />
-        {[120, 250, 500].map((n) => (
-          <button key={n} type="button" className={ticks === n ? "active" : ""} onClick={() => setTicks(n)}>{n} ticks</button>
-        ))}
+        <span role="group" aria-label="Tick count" className="btGroup">
+          {[120, 250, 500].map((n) => (
+            <button key={n} type="button" className={ticks === n ? "active" : ""} aria-pressed={ticks === n} onClick={() => setTicks(n)}>{n} ticks</button>
+          ))}
+        </span>
         <span className="btDivider" aria-hidden="true" />
-        {BACKTEST_REGIMES.map((name) => (
-          <button key={name} type="button" className={regime === name ? "active" : ""} onClick={() => setRegime(name)}>{name}</button>
-        ))}
+        <span role="group" aria-label="Market regime" className="btGroup">
+          {BACKTEST_REGIMES.map((name) => (
+            <button key={name} type="button" className={regime === name ? "active" : ""} aria-pressed={regime === name} onClick={() => setRegime(name)}>{name}</button>
+          ))}
+        </span>
         <button type="button" className="btRun" onClick={run} disabled={busy}><FlaskConical size={13} /> {busy ? "running…" : "Run backtest"}</button>
       </div>
       {source === "historical" && (
@@ -1484,7 +1489,7 @@ function CalibrationPanel({ calibration, enabled }) {
   if (!calibration) return null;
   const venues = calibration.venues || [];
   return (
-    <section className="surface calibration">
+    <section className="surface calibration" id="calibration">
       <PanelTitle icon={Brain} title="Self-calibration" pill={enabled ? "applied" : "tracking"} />
       <div className="calBody">
         {venues.length ? venues.map((venue) => (
@@ -1565,7 +1570,7 @@ function ResearchLab({ runSpreadStudy, runAutotune, applyParams, loadResearchHis
   };
 
   return (
-    <div className="researchLab">
+    <div className="researchLab" id="research">
       <section className="surface radarPanel">
         <PanelTitle icon={Activity} title="Spread dynamics (fitted on real data)" pill={study ? `${study.pairsFitted}/${study.pairsTotal} pairs` : "OU model"} />
         <p className="radarNote">
@@ -1725,7 +1730,7 @@ function WideNetRadarPanel({ discovery = {}, sweepDiscovery }) {
     try { await sweepDiscovery(); } finally { setBusy(false); }
   };
   return (
-    <section className="surface radarPanel">
+    <section className="surface radarPanel" id="radar">
       <PanelTitle icon={Radar} title="Wide-Net Radar" pill={discovery.enabled ? `${sweep.venuesLive ?? 0}/${discovery.universeCount || 0} venues` : "off"} />
       <p className="radarNote">
         A background scout sweeps all {discovery.universeCount || 0} venues + {(discovery.bases || []).join("/")} from batched public tickers —
@@ -1800,7 +1805,7 @@ function ModelsPanel({ models = {}, metrics = {} }) {
     ["Wide-net radar + observation recorder", "Scans 10 venues + XRP/LTC/SOL/AVAX and measures, on real data, how often edges appear and clear the fee wall."],
   ];
   return (
-    <section className="surface modelsPanel">
+    <section className="surface modelsPanel" id="models">
       <PanelTitle icon={Brain} title="Models & Intelligence" pill="quant stack" />
       <p className="radarNote">
         Every one of these is live and, where selectable, switchable in the Control Room. This is the depth that separates a
@@ -1826,42 +1831,60 @@ function ModelsPanel({ models = {}, metrics = {} }) {
   );
 }
 
-function ResultsWorkbench({ snapshot, loadParams, applyParams, runBacktest, control, sweepDiscovery, runSpreadStudy, runAutotune, loadResearchHistory, onExplainTrade, guideNonce }) {
-  const [tab, setTab] = React.useState("opportunities");
+// Every section below is always rendered — nothing is hidden behind a tab
+// click. The nav is a plain anchor list (native, keyboard- and screen-reader-
+// friendly) that jumps to a section already on the page; a scrollspy just
+// keeps it honest about where you are.
+const WORKBENCH_SECTIONS = ["overview", "opportunities", "control", "stress", "models", "trades", "signals", "radar", "research", "backtest", "diagnostics"];
+
+function ResultsWorkbench({ snapshot, loadParams, applyParams, runBacktest, control, sweepDiscovery, runSpreadStudy, runAutotune, loadResearchHistory, onExplainTrade, triggerScenario }) {
   const radarPositive = snapshot.discovery?.lastSweep?.positiveCount;
-  // The intro's "Why Aurelion should win" link jumps here.
-  React.useEffect(() => { if (guideNonce) setTab("guide"); }, [guideNonce]);
-  const tabs = [
-    ["guide", "Why we win", "judge"],
+  const [activeId, setActiveId] = React.useState(WORKBENCH_SECTIONS[0]);
+
+  React.useEffect(() => {
+    const targets = WORKBENCH_SECTIONS.map((id) => document.getElementById(id)).filter(Boolean);
+    if (!targets.length) return undefined;
+    const observer = new IntersectionObserver((entries) => {
+      const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+      if (visible[0]) setActiveId(visible[0].target.id);
+    }, { rootMargin: "-140px 0px -65% 0px", threshold: 0 });
+    targets.forEach((el) => observer.observe(el));
+    return () => observer.disconnect();
+  }, []);
+
+  const nav = [
+    ["overview", "Overview", null],
     ["opportunities", "Opportunities", snapshot.queue?.queued || 0],
+    ["control", "Control Room", "live"],
+    ["stress", "Stress Lab", (snapshot.scenarios?.active || []).length || "stable"],
+    ["models", "Models", "quant"],
     ["trades", "Trades", snapshot.trades?.length || 0],
     ["signals", "Signals", snapshot.opportunityHistory?.length || snapshot.opportunities?.length || 0],
-    ["control", "Control Room", "live"],
-    ["models", "Models", "quant"],
     ["radar", "Wide-Net Radar", radarPositive != null ? radarPositive : "scout"],
     ["research", "Research Lab", "learn"],
     ["backtest", "Backtest", "replay"],
-    ["infra", "Diagnostics", snapshot.streams?.streams?.length || snapshot.books?.length || 0],
+    ["diagnostics", "Diagnostics", snapshot.streams?.streams?.length || snapshot.books?.length || 0],
   ];
   return (
     <section className="workbench">
-      <div className="workbenchTabs">
-        {tabs.map(([id, label, count]) => (
-          <button className={tab === id ? "active" : ""} key={id} onClick={() => setTab(id)} type="button">
-            {label}<span>{count}</span>
-          </button>
+      <nav className="workbenchTabs" aria-label="Jump to section">
+        {nav.map(([id, label, count]) => (
+          <a key={id} href={`#${id}`} className={activeId === id ? "active" : ""} aria-current={activeId === id ? "location" : undefined}>
+            {label}{count != null && <span>{count}</span>}
+          </a>
         ))}
-      </div>
-      {tab === "guide" && <JudgeGuide />}
-      {tab === "opportunities" && <OpportunityTable opportunities={snapshot.queuedOpportunities} queue={snapshot.queue} now={snapshot.now} />}
-      {tab === "trades" && <Trades trades={snapshot.trades} metrics={snapshot.metrics} onExplainTrade={onExplainTrade} />}
-      {tab === "signals" && <OpportunityHistory opportunities={snapshot.opportunityHistory || snapshot.opportunities} metrics={snapshot.metrics} now={snapshot.now} />}
-      {tab === "control" && <ControlRoom loadParams={loadParams} applyParams={applyParams} />}
-      {tab === "models" && <ModelsPanel models={snapshot.models} metrics={snapshot.metrics} />}
-      {tab === "radar" && <WideNetRadarPanel discovery={snapshot.discovery} sweepDiscovery={sweepDiscovery} />}
-      {tab === "research" && <ResearchLab runSpreadStudy={runSpreadStudy} runAutotune={runAutotune} applyParams={applyParams} loadResearchHistory={loadResearchHistory} />}
-      {tab === "backtest" && <Backtest runBacktest={runBacktest} />}
-      {tab === "infra" && <InfrastructurePanel snapshot={snapshot} control={control} />}
+      </nav>
+      <JudgeGuide />
+      <OpportunityTable opportunities={snapshot.queuedOpportunities} queue={snapshot.queue} now={snapshot.now} />
+      <ControlRoom loadParams={loadParams} applyParams={applyParams} />
+      <StressLab scenarios={snapshot.scenarios} triggerScenario={triggerScenario} />
+      <ModelsPanel models={snapshot.models} metrics={snapshot.metrics} />
+      <Trades trades={snapshot.trades} metrics={snapshot.metrics} onExplainTrade={onExplainTrade} />
+      <OpportunityHistory opportunities={snapshot.opportunityHistory || snapshot.opportunities} metrics={snapshot.metrics} now={snapshot.now} />
+      <WideNetRadarPanel discovery={snapshot.discovery} sweepDiscovery={sweepDiscovery} />
+      <ResearchLab runSpreadStudy={runSpreadStudy} runAutotune={runAutotune} applyParams={applyParams} loadResearchHistory={loadResearchHistory} />
+      <Backtest runBacktest={runBacktest} />
+      <InfrastructurePanel snapshot={snapshot} control={control} />
     </section>
   );
 }
@@ -1961,7 +1984,7 @@ function CoPilot({ snapshot, focusTrade }) {
   React.useEffect(() => () => { if (esRef.current) esRef.current.close(); }, []);
 
   return (
-    <section className="surface coPilot">
+    <section className="surface coPilot" id="copilot">
       <PanelTitle icon={Sparkles} title="AI Co-pilot" pill={coPilot.available ? "Claude · live" : "live"} />
       <div className="coPilotBody">
         <p className="coPilotText" aria-live="polite">
@@ -1974,53 +1997,84 @@ function CoPilot({ snapshot, focusTrade }) {
   );
 }
 
-// First-arrival orientation for an unattended evaluator: what this is, that it's
-// live, how to explore it in a minute, and why it's different — because no one
-// is standing next to the judge to explain it.
-function WelcomeOverlay({ snapshot, onClose, onOpenGuide }) {
+// First-arrival orientation for an unattended evaluator, in Spanish: what this
+// is, that it's live, how to explore it in a minute, and what makes it
+// different — because no one is standing next to them to explain it.
+function WelcomeOverlay({ snapshot, onClose }) {
   const mode = snapshot?.mode;
+  const cardRef = React.useRef(null);
+  const goToOverview = () => {
+    onClose();
+    requestAnimationFrame(() => {
+      document.getElementById("overview")?.scrollIntoView({ block: "start" });
+    });
+  };
+
+  // A modal dialog must trap keyboard focus and start focused, or a keyboard
+  // user tabs straight through it into the page behind it.
+  React.useEffect(() => {
+    const focusable = cardRef.current?.querySelectorAll("button, a[href]");
+    focusable?.[0]?.focus();
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") { onClose(); return; }
+      if (event.key !== "Tab" || !focusable?.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
   return (
-    <div className="introScrim" role="dialog" aria-modal="true" aria-label="Welcome to Aurelion">
-      <div className="introCard">
-        <button type="button" className="introClose" aria-label="Close" onClick={onClose}>×</button>
+    <div className="introScrim" role="dialog" aria-modal="true" aria-label="Bienvenida a Aurelion" lang="es">
+      <div className="introCard" ref={cardRef}>
+        <button type="button" className="introClose" aria-label="Cerrar" onClick={onClose}>×</button>
         <div className="introHead">
           <div className="sigil"><Sparkles size={22} /></div>
           <div>
-            <h2>Welcome to Aurelion</h2>
-            <p>Bitcoin arbitrage intelligence — <b>live and running right now on this page.</b></p>
+            <h2>Bienvenido a Aurelion</h2>
+            <p>Inteligencia de arbitraje de Bitcoin — <b>funcionando en vivo ahora mismo en esta página.</b></p>
           </div>
         </div>
         <p className="introLede">
-          Aurelion scans multiple exchanges for price dislocations and decides, in a few milliseconds, whether each one is
-          <b> genuinely profitable after fees, slippage, latency, depth and inventory</b> — not just whether a spread exists.
-          Everything you see updates on its own. It is analysis and <b>paper-trading only</b>: no real money, ever.
+          Aurelion analiza varias casas de cambio en busca de diferencias de precio y decide, en pocos milisegundos, si cada
+          una es <b>genuinamente rentable después de comisiones, deslizamiento, latencia, profundidad de mercado e inventario</b> —
+          no solo si existe un margen. Todo lo que ves se actualiza solo. Es software de análisis y <b>trading simulado
+          (paper trading) únicamente</b>: nunca dinero real.
         </p>
         <div className="introGrid">
           <div className="introStep">
-            <b>1 · Watch it think</b>
-            <span>The <em>AI Co-pilot</em> narrates the current decision in plain language, live. The <em>Current Decision</em> panel shows the math behind it.</span>
+            <b>1 · Obsérvalo pensar</b>
+            <span>El <em>Copiloto IA</em> narra la decisión actual en lenguaje sencillo, en vivo. El panel <em>Decisión actual</em> muestra las matemáticas detrás de ella.</span>
           </div>
           <div className="introStep">
-            <b>2 · Drive it</b>
-            <span>Open <em>Control Room</em> and move a slider or apply a preset — 47 live parameters change the bot's behavior instantly, no restart.</span>
+            <b>2 · Contrólalo</b>
+            <span>Abre la <em>Sala de control</em> y mueve un control deslizante o aplica un preset — 47 parámetros en vivo cambian el comportamiento del bot al instante, sin reiniciar.</span>
           </div>
           <div className="introStep">
-            <b>3 · Stress &amp; prove it</b>
-            <span><em>Stress Lab</em> injects crashes, outages, even an engine fault it survives. <em>Backtest</em> and <em>Research Lab</em> measure and train on real data.</span>
+            <b>3 · Ponlo a prueba</b>
+            <span>El <em>Laboratorio de estrés</em> inyecta caídas, cortes de conexión y hasta una falla del motor que el sistema sobrevive. <em>Backtest</em> y el <em>Laboratorio de investigación</em> miden y entrenan con datos reales.</span>
           </div>
           <div className="introStep">
-            <b>4 · See it real</b>
-            <span>Switch to <em>Auto</em> (top bar) for real exchange data. <em>Wide-Net Radar</em> + <em>Live Observation</em> show the real, measured hunt for edges.</span>
+            <b>4 · Mira lo real</b>
+            <span>Cambia a <em>Auto</em> (barra superior) para datos reales de mercado. El <em>Radar de red amplia</em> y la <em>Observación en vivo</em> muestran la búsqueda real y medida de oportunidades.</span>
           </div>
         </div>
         <div className="introWhy">
-          <b>Why it's different:</b> Bellman-Ford cycle detection, Ornstein-Uhlenbeck spread modeling, fractional-Kelly sizing,
-          Bayesian per-venue calibration, a hyperopt trainer with out-of-sample validation, a fault-contained engine, and a
-          co-pilot that explains every call. Most bots check a spread; this one proves whether it would actually pay.
+          <b>Qué lo hace distinto:</b> detección de ciclos Bellman-Ford, modelado de spread Ornstein-Uhlenbeck, dimensionamiento
+          Kelly fraccional, calibración bayesiana por casa de cambio, un entrenador de parámetros con validación fuera de
+          muestra, un motor que contiene sus propias fallas, y un copiloto que explica cada decisión. La mayoría de los bots
+          solo revisan si hay un margen; este comprueba si realmente convendría tomarlo.
         </div>
         <div className="introActions">
-          <button type="button" className="introPrimary" onClick={onClose}>Start exploring{mode ? ` (${mode} mode)` : ""}</button>
-          <button type="button" className="introGuideLink" onClick={() => { onClose(); onOpenGuide(); }}>Why Aurelion should win →</button>
+          <button type="button" className="introPrimary" onClick={onClose}>Empezar a explorar{mode ? ` · modo ${mode}` : ""}</button>
+          <button type="button" className="introGuideLink" onClick={goToOverview}>Ver el resumen completo →</button>
         </div>
       </div>
     </div>
@@ -2028,37 +2082,40 @@ function WelcomeOverlay({ snapshot, onClose, onOpenGuide }) {
 }
 
 const JUDGE_CRITERIA = [
-  { crit: "Parametrization depth", why: "The committee's stated #1 factor.", how: "47 parameters tunable live in the Control Room (7 groups + Conservative/Balanced/Aggressive/HFT presets). A trainer even searches them for you.", where: "Control Room · Research Lab" },
-  { crit: "Net-profit accuracy", why: "Profit must survive real costs.", how: "Every opportunity is charged fees, book-walk slippage, market impact, latency risk, inventory rebalancing and adverse move. P&L conservation is proven by invariant tests.", where: "Current Decision · Real Costs · Diagnostics" },
-  { crit: "Latency", why: "Speed is judged.", how: "~3–6 ms internal decision time, decomposed live per stage (ingest/risk/scan/rank/exec/publish) and per venue. Shown, not just claimed.", where: "Speed panel · Diagnostics" },
-  { crit: "Robustness", why: "It must not break.", how: "A watchdog contains any fault without downtime (try the Engine-fault button), a feed guard rejects poisoned data, and fuzz + chaos suites verify no crash and no NaN.", where: "Stress Lab · Resilience" },
-  { crit: "Strategy & intelligence", why: "Depth of method.", how: "Bellman-Ford negative-cycle detection, OU mean-reversion fitting, fractional-Kelly sizing, Bayesian calibration, EV scoring, an observation recorder, and a wide-net radar across 10 venues + XRP/LTC/SOL/AVAX.", where: "Models · Research Lab · Wide-Net Radar" },
-  { crit: "Real-world viability", why: "Would it actually work?", how: "Live mode runs the identical engine on real venues and honestly reports that fees exceed edges — the measured finding, with a testnet order path and a documented route to real capital.", where: "Live Observation · Wide-Net Radar · Execution gateway" },
+  { crit: "Parametrization depth", why: "How much of the behavior is actually tunable.", how: "47 parameters tunable live in the Control Room (7 groups + Conservative/Balanced/Aggressive/HFT presets). A trainer even searches them for you.", links: [{ l: "Control Room", h: "#control" }, { l: "Research Lab", h: "#research" }] },
+  { crit: "Net-profit accuracy", why: "Profit must survive real costs.", how: "Every opportunity is charged fees, book-walk slippage, market impact, latency risk, inventory rebalancing and adverse move. P&L conservation is proven by invariant tests.", links: [{ l: "Current Decision", h: "#decision" }, { l: "Real Costs", h: "#reality" }, { l: "Diagnostics", h: "#diagnostics" }] },
+  { crit: "Latency", why: "Speed, measured rather than claimed.", how: "~3–6 ms internal decision time, decomposed live per stage (ingest/risk/scan/rank/exec/publish) and per venue.", links: [{ l: "Speed panel", h: "#speed" }, { l: "Diagnostics", h: "#diagnostics" }] },
+  { crit: "Robustness", why: "It has to keep running under stress.", how: "A watchdog contains any fault without downtime (try the Engine-fault button), a feed guard rejects poisoned data, and fuzz + chaos suites verify no crash and no NaN.", links: [{ l: "Stress Lab", h: "#stress" }, { l: "Resilience", h: "#resilience" }] },
+  { crit: "Strategy & intelligence", why: "Depth of method behind each decision.", how: "Bellman-Ford negative-cycle detection, OU mean-reversion fitting, fractional-Kelly sizing, Bayesian calibration, EV scoring, an observation recorder, and a wide-net radar across 10 venues + XRP/LTC/SOL/AVAX.", links: [{ l: "Models", h: "#models" }, { l: "Research Lab", h: "#research" }, { l: "Wide-Net Radar", h: "#radar" }] },
+  { crit: "Real-world viability", why: "Whether it would actually work outside a demo.", how: "Live mode runs the identical engine on real venues and honestly reports that fees exceed edges — the measured finding, with a testnet order path and a documented route to real capital.", links: [{ l: "Live Observation", h: "#observation" }, { l: "Wide-Net Radar", h: "#radar" }, { l: "Execution gateway", h: "#execution" }] },
 ];
 
-// Persistent, self-serve case for the evaluation. Maps each judging criterion to
-// concrete evidence and exactly where to see it — so an unattended judge can score
-// confidently without anyone walking them through it.
+// Standing, self-serve map of the system for an unattended visitor: what each
+// area demonstrates and a direct link to it. Nothing below is behind a click —
+// this is simply the index for a page where every section is already open.
 function JudgeGuide() {
   return (
-    <section className="surface judgeGuide">
-      <PanelTitle icon={ListChecks} title="Why Aurelion should win" pill="for the judge" />
+    <section className="surface judgeGuide" id="overview">
+      <PanelTitle icon={ListChecks} title="Overview" pill="map of this page" />
       <p className="radarNote">
-        You're evaluating this alone, so here is the case laid out: each criterion, how Aurelion answers it, and where to see
-        the evidence yourself. Everything below is live and verifiable on this page right now.
+        Nothing on this page is hidden behind a click — every section below is open, live, and stacked on this same page.
+        Here is what each part demonstrates, and a direct link to it.
       </p>
       <div className="judgeRows">
         {JUDGE_CRITERIA.map((row) => (
           <article key={row.crit} className="judgeRow">
             <div className="judgeCrit"><b>{row.crit}</b><small>{row.why}</small></div>
             <div className="judgeHow">{row.how}</div>
-            <div className="judgeWhere">↳ {row.where}</div>
+            <div className="judgeWhere">
+              <span aria-hidden="true">↳</span>
+              {row.links.map((link) => <a key={link.h} href={link.h}>{link.l}</a>)}
+            </div>
           </article>
         ))}
       </div>
       <div className="judgeClose">
         Aurelion is analysis and paper-trading only — no real-money execution, no withdrawal-capable keys, by design.
-        Its honesty <b>is</b> the point: a system disciplined enough to refuse trades that don't pay, and transparent enough to show you why.
+        It refuses trades that don't pay after real costs, and explains every call it makes.
       </div>
     </section>
   );
@@ -2070,7 +2127,6 @@ function App() {
   const [showIntro, setShowIntro] = React.useState(() => {
     try { return localStorage.getItem("aurelion_intro_seen") !== "1"; } catch { return true; }
   });
-  const [guideNonce, setGuideNonce] = React.useState(0);
   const dismissIntro = React.useCallback(() => {
     setShowIntro(false);
     try { localStorage.setItem("aurelion_intro_seen", "1"); } catch { /* private mode */ }
@@ -2080,9 +2136,10 @@ function App() {
   }
   return (
     <>
-      {showIntro && <WelcomeOverlay snapshot={snapshot} onClose={dismissIntro} onOpenGuide={() => setGuideNonce((n) => n + 1)} />}
+      <a className="skipLink" href="#main">Skip to main content</a>
+      {showIntro && <WelcomeOverlay snapshot={snapshot} onClose={dismissIntro} />}
       <Header snapshot={snapshot} connected={connected} control={control} reset={reset} exportSession={exportSession} onHelp={() => setShowIntro(true)} />
-      <main className="layout">
+      <main className="layout" id="main">
         <Overview snapshot={snapshot} />
         <ModeBanner snapshot={snapshot} />
         <section className="mainGrid">
@@ -2104,10 +2161,10 @@ function App() {
               runAutotune={runAutotune}
               loadResearchHistory={loadResearchHistory}
               onExplainTrade={(id) => setExplainTrade({ id, nonce: Date.now() })}
-              guideNonce={guideNonce}
+              triggerScenario={triggerScenario}
             />
           </div>
-          <SideRail snapshot={snapshot} control={control} triggerScenario={triggerScenario} />
+          <SideRail snapshot={snapshot} control={control} />
         </section>
       </main>
     </>
