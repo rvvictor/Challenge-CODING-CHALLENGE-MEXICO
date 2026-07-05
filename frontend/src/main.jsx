@@ -216,7 +216,7 @@ function useAurelion() {
 function Metric({ icon: Icon, label, value, note, tone = "neutral" }) {
   return (
     <article className={`metric ${tone}`}>
-      <Icon size={18} />
+      <Icon size={20} />
       <span>{label}</span>
       <strong>{value}</strong>
       <small>{note}</small>
@@ -1915,43 +1915,54 @@ function CoPilot({ snapshot, focusTrade }) {
   const [source, setSource] = React.useState("");
   const [streaming, setStreaming] = React.useState(false);
   const esRef = React.useRef(null);
+  const activeRef = React.useRef(false);
   const lastKeyRef = React.useRef("");
+  const pendingKeyRef = React.useRef("");
   const lastRunRef = React.useRef(0);
   const lastFocusNonceRef = React.useRef(0);
+  const catchUpRef = React.useRef(null);
 
+  // In demo mode the market re-ticks faster than a narration can finish, so a
+  // naive "restart on any change" thrashes the stream (opens, then aborts it
+  // mid-flight, over and over). Instead: never tear down an in-flight stream —
+  // let it finish, then catch up once to whatever the latest context is.
   const startStream = React.useCallback((askText, tradeId) => {
     if (esRef.current) { esRef.current.close(); esRef.current = null; }
     setText("");
     setSource("");
     setStreaming(true);
+    activeRef.current = true;
     lastRunRef.current = Date.now();
     const params = new URLSearchParams();
     if (askText) params.set("q", askText);
     if (tradeId) params.set("tradeId", tradeId);
     const events = new EventSource(`${API_BASE}/api/narrate/stream?${params.toString()}`);
     esRef.current = events;
+    const finish = (src) => {
+      setSource(src || "");
+      setStreaming(false);
+      activeRef.current = false;
+      events.close();
+      esRef.current = null;
+      if (pendingKeyRef.current !== lastKeyRef.current) {
+        lastKeyRef.current = pendingKeyRef.current;
+        catchUpRef.current = setTimeout(() => startStream(""), 700);
+      }
+    };
     events.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
         if (data.type === "delta") setText((prev) => prev + data.text);
-        else if (data.type === "done") {
-          setSource(data.source || "");
-          setStreaming(false);
-          events.close();
-          esRef.current = null;
-        }
+        else if (data.type === "done") finish(data.source);
       } catch (_error) { /* ignore malformed chunk */ }
     };
-    events.onerror = () => {
-      setStreaming(false);
-      events.close();
-      esRef.current = null;
-    };
+    events.onerror = () => finish("");
   }, []);
 
   const contextKey = coPilotContextKey(snapshot);
   React.useEffect(() => {
-    if (contextKey === lastKeyRef.current) return undefined;
+    pendingKeyRef.current = contextKey;
+    if (contextKey === lastKeyRef.current || activeRef.current) return undefined;
     const first = !lastKeyRef.current;
     const elapsed = Date.now() - lastRunRef.current;
     // Snappier than before: react to a changed decision within ~3s (was 5s).
@@ -1981,7 +1992,10 @@ function CoPilot({ snapshot, focusTrade }) {
     startStream("", focusTrade.id);
   }, [focusTrade, startStream]);
 
-  React.useEffect(() => () => { if (esRef.current) esRef.current.close(); }, []);
+  React.useEffect(() => () => {
+    if (esRef.current) esRef.current.close();
+    if (catchUpRef.current) clearTimeout(catchUpRef.current);
+  }, []);
 
   return (
     <section className="surface coPilot" id="copilot">
