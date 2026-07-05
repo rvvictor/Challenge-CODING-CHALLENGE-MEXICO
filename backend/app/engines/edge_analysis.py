@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from statistics import mean
 from typing import Any
 
@@ -89,12 +90,24 @@ def explain_opportunity(item: dict[str, Any]) -> dict[str, Any]:
     else:
         settlement_verdict = "not-viable"
 
+    # Ensemble capture-confidence: a single calibrated probability that the trade
+    # would actually capture positive net edge, combining the system's existing
+    # probabilistic models — venue+freshness confidence (which already folds in the
+    # Bayesian per-venue calibration when enabled), the latency-capture probability,
+    # and an edge-survival logistic on the net bps (≈0.5 at breakeven). One number
+    # a non-expert can read: "how sure is the system this trade would pay?"
+    latency_capture = clamp(float(payload.get("latencyCaptureProbability") if payload.get("latencyCaptureProbability") is not None else 1), 0, 1)
+    edge_survival = 1.0 / (1.0 + math.exp(-max(-40.0, min(40.0, net_bps * 0.5))))
+    capture_confidence = rounded(clamp(confidence * latency_capture * edge_survival, 0, 1), 4)
+
     payload["decision"] = {
         "route": route_name(payload),
         "action": decision,
         "summary": decision_summary,
         "explainableScore": explainable_score,
         "scoreGrade": "A" if explainable_score >= 82 else "B" if explainable_score >= 66 else "C" if explainable_score >= 48 else "D",
+        "captureConfidence": capture_confidence,
+        "captureConfidenceModel": "confidence × latency-capture × edge-survival logistic",
         "mainBlocker": payload.get("reason") or decision_summary,
     }
     payload["edgeBreakdown"] = {

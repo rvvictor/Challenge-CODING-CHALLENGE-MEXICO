@@ -2150,5 +2150,40 @@ class CoPilotModeAwarenessTests(unittest.TestCase):
         self.assertFalse(live.get("cached"))
 
 
+class EnsembleCaptureConfidenceTests(unittest.TestCase):
+    """The ensemble capture-confidence combines existing probabilistic signals."""
+
+    def _explain(self, net_bps, confidence, latency_capture):
+        from backend.app.engines.edge_analysis import explain_opportunity
+
+        return explain_opportunity({
+            "status": "profitable", "netBps": net_bps, "grossProfit": 1.0, "netProfit": 0.5,
+            "confidence": confidence, "filledRatio": 1.0, "latencyCaptureProbability": latency_capture,
+            "costs": {"totalCosts": 0.5}, "buyPrice": 70000, "qtyBtc": 0.01,
+        })["decision"]
+
+    def test_capture_confidence_is_a_probability(self):
+        d = self._explain(5.0, 0.9, 0.9)
+        self.assertIn("captureConfidence", d)
+        self.assertGreaterEqual(d["captureConfidence"], 0.0)
+        self.assertLessEqual(d["captureConfidence"], 1.0)
+
+    def test_higher_edge_and_confidence_raise_capture_confidence(self):
+        low = self._explain(-3.0, 0.4, 0.5)["captureConfidence"]
+        high = self._explain(8.0, 0.95, 0.95)["captureConfidence"]
+        self.assertGreater(high, low)
+
+    def test_negative_edge_drops_below_half(self):
+        d = self._explain(-6.0, 0.9, 0.9)
+        self.assertLess(d["captureConfidence"], 0.5)
+
+    def test_extreme_net_bps_stays_finite(self):
+        import math
+
+        for net in (-9999.0, 9999.0):
+            value = self._explain(net, 0.9, 0.9)["captureConfidence"]
+            self.assertTrue(math.isfinite(value))
+
+
 if __name__ == "__main__":
     unittest.main()

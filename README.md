@@ -381,6 +381,23 @@ describí al comité: observar → paper-live → testnet → (a futuro) capital
 
 ## Para el jurado
 
+### Evaluación autoservicio (sin presentador)
+
+Aurelion está hecho para que un juez lo evalúe **solo**, sin nadie explicándolo:
+
+- Al entrar aparece una **bienvenida** que dice qué es, que está corriendo en vivo,
+  cómo explorarlo en 60 segundos y por qué es distinto (reabrible con el botón **?**
+  del header).
+- La pestaña **"Why we win"** mapea cada criterio de evaluación a la evidencia
+  concreta y a dónde verla en la misma página.
+- La pestaña **Models** nombra y explica todo el stack cuántico (Bellman-Ford,
+  Ornstein-Uhlenbeck, Kelly, calibración bayesiana, impacto de mercado, EV,
+  entrenador con validación fuera de muestra, radar, observación) y una nueva
+  **confianza de captura** (probabilidad ensamblada de que un trade realmente pague).
+- El **co-piloto** narra la decisión en vivo, en lenguaje claro y consciente del
+  modo (demo = showcase; live = mercados reales) — solo muestra la explicación,
+  sin caja de preguntas, y se actualiza rápido.
+
 ### Demo vs. auto/live — por qué se ven distintos (a propósito)
 
 **El motor es el mismo en ambos modos.** Lo que cambia es la fuente de datos:
