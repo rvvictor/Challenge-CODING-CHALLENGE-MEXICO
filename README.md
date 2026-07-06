@@ -35,10 +35,11 @@ movimiento adverso — y el sistema **se niega a operar** cuando esos costos sup
 
 <div align="center">
 
-![Vista principal de Aurelion](docs/screenshots/img1.png)
-![Vista extendida de Aurelion](docs/screenshots/img2.png)
-![Vista extendida de Aurelion](docs/screenshots/img3.png)
-![Vista extendida de Aurelion](docs/screenshots/img4.png)
+![Cockpit: Sala de control, Decisión actual y Sistema](docs/screenshots/img1.png)
+![Cola de prioridad y Modelos e inteligencia](docs/screenshots/img2.png)
+![Radar de red amplia y Backtest](docs/screenshots/img3.png)
+![Resumen para el evaluador con enlaces a cada sección](docs/screenshots/img4.png)
+
 </div>
 
 ---
