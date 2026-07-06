@@ -1094,6 +1094,7 @@ function Workspace({ snapshot, onExplainTrade, runBacktest, sweepDiscovery, runS
   return (
     <section className="surface systemPanel workspacePanel">
       <OpportunityTable opportunities={snapshot.queuedOpportunities} queue={snapshot.queue} now={snapshot.now} />
+      <ModelsPanel models={snapshot.models} metrics={snapshot.metrics} />
       <div className="systemDuo">
         <section className="systemSection pnlCard" id="pnl">
           <PanelTitle icon={ChartNoAxesCombined} title="P&L" pill={formatMoney(snapshot.metrics.cumulativePnl)} />
@@ -1828,7 +1829,7 @@ function ModelsPanel({ models = {}, metrics = {} }) {
     ["Radar de red amplia + registro de observación", "Escanea 10 casas + XRP/LTC/SOL/AVAX y mide, con datos reales, con qué frecuencia aparecen los márgenes y superan el muro de comisiones."],
   ];
   return (
-    <section className="surface modelsPanel" id="models">
+    <section className="systemSection modelsPanel" id="models">
       <PanelTitle icon={Brain} title="Modelos e inteligencia" pill="stack cuantitativo" />
       <p className="radarNote">
         Cada uno de estos está en vivo y, donde es seleccionable, se puede cambiar en la Sala de control. Esta es la
@@ -1879,9 +1880,9 @@ function SystemPanel({ snapshot, control, triggerScenario }) {
 // Tier 1 — the cockpit. Everything a visitor should see first, without
 // scrolling: the live parametrization (the committee's #1 factor), what the
 // engine is deciding right now and why (with the co-pilot's plain-language
-// narration directly beneath it), and the system panel + models proving it's
-// robust and sophisticated. Control Room and Decision get the largest, tallest
-// cells on purpose — both span the full cockpit height.
+// narration directly beneath it), and the system panel proving it's robust.
+// Models & Intelligence now lives in the Workspace panel below, next to the
+// priority queue, instead of forcing a third cockpit row.
 function Cockpit({ snapshot, loadParams, applyParams, triggerScenario, focusTrade, control }) {
   return (
     <section className="cockpit">
@@ -1892,7 +1893,6 @@ function Cockpit({ snapshot, loadParams, applyParams, triggerScenario, focusTrad
         <CoPilot snapshot={snapshot} focusTrade={focusTrade} />
       </div>
       <div className="cockpitSystem"><SystemPanel snapshot={snapshot} control={control} triggerScenario={triggerScenario} /></div>
-      <div className="cockpitModels"><ModelsPanel models={snapshot.models} metrics={snapshot.metrics} /></div>
     </section>
   );
 }

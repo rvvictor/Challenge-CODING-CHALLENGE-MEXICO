@@ -402,37 +402,27 @@ small,
 .cockpit {
   display: grid;
   grid-template-columns: minmax(460px, 1.5fr) minmax(280px, 0.85fr) minmax(280px, 0.85fr);
-  /* Decision (edge + reality + co-pilot, stacked) now spans both rows, same as
-     Control Room — the co-pilot lives directly under the decision it explains
-     instead of in its own cell. System (stress lab, exchanges, wallets, demo
-     quality, global context, speed — one seamless panel) takes the cell the
-     co-pilot used to occupy. */
-  grid-template-areas:
-    "control decision system"
-    "control decision models";
+  /* Decision (edge + reality + co-pilot, stacked) and System (stress lab,
+     exchanges, wallets, demo quality, global context, speed — one seamless
+     panel) sit alongside Control Room, all in a single row. Grid's default
+     item alignment (stretch) makes every column match the row's tallest
+     content automatically — no manual height-matching needed. Models &
+     Intelligence moved out of the cockpit into the Workspace panel below,
+     next to the priority queue, so there's no third row to keep in sync. */
+  grid-template-areas: "control decision system";
   gap: 10px;
-  /* Stretch (the grid default) rather than start: Control and Decision span
-     both rows, so their height is set by whatever System+Models need
-     together. Without stretching, a shorter Control/Decision just left bare
-     page background showing below it once System+Models ran taller — this
-     makes both fill that full span instead, so each card's own background
-     covers the space instead of leaving a gap. */
 }
 
-.cockpitControl { grid-area: control; min-width: 0; display: flex; flex-direction: column; }
-.cockpitControl > * { flex: 1; min-height: 0; }
-.cockpitDecision { grid-area: decision; display: grid; grid-template-rows: auto auto 1fr; gap: 10px; min-width: 0; }
+.cockpitControl { grid-area: control; min-width: 0; }
+.cockpitDecision { grid-area: decision; display: grid; gap: 10px; align-content: start; min-width: 0; }
 .cockpitSystem { grid-area: system; min-width: 0; }
-.cockpitModels { grid-area: models; min-width: 0; display: flex; flex-direction: column; }
-.cockpitModels > * { flex: 1; min-height: 0; }
 
 @media (max-width: 1280px) {
   .cockpit {
     grid-template-columns: 1fr 1fr;
     grid-template-areas:
       "control  control"
-      "decision system"
-      "decision models";
+      "decision system";
   }
 }
 
@@ -442,8 +432,7 @@ small,
     grid-template-areas:
       "control"
       "decision"
-      "system"
-      "models";
+      "system";
   }
 }
 
