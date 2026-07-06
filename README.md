@@ -35,9 +35,10 @@ movimiento adverso — y el sistema **se niega a operar** cuando esos costos sup
 
 <div align="center">
 
-![Vista principal de Aurelion](docs/screenshots/dashboard-overview.png)
-![Vista extendida de Aurelion](docs/screenshots/dashboard-wide.png)
-
+![Vista principal de Aurelion](docs/screenshots/img1.png)
+![Vista extendida de Aurelion](docs/screenshots/img2.png)
+![Vista extendida de Aurelion](docs/screenshots/img3.png)
+![Vista extendida de Aurelion](docs/screenshots/img4.png)
 </div>
 
 ---
