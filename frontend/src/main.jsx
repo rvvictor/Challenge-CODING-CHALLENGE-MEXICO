@@ -2074,7 +2074,7 @@ function WelcomeOverlay({ snapshot, onClose }) {
           </div>
           <div className="introStep">
             <b>2 · Contrólalo</b>
-            <span>Abre la <em>Sala de control</em> y mueve un control deslizante o aplica un preset — 47 parámetros en vivo cambian el comportamiento del bot al instante, sin reiniciar.</span>
+            <span>Abre la <em>Sala de control</em> y mueve un control deslizante o aplica un preset — 50 parámetros en vivo cambian el comportamiento del bot al instante, sin reiniciar.</span>
           </div>
           <div className="introStep">
             <b>3 · Ponlo a prueba</b>
@@ -2101,7 +2101,7 @@ function WelcomeOverlay({ snapshot, onClose }) {
 }
 
 const JUDGE_CRITERIA = [
-  { crit: "Profundidad de parametrización", why: "Cuánto del comportamiento es realmente ajustable.", how: "47 parámetros ajustables en vivo en la Sala de control (7 grupos + presets Conservador/Balanceado/Agresivo/HFT). Un entrenador incluso los busca por ti.", links: [{ l: "Sala de control", h: "#control" }, { l: "Lab. de investigación", h: "#research" }] },
+  { crit: "Profundidad de parametrización", why: "Cuánto del comportamiento es realmente ajustable.", how: "50 parámetros ajustables en vivo en la Sala de control (9 grupos + presets Conservador/Balanceado/Agresivo/HFT). Un entrenador incluso los busca por ti.", links: [{ l: "Sala de control", h: "#control" }, { l: "Lab. de investigación", h: "#research" }] },
   { crit: "Exactitud de la ganancia neta", why: "La ganancia debe sobrevivir a los costos reales.", how: "Cada oportunidad se carga con comisiones, deslizamiento por recorrido del libro, impacto de mercado, riesgo de latencia, rebalanceo de inventario y movimiento adverso. La conservación del P&L se prueba con tests de invariantes.", links: [{ l: "Decisión actual", h: "#decision" }, { l: "Costos reales", h: "#reality" }, { l: "Diagnósticos", h: "#diagnostics" }] },
   { crit: "Latencia", why: "Velocidad, medida en lugar de afirmada.", how: "~3–6 ms de decisión interna, descompuesta en vivo por etapa (ingesta/riesgo/escaneo/ranking/ejec/publica) y por casa.", links: [{ l: "Panel Velocidad", h: "#speed" }, { l: "Diagnósticos", h: "#diagnostics" }] },
   { crit: "Robustez", why: "Tiene que seguir funcionando bajo estrés.", how: "Un vigilante contiene cualquier falla sin caídas (prueba el botón Falla del motor), una guardia de datos rechaza datos corruptos, y las suites de fuzz + caos verifican que no hay crash ni NaN.", links: [{ l: "Lab. de estrés", h: "#stress" }, { l: "Resiliencia", h: "#resilience" }] },
