@@ -14,17 +14,29 @@ def now_ms() -> int:
 
 
 class ExecutionSimulator:
-    def __init__(self, settings: Settings, ledger: WalletLedger, store: EventStore, risk: RiskManager):
+    def __init__(self, settings: Settings, ledger: WalletLedger, store: EventStore, risk: RiskManager, gateway=None):
         self.settings = settings
         self.ledger = ledger
         self.store = store
         self.risk = risk
+        # The execution gateway the trade loop settles through. Paper /
+        # read-only-live settle as a provenance passthrough (identical P&L);
+        # the testnet gateway places real sandbox orders and returns real fills.
+        # Defaults to a paper gateway so the simulator works standalone (tests).
+        if gateway is None:
+            from backend.app.integrations.gateways import PaperExecutionGateway
+
+            gateway = PaperExecutionGateway()
+        self.gateway = gateway
+        self.book_map: dict = {}
         self.cooldowns: dict[str, int] = {}
         self.last_demo_execution_at = 0
+        self.leg_failure_until = 0
 
     def reset(self) -> None:
         self.cooldowns.clear()
         self.last_demo_execution_at = 0
+        self.leg_failure_until = 0
 
     def try_execute(self, opportunities: list[dict], books: list[dict]) -> list[dict]:
         current = now_ms()
@@ -48,6 +60,14 @@ class ExecutionSimulator:
                 trade["inventoryRebalance"] = transfers
             if not self.has_inventory(trade):
                 continue
+            # Route settlement through the execution gateway. Paper /
+            # read-only-live tag provenance and return the modeled trade
+            # unchanged; the testnet gateway places real sandbox orders and
+            # rewrites the fill. A gateway that rejects returns None.
+            settled = self.gateway.settle_trade(trade, opportunity, self.book_map)
+            if settled is None:
+                continue
+            trade = settled
             self.ledger.apply_trade(trade)
             self.cooldowns[key] = current + self.settings.pair_cooldown_ms
             self.risk.record_trade(trade, current)
@@ -69,20 +89,53 @@ class ExecutionSimulator:
             wallet = self.ledger.get(trade["exchangeId"])
             return float(wallet["USDT"]) >= trade["quoteIn"]
 
+        base = trade.get("baseAsset", "BTC")
         buy = self.ledger.get(trade["buyExchangeId"])
         sell = self.ledger.get(trade["sellExchangeId"])
         buy_debit = trade["buyQuote"] + trade["buyFee"] + trade["slippageCostBuy"] + trade["rebalanceCost"]
-        return float(buy["USDT"]) >= buy_debit and float(sell["BTC"]) >= trade["qtyBtc"]
+        return float(buy["USDT"]) >= buy_debit and float(sell[base]) >= trade["qtyBtc"]
+
+    def reconcile_fills(self, opportunity: dict) -> dict | None:
+        """Per-leg reconciliation for cross-exchange trades: intended vs filled on
+        each leg, the resulting open exposure, and the corrective cover. Normally
+        both legs fill the same size (hedged, zero exposure). Under a `leg_failure`
+        scenario the sell leg under-fills, leaving the bot net-long until it covers
+        the residual at a worse price (a real cost, charged to P&L)."""
+        if opportunity.get("strategy") == "triangular":
+            return None
+        intended = round(float(opportunity.get("qtyBtc", 0)), 8)
+        buy_filled = intended
+        sell_filled = intended
+        cover_bps = 0.0
+        cover_cost = 0.0
+        if now_ms() < self.leg_failure_until and intended > 0:
+            sell_filled = round(intended * 0.55, 8)
+            exposure = round(buy_filled - sell_filled, 8)
+            cover_bps = round(self.settings.execution_adverse_max_bps + 6, 3)
+            cover_cost = round(exposure * float(opportunity.get("sellPrice", 0)) * cover_bps / 10000, 4)
+        exposure = round(buy_filled - sell_filled, 8)
+        return {
+            "intendedQtyBtc": intended,
+            "buyFilledBtc": buy_filled,
+            "sellFilledBtc": sell_filled,
+            "netExposureBtc": exposure,
+            "hedged": abs(exposure) < 1e-9,
+            "correctiveAction": "cover-residual" if exposure > 1e-9 else "none",
+            "coverBps": cover_bps,
+            "coverCost": cover_cost,
+        }
 
     def build_trade(self, opportunity: dict) -> dict:
         adverse = self.adverse_price_movement(opportunity)
+        reconciliation = self.reconcile_fills(opportunity)
+        cover_cost = reconciliation["coverCost"] if reconciliation else 0.0
         base = {
             "id": f"T-{uuid.uuid4().hex[:10]}",
             "time": now_ms(),
             "strategy": opportunity["strategy"],
             "opportunityId": opportunity["id"],
             "grossProfit": opportunity["grossProfit"],
-            "netProfit": round(opportunity["netProfit"] - adverse["cost"], 4),
+            "netProfit": round(opportunity["netProfit"] - adverse["cost"] - cover_cost, 4),
             "netBps": opportunity["netBps"],
             "expectedValue": opportunity.get("expectedValue", opportunity["netProfit"]),
             "evBps": opportunity.get("evBps", opportunity["netBps"]),
@@ -123,6 +176,7 @@ class ExecutionSimulator:
             }
         return {
             **base,
+            "baseAsset": opportunity.get("baseAsset", "BTC"),
             "buyExchangeId": opportunity["buyExchangeId"],
             "sellExchangeId": opportunity["sellExchangeId"],
             "buyExchange": opportunity["buyExchange"],
@@ -140,6 +194,9 @@ class ExecutionSimulator:
             "latencyRiskCost": opportunity["costs"]["latencyRiskCost"],
             "rebalanceCost": opportunity["costs"]["rebalanceCost"],
             "adverseMoveCost": adverse["cost"],
+            "coverCost": cover_cost,
+            "reconciliation": reconciliation,
+            "status": "leg-failure" if reconciliation and reconciliation["netExposureBtc"] > 1e-9 else base["status"],
         }
 
     def adverse_price_movement(self, opportunity: dict) -> dict:

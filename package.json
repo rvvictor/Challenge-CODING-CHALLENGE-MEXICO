@@ -10,8 +10,7 @@
     "start": "python -m backend.app.main",
     "build": "npm --prefix frontend run build",
     "check": "python -m compileall backend && npm --prefix frontend run build",
-    "test": "python -m unittest discover -s backend/tests",
-    "test:legacy": "node --test tests/*.test.js"
+    "test": "python -m unittest discover -s backend/tests"
   },
   "keywords": [
     "aurelion",

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import math
 import time
 import uuid
-from statistics import median
+from statistics import median, pstdev
 
 from backend.app.core.config import Settings
 
@@ -69,7 +70,7 @@ class RiskManager:
         oldest = self.price_window[0]
         if oldest["price"] <= 0:
             return
-        change_pct = abs((mid - oldest["price"]) / oldest["price"]) * 100
+        change_pct = self._window_volatility_pct(mid, oldest["price"])
         self.current_volatility_pct = change_pct
         if current_ms < self.paused_until and self.last_condition == "volatility":
             if current_ms - self.last_volatility_review >= 2000:
@@ -86,6 +87,34 @@ class RiskManager:
                 current_ms,
                 {"changePct": change_pct, "windowMs": self.settings.volatility_window_ms},
             )
+
+    def _window_volatility_pct(self, latest_price: float, oldest_price: float) -> float:
+        """Effective volatility (%) under the selected model.
+
+        - range:  absolute oldest->now percent move (original behavior).
+        - stddev: rolling sigma of per-tick log returns, scaled by sqrt(N).
+        - ewma:   exponentially weighted sigma of returns, scaled by sqrt(N).
+        The sqrt(N) scaling expresses a per-tick sigma as an expected cumulative
+        move over the window, comparable to the range threshold.
+        """
+        model = self.settings.volatility_model
+        if model == "range":
+            return abs((latest_price - oldest_price) / oldest_price) * 100 if oldest_price else 0.0
+        prices = [point["price"] for point in self.price_window if point["price"] > 0]
+        if len(prices) < 2:
+            return 0.0
+        returns = [math.log(prices[i] / prices[i - 1]) for i in range(1, len(prices)) if prices[i - 1] > 0]
+        if not returns:
+            return 0.0
+        if model == "stddev":
+            sigma = pstdev(returns) if len(returns) > 1 else abs(returns[0])
+        else:  # ewma
+            lam = 0.94
+            variance = 0.0
+            for value in returns:
+                variance = lam * variance + (1 - lam) * value * value
+            sigma = math.sqrt(variance)
+        return sigma * math.sqrt(len(returns)) * 100
 
     def can_execute(self, books: list[dict], current_ms: int | None = None) -> dict:
         current_ms = current_ms or now_ms()

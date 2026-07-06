@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from statistics import mean
 from typing import Any
 
@@ -89,12 +90,24 @@ def explain_opportunity(item: dict[str, Any]) -> dict[str, Any]:
     else:
         settlement_verdict = "not-viable"
 
+    # Ensemble capture-confidence: a single calibrated probability that the trade
+    # would actually capture positive net edge, combining the system's existing
+    # probabilistic models — venue+freshness confidence (which already folds in the
+    # Bayesian per-venue calibration when enabled), the latency-capture probability,
+    # and an edge-survival logistic on the net bps (≈0.5 at breakeven). One number
+    # a non-expert can read: "how sure is the system this trade would pay?"
+    latency_capture = clamp(float(payload.get("latencyCaptureProbability") if payload.get("latencyCaptureProbability") is not None else 1), 0, 1)
+    edge_survival = 1.0 / (1.0 + math.exp(-max(-40.0, min(40.0, net_bps * 0.5))))
+    capture_confidence = rounded(clamp(confidence * latency_capture * edge_survival, 0, 1), 4)
+
     payload["decision"] = {
         "route": route_name(payload),
         "action": decision,
         "summary": decision_summary,
         "explainableScore": explainable_score,
         "scoreGrade": "A" if explainable_score >= 82 else "B" if explainable_score >= 66 else "C" if explainable_score >= 48 else "D",
+        "captureConfidence": capture_confidence,
+        "captureConfidenceModel": "confidence × latency-capture × edge-survival logistic",
         "mainBlocker": payload.get("reason") or decision_summary,
     }
     payload["edgeBreakdown"] = {
@@ -129,7 +142,7 @@ def explain_opportunity(item: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
-def latency_slo(books: list[dict[str, Any]]) -> dict[str, Any]:
+def latency_slo(books: list[dict[str, Any]], decision_latencies: list[float] | None = None, stage_windows: dict[str, list[float]] | None = None) -> dict[str, Any]:
     ages = [float(book.get("ageMs") or 0) for book in books]
     updates = [float(book.get("latencyMs") or 0) for book in books]
     p95_age = percentile(ages, 0.95)
@@ -139,7 +152,7 @@ def latency_slo(books: list[dict[str, Any]]) -> dict[str, Any]:
         status = "breach"
     elif p95_age > 1000 or p95_update > 450:
         status = "watch"
-    return {
+    payload = {
         "status": status,
         "healthy": status != "breach",
         "summary": "SLO healthy" if status == "green" else "Latency watch" if status == "watch" else "Latency breach",
@@ -156,6 +169,31 @@ def latency_slo(books: list[dict[str, Any]]) -> dict[str, Any]:
             "targetP95": 450,
         },
     }
+    if decision_latencies:
+        # Internal processing time: from "books read this tick" to "opportunities
+        # scanned, scored and risk-gated" — isolates Aurelion's own compute
+        # overhead from network/exchange latency (bookAgeMs/updateLatencyMs above).
+        # Answers "how fast does the system itself decide once it has the data?"
+        payload["decisionMs"] = {
+            "p50": rounded(percentile(decision_latencies, 0.5), 2),
+            "p95": rounded(percentile(decision_latencies, 0.95), 2),
+            "last": rounded(decision_latencies[-1], 2),
+            "samples": len(decision_latencies),
+        }
+    if stage_windows:
+        # Where the milliseconds go inside one tick: book ingest + venue health,
+        # risk gate, opportunity scan, ranking/explainability, execution and
+        # snapshot publication. Same rolling-window treatment as decisionMs.
+        payload["stages"] = {
+            name: {
+                "p50": rounded(percentile(window, 0.5), 2),
+                "p95": rounded(percentile(window, 0.95), 2),
+                "last": rounded(window[-1], 2),
+            }
+            for name, window in stage_windows.items()
+            if window
+        }
+    return payload
 
 
 def venue_quality(books: list[dict[str, Any]]) -> list[dict[str, Any]]:

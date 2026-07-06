@@ -2,7 +2,7 @@
 
 # Aurelion
 
-### Inteligencia de arbitraje de Bitcoin para el CODING CHALLENGE MEXICO
+### Inteligencia de arbitraje de Bitcoin — CODING CHALLENGE MÉXICO
 
 Creado por **Victor Ruiz**
 
@@ -10,462 +10,247 @@ Creado por **Victor Ruiz**
 [![FastAPI](https://img.shields.io/badge/FastAPI-Backend-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![React](https://img.shields.io/badge/React-Interfaz-149eca?style=for-the-badge&logo=react&logoColor=white)](https://react.dev/)
 [![Vite](https://img.shields.io/badge/Vite-Build-646cff?style=for-the-badge&logo=vite&logoColor=white)](https://vite.dev/)
-[![Redis](https://img.shields.io/badge/Redis-PubSub-dc382d?style=for-the-badge&logo=redis&logoColor=white)](https://redis.io/)
-[![Postgres](https://img.shields.io/badge/Postgres-Auditoría-4169e1?style=for-the-badge&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 
 </div>
 
 ---
 
-## Descripción
+## Qué es Aurelion
 
-**Aurelion** es un bot de arbitraje de Bitcoin construido con una arquitectura real de backend y frontend. El sistema monitorea libros de órdenes en múltiples exchanges, detecta oportunidades de arbitraje cross-exchange, triangular y ciclos dinámicos de 4 pasos, prioriza las mejores rutas con una cola basada en valor esperado, simula ejecuciones con costos realistas y muestra todo el proceso en un dashboard web claro, visual y auditable.
-
-El objetivo del proyecto no es fingir que cualquier spread es ejecutable. Aurelion modela la cadena completa de decisión:
+Aurelion monitorea libros de órdenes en varios exchanges en tiempo real, detecta arbitraje
+cross-exchange, triangular y ciclos dinámicos de 4 pasos, prioriza las rutas por **valor
+esperado** (no por spread bruto), simula la ejecución con costos realistas, y muestra todo
+el proceso — decisión, costos, riesgo — en un dashboard auditable.
 
 ```text
 datos de mercado -> libros normalizados -> motores de arbitraje -> score de valor esperado
--> cola de prioridad -> compuertas de riesgo -> validación de inventario
--> ejecución simulada -> auditoría durable -> dashboard en vivo
+-> cola de prioridad -> compuertas de riesgo -> ejecución simulada -> auditoría durable
 ```
 
-El proyecto fue diseñado para demostrar dominio técnico bajo presión: velocidad, razonamiento financiero, manejo de fallas, claridad visual, trazabilidad y código limpio.
+No finge que cualquier spread es una ganancia: cada oportunidad se cobra comisiones reales
+del venue, slippage por profundidad de libro, impacto de mercado, riesgo de latencia y
+movimiento adverso — y el sistema **se niega a operar** cuando esos costos superan el edge.
 
-Repositorio:
+**Repositorio:** https://github.com/rvvictor/Challenge-CODING-CHALLENGE-MEXICO
 
-```text
-https://github.com/rvvictor/Challenge-CODING-CHALLENGE-MEXICO
-```
-
----
-
-## Capturas de pantalla
-
-### Vista principal del cockpit
+<div align="center">
 
 ![Vista principal de Aurelion](docs/screenshots/dashboard-overview.png)
-
-### Vista operativa extendida
-
 ![Vista extendida de Aurelion](docs/screenshots/dashboard-wide.png)
 
+</div>
+
 ---
 
-## Por qué Aurelion destaca
+## Capacidades principales
 
-| Área | Qué hace Aurelion |
+| Área | Qué hace |
 | --- | --- |
-| Datos de mercado | Usa una estrategia **WebSocket-first** con `ccxt.pro` cuando está disponible. El polling REST solo se activa como respaldo después de fallas repetidas. |
-| Robustez | Reintenta conexiones cada 2 segundos, activa REST después de 5 fallas de WebSocket y puede deshabilitar streams dañados sin romper el sistema. |
-| Velocidad | El perfil por defecto opera con 5 exchanges rápidos para reducir latencia, pero mantiene un catálogo de 10 exchanges para cobertura. |
-| Arbitraje | Detecta arbitraje cross-exchange de BTC, ciclos triangulares clásicos y ciclos dinámicos de 4 pasos como `USDT -> BTC -> ETH -> SOL -> USDT`. |
-| Calidad de ejecución | Modela comisiones, slippage, impacto por retiros, riesgo de latencia, movimiento adverso de precio y penalización por inventario. |
-| Priorización | La cola deduplica rutas equivalentes y ordena por valor esperado, confianza, liquidez y riesgo ajustado. |
-| Riesgo | Incluye circuit breaker por volatilidad, datos stale, rachas de pérdidas y presupuesto de riesgo por hora. |
-| Auditoría | Mantiene historial en memoria y persistencia opcional con Postgres o SQLite local. |
-| Interfaz | Dashboard enfocado en P&L, velocidad, salud de exchanges, decisión actual, mercado vivo, señales y trades ejecutados. |
-| Demo realista | Simulador determinístico con shocks controlados para mostrar trades normales, parciales, triangulares y dinámicos sin ganancias absurdas. |
+| **Motores de arbitraje** | Cross-exchange BTC, triangular clásico y ciclos dinámicos de 4 pasos (`USDT→BTC→ETH→SOL→USDT`), sobre 10 exchanges y BTC/ETH/XRP/LTC/SOL/AVAX. |
+| **Modelo de costos** | Comisión taker por venue (nivel de entrada, sin descuentos), slippage por recorrido de libro, impacto de mercado (√-law / Almgren), riesgo de latencia y movimiento adverso post-decisión. |
+| **Valor esperado** | Rankea por EV = utilidad neta × confianza − riesgo de latencia − riesgo de volatilidad − penalización de inventario. Deduplica rutas equivalentes. |
+| **Modelos seleccionables** | Bellman-Ford (todos los ciclos rentables) vs. DFS acotado; impacto `book_walk`/`sqrt_impact`/`almgren_lite`; sizing fijo vs. Kelly fraccional; volatilidad `range`/`ewma`/`stddev`; calibración bayesiana por venue. Todos ajustables en vivo. |
+| **Control Room** | **50 parámetros** en vivo (9 grupos) con presets Conservative/Balanced/Aggressive/HFT — cambios se aplican al siguiente tick, sin reiniciar. |
+| **Riesgo y resiliencia** | Circuit breaker (volatilidad, datos stale, rachas de pérdida, presupuesto horario), feed guard contra libros envenenados, watchdog que contiene fallas del motor sin caerse, exposición máxima abierta. |
+| **Research Lab** | Ajusta un modelo de reversión a la media (Ornstein-Uhlenbeck) sobre spreads reales; entrena parámetros repitiendo el mercado por los mismos motores (estilo *hyperopt*) con validación fuera de muestra. |
+| **Validación estadística** | Corre el motor sobre varias ventanas de mercado independientes y reporta un **intervalo de confianza bootstrap** y una **prueba de significancia** sobre si el edge es real después de costos — no una sola corrida, una conclusión con matemática detrás. |
+| **Wide-Net Radar** | Barre los 10 exchanges + XRP/LTC/SOL/AVAX en segundo plano (datos públicos, sin afectar la latencia del loop caliente) y mide cuánto sobrevive cada ruta tras comisiones. |
+| **Camino a real** | `paper → read-only-live → testnet (sandbox, dinero falso) → capital real (futuro, revisado)`. El gateway de testnet coloca órdenes reales en sandbox con llaves *solo de trading*; nunca llaves con permiso de retiro. |
+| **Auditoría** | Ledger durable (SQLite/Postgres) con retención automática, exportación de sesión, continuidad entre reinicios, reporte HTML autocontenido para revisión. |
+| **Co-piloto de IA** | Explica la decisión actual en lenguaje simple y breve; usa Claude si hay `ANTHROPIC_API_KEY`, si no, una explicación determinística — funciona sin llave. |
 
 ---
 
-## Stack tecnológico
+## Por qué en `auto`/`live` casi no hay ganancias — y qué estamos haciendo al respecto
+
+**Esto es intencional y medido, no un defecto.** El motor es idéntico en los tres modos; lo
+único que cambia es la fuente de datos:
+
+- **`demo`** usa un simulador determinístico que inyecta dislocaciones rentables de forma
+  controlada, para mostrar *toda* la funcionalidad (ejecuciones, ciclos triangulares,
+  recuperación de fallas parciales, stress lab) en el tiempo de una evaluación.
+- **`auto`/`live`** corre el mismo motor sobre **datos reales de mercado**. Ahí el hallazgo
+  medido — por el Wide-Net Radar, el modelo de spreads OU y el grabador de observación en
+  vivo — es que **casi ninguna ruta sobrevive los costos reales**: comisiones taker (10–120
+  bps según el venue), slippage, impacto de mercado y latencia consumen el spread antes de
+  que se pueda capturar. Los mejores edges observados rondan **−20 bps netos** en BTC/ETH; las
+  alts (XRP/LTC/SOL/AVAX) tampoco alcanzan a cubrir el nivel de comisión de entrada. El bot
+  entonces se niega a operar — eso es la disciplina funcionando, no una falla.
+
+**Por qué pasa:** los pares mayores entre exchanges grandes son extremadamente eficientes; la
+literatura (Kaiko 2025, Makarov & Schoar 2020) documenta ventanas de arbitraje real de
+segundos, no minutos, y sin ventaja de latencia de colocation, ese margen ya se cerró para
+cuando cualquier bot basado en API pública puede reaccionar.
+
+**Qué estamos haciendo para acercarnos a la realidad, en vez de solo afirmarlo:**
+
+1. **Research Lab** ajusta el modelo OU sobre historial real por par de venues — mide cuánto
+   duran las dislocaciones, con qué frecuencia aparecen y qué fracción desaparece antes de
+   poder ejecutarse, en vez de asumirlo.
+2. **Entrenador de parámetros** repite el mercado por los mismos motores muchos veces
+   (patrón *hyperopt*) y valida el mejor preset sobre una realización de mercado
+   independiente, para detectar sobreajuste.
+3. **Motor de validación estadística** (`GET /api/validation`, nuevo) va un paso más allá:
+   corre varias ventanas fuera de muestra, agrupa cada operación realizada y calcula un
+   intervalo de confianza bootstrap y una prueba de significancia (¿la media por operación es
+   distinguible de cero después de costos?) sobre el resultado agrupado. La conclusión es
+   honesta y cuantificada — en datos reales, hoy, típicamente reporta **"sin datos
+   suficientes / edge no positivo"**, exactamente porque las oportunidades no cruzan el muro
+   de comisiones; en el simulador de demo reporta correctamente **"edge positivo"**, porque ahí
+   sí está diseñado para pagar. Esa diferencia es la prueba de que el sistema no infla resultados.
+4. **Wide-Net Radar** vigila continuamente los 10 exchanges + 4 alts en busca de una ruta que
+   sí cruce el muro, y marca cualquier hallazgo persistente como candidato a promoción —
+   la promoción a el carril rápido queda como decisión humana, no automática.
+5. **Camino documentado a capital real**: `testnet` (sandbox, dinero falso) ya funciona hoy;
+   el checklist completo para graduar a capital pequeño está en
+   [`docs/SECURITY-live-readiness.md`](docs/SECURITY-live-readiness.md). Dinero real
+   **no está implementado ni habilitado**.
+
+---
+
+## Stack técnico
 
 | Capa | Tecnología |
 | --- | --- |
-| Backend API | Python, FastAPI, Uvicorn |
-| Datos de mercado | `ccxt.pro` para WebSockets cuando está instalado, `ccxt.async_support` para respaldo REST |
+| Backend | Python 3.11+, FastAPI, Uvicorn, asyncio |
+| Datos de mercado | `ccxt.pro` (WebSocket) con respaldo `ccxt` REST |
 | Frontend | React 19, Vite, lucide-react |
-| Tiempo real | Server-Sent Events con snapshot REST como respaldo |
+| Tiempo real | Server-Sent Events, con snapshot REST como respaldo |
+| Persistencia | SQLite local (por defecto) o Postgres vía `DATABASE_URL`, con retención automática |
 | Mensajería | Redis Pub/Sub opcional |
-| Persistencia | Postgres mediante `DATABASE_URL`, SQLite local como respaldo |
-| Pruebas | `unittest` en Python, pruebas de motores y verificación de build del frontend |
-| Despliegue | Servicio web Python capaz de ejecutar FastAPI y construir React |
+| IA | Claude (Anthropic) opcional para el co-piloto; funciona sin llave |
 
 ---
 
-## Funciones principales
+## Instalación y ejecución local
 
-### 1. Datos de mercado WebSocket-first
+```bash
+git clone https://github.com/rvvictor/Challenge-CODING-CHALLENGE-MEXICO.git
+cd Challenge-CODING-CHALLENGE-MEXICO
 
-Aurelion intenta usar `ccxt.pro` para recibir libros de órdenes en vivo por WebSocket. Si `ccxt.pro` no está disponible, el sistema puede operar con `ccxt.async_support` como respaldo REST cuando sea posible.
-
-Cada stream mantiene su propio estado:
-
-- `websocket`: modo principal.
-- `rest`: modo de respaldo, activado solo después de 5 fallas consecutivas.
-- `disabled`: estado seguro cuando REST también falla repetidamente.
-- `healthScore`: puntaje automático que baja cuando hay errores o latencia alta.
-
-El proveedor también usa límites seguros por exchange para evitar errores conocidos en KuCoin, Kraken, Bybit y Bitfinex cuando rechazan profundidades no soportadas.
-
-### 2. Motores de arbitraje
-
-Aurelion detecta:
-
-- **Arbitraje cross-exchange de BTC**: comprar BTC en un exchange y venderlo en otro.
-- **Arbitraje triangular clásico**: por ejemplo `USDT -> BTC -> ETH -> USDT`.
-- **Ciclos dinámicos de 4 pasos**: por ejemplo `USDT -> BTC -> ETH -> SOL -> USDT`.
-- **Near misses**: señales no ejecutables que explican qué tan cerca estuvo el mercado de ser rentable.
-
-Cada oportunidad incluye edge neto, edge bruto, comisiones, slippage, riesgo de latencia, valor esperado, confianza, ratio de llenado y decisión de ejecución.
-
-### 3. Cola de prioridad por valor esperado
-
-La cola no ordena solamente por spread bruto. Aurelion calcula una aproximación de valor esperado:
-
-```text
-EV = utilidad_neta * confianza - riesgo_latencia - riesgo_volatilidad - penalización_inventario
+python -m pip install -r requirements.txt
+npm --prefix frontend install
+npm run build
+npm run dev
 ```
 
-También elimina duplicados:
+Abrir `http://localhost:8000` (si la terminal muestra `0.0.0.0:8000`, es solo la interfaz de
+escucha del servidor — usar `localhost` en el navegador).
 
-- Si aparecen `Binance -> Kraken` y `Kraken -> Binance` en el mismo tick, conserva la ruta con mejor score ajustado.
-- Si aparecen varias versiones de un mismo ciclo triangular, conserva la de mayor valor esperado.
-- Las oportunidades rentables tienen prioridad sobre señales rechazadas o bloqueadas.
+```bash
+npm run check     # compila el backend y construye el frontend
+npm run test      # suite de pruebas del backend (unittest)
+```
 
-### 4. Simulador de ejecución
+---
 
-La capa de ejecución simula:
+## Despliegue (Render)
 
-- fills completos;
-- fills parciales;
-- ciclos triangulares parciales;
-- movimiento adverso de precio por latencia;
-- rebalanceo virtual de inventario;
-- P&L realizado;
-- metadatos completos para dashboard y exportación.
+```text
+Comando de build: pip install -r requirements.txt && npm --prefix frontend ci && npm --prefix frontend run build
+Comando de inicio: python -m backend.app.main
+```
 
-El modo demo está calibrado para mostrar trades cross-exchange normales, parciales normales, oportunidades triangulares y señales dinámicas de 4 pasos sin producir resultados irreales.
+Variables mínimas recomendadas:
 
-### 5. Circuit breaker y control de riesgo
+```text
+MARKET_MODE=demo
+AUTO_EXECUTION=true
+EXCHANGE_PROFILE=speed
+EVALUATION_INTERVAL_MS=450
+```
 
-Aurelion pausa la ejecución cuando el riesgo deja de ser aceptable:
+**Sobre el disco en planes con almacenamiento limitado:** el almacén durable se auto-poda
+(`PERSISTENCE_RETENTION_HOURS`, por defecto 24h, y `PERSISTENCE_MAX_ROWS`, por defecto 50 000
+filas — lo que se cumpla primero) para que nunca crezca sin límite. En un disco muy pequeño,
+bajar ambos valores (p. ej. `PERSISTENCE_RETENTION_HOURS=6`, `PERSISTENCE_MAX_ROWS=10000`) o
+apagar la persistencia por completo con `PERSISTENCE_ENABLED=false` — el dashboard en vivo
+sigue funcionando igual, solo se pierde el historial entre reinicios. Ver `.env.example` para
+la lista completa de variables.
 
-- shock de volatilidad en BTC dentro de la ventana configurada;
-- 5 trades negativos consecutivos;
-- libros de órdenes sin actualizar;
-- presupuesto de pérdidas por hora excedido;
-- prueba manual de volatilidad desde el dashboard.
+---
 
-Cuando el circuit breaker está activo, el sistema sigue observando el mercado, pero deja de ejecutar nuevos trades. Después del cooldown, se reactiva automáticamente.
+## Modos de ejecución
 
-### 6. Auditoría y trazabilidad
-
-El runtime conserva eventos importantes de la sesión:
-
-- oportunidades detectadas;
-- trades ejecutados;
-- eventos de riesgo;
-- fallas de streams de mercado;
-- serie de P&L;
-- ledger de replay;
-- exportación completa en JSON.
-
-Si se configura `DATABASE_URL`, Aurelion escribe registros durables en Postgres. Si no hay Postgres, usa SQLite local para que el proyecto siga siendo fácil de correr durante la evaluación.
+| Modo | Qué hace |
+| --- | --- |
+| `demo` | Simulador determinístico. Recomendado para evaluación: visual, rápido, sin dependencias externas. |
+| `auto` | Intenta datos reales; se degrada de forma segura al simulador si el entorno bloquea exchanges. |
+| `live` | Datos reales de mercado. La ejecución sigue siendo paper/testnet — nunca dinero real por defecto. |
 
 ---
 
 ## Estructura del proyecto
 
 ```text
-backend/
-  app/
-    main.py                         FastAPI, SSE, API de control, exportación y SPA
-    core/
-      config.py                     Configuración, catálogo de exchanges y perfiles
-      models.py                     Modelos de dominio compatibles con Pydantic
-    engines/
-      market_service.py             Orquestador principal del motor
-      arbitrage.py                  Motor de arbitraje cross-exchange
-      triangular.py                 Motor triangular y ciclos dinámicos multi-leg
-      queue.py                      Cola de prioridad y deduplicación
-      execution.py                  Ejecución simulada y movimiento adverso
-      ledger.py                     Wallets, P&L realizado/no realizado y exposición
-      risk.py                       Circuit breaker y presupuesto de riesgo
-      simulator.py                  Mercado demo determinístico con shocks controlados
-      edge_analysis.py              Explicabilidad, SLO de latencia y calidad demo
-      edge_ledger.py                Ledger de decisiones reproducible
-      event_store.py                Historial en memoria con persistencia opcional
-    integrations/
-      ccxt_provider.py              Proveedor WebSocket-first con respaldo REST
-      redis_bus.py                  Pub/Sub opcional
-      persistence.py                Persistencia durable en Postgres o SQLite
-      global_market.py              Contexto externo de BTC/ETH
-    tests/
-      test_engines.py               Pruebas de motores, riesgo, proveedor, métricas y API
+backend/app/
+  main.py                    FastAPI: API, SSE, exportación, SPA
+  core/                      config.py (settings + catálogo), models.py (dominio)
+  engines/                   arbitrage · triangular · queue · scoring · execution · ledger
+                              risk · simulator · venue_health · edge_analysis · discovery
+                              backtest · validation · statistics · autotune · report
+  integrations/               ccxt_provider · persistence · redis_bus · gateways · llm_narrator
+backend/tests/test_engines.py Suite de pruebas (142+)
 
-frontend/
-  src/
-    main.jsx                        Cockpit React
-    styles/app.css                  Sistema visual y layout responsivo
+frontend/src/
+  main.jsx                   Cockpit React
+  styles/app.css              Sistema visual y layout
 
-docs/
-  screenshots/                      Capturas usadas en este README
+docs/                         Arquitectura, seguridad live, hallazgos de investigación
 ```
 
 ---
 
-## Instalación
+## API (resumen)
 
-### Requisitos
-
-- Python 3.11+
-- Node.js 20+
-- Redis opcional
-- Postgres opcional
-- `ccxt.pro` opcional para streams WebSocket reales de exchanges
-
-### 1. Clonar el repositorio
-
-```bash
-git clone https://github.com/rvvictor/Challenge-CODING-CHALLENGE-MEXICO.git
-cd Challenge-CODING-CHALLENGE-MEXICO
-```
-
-### 2. Instalar dependencias del backend
-
-```bash
-python -m pip install -r requirements.txt
-```
-
-### 3. Instalar dependencias del frontend
-
-```bash
-npm --prefix frontend install
-```
-
-### 4. Construir el frontend
-
-```bash
-npm run build
-```
-
-### 5. Ejecutar la aplicación
-
-```bash
-npm run dev
-```
-
-Abrir:
-
-```text
-http://localhost:8000
-```
-
-Si la terminal muestra `http://0.0.0.0:8000`, se debe abrir `http://localhost:8000` en el navegador. `0.0.0.0` solo significa que el servidor escucha en todas las interfaces; no es una URL navegable local.
-
----
-
-## Comandos disponibles
-
-```bash
-npm run dev       # Ejecuta FastAPI y sirve el frontend construido
-npm run start     # Comando de inicio estilo producción
-npm run build     # Construye el frontend React
-npm run check     # Compila backend y construye frontend
-npm run test      # Ejecuta pruebas del backend
-npm run dev:web   # Servidor Vite solo para desarrollo visual
-```
-
----
-
-## Modos de ejecución
-
-| Modo | Propósito |
+| Endpoint | Qué devuelve |
 | --- | --- |
-| `demo` | Simulador determinístico. Es el modo recomendado para evaluación visual porque muestra señales realistas rápidamente sin depender de APIs externas. |
-| `auto` | Intenta conectarse a datos reales de mercado; si el entorno bloquea exchanges o falta `ccxt.pro`, puede degradarse de forma segura. |
-| `live` | Ruta de datos en vivo para validar mercado real. La ejecución sigue siendo paper/simulada. |
+| `GET /api/snapshot`, `GET /events` (SSE) | Estado completo del dashboard, en vivo. |
+| `GET/POST /api/params` | Registro de parámetros, valores, presets; aplica cambios en vivo. |
+| `GET /api/backtest` | Replay determinístico (simulado o historial real) con hit rate, drawdown, Sharpe-like. |
+| `GET /api/validation` | Validación estadística del edge: CI bootstrap + prueba de significancia sobre varias ventanas. |
+| `GET /api/research/spread`, `POST /api/research/autotune` | Ajuste de modelo OU y entrenador de parámetros. |
+| `GET /api/discovery`, `POST /api/discovery/sweep` | Radar de red amplia. |
+| `GET /api/observation` | Grabador de observación en vivo (frecuencia, tasa de captura por ruta). |
+| `POST /api/scenario` | Inyecta un escenario del Stress Lab. |
+| `GET /api/narrate`, `GET /api/narrate/stream` | Co-piloto de IA. |
+| `GET /api/export/report`, `GET /api/export/session` | Reporte HTML autocontenido / export JSON completo. |
+| `GET /api/continuity`, `GET /api/replay` | Continuidad e historial desde el almacén durable. |
+| `POST /api/control`, `POST /api/reset` | Cambia modo/exchanges/ejecución; reinicia la sesión. |
+| `GET /metrics` | Métricas estilo Prometheus. |
 
-### Aclaración importante sobre `auto` y `live`
-
-En `auto` y `live` es normal que haya menos movimiento que en `demo`. En mercado real, las oportunidades netas duran muy poco y muchas quedan descartadas al descontar comisiones, slippage, latencia, liquidez e inventario. Además, este proyecto no incluye API keys, llaves privadas ni permisos para ejecutar trades reales con dinero. Aurelion está preparado como bot de análisis, simulación y paper trading para el challenge.
-
----
-
-## Perfiles de exchanges
-
-| Perfil | Exchanges | Uso |
-| --- | --- | --- |
-| `speed` | OKX, Bybit, KuCoin, Kraken, Bitstamp | Perfil por defecto. Menor latencia y evaluación más limpia. |
-| `demo` | OKX, Bybit, KuCoin, Kraken, Bitstamp | Perfil controlado para el simulador. |
-| `coverage` | 10 exchanges configurados | Mayor cobertura para demostrar universo global. |
-
-Catálogo completo configurado:
-
-```text
-Binance, OKX, Kraken, Coinbase, Bitstamp, Bybit, KuCoin, Gate.io, Bitfinex, Gemini
-```
+Todos los endpoints que mutan estado aceptan `CONTROL_TOKEN` opcional (`X-Aurelion-Token`) y
+comparten un rate limit por cliente.
 
 ---
 
-## Variables de entorno
+## Notas de modelado (transparencia cuantitativa)
 
-| Variable | Valor por defecto | Descripción |
-| --- | --- | --- |
-| `PORT` | `8000` | Puerto del backend. |
-| `MARKET_MODE` | `demo` | Modo `demo`, `auto` o `live`. |
-| `EXCHANGE_PROFILE` | `speed` | Perfil `speed`, `demo` o `coverage`. |
-| `ACTIVE_EXCHANGES` | vacío | Lista separada por comas. Usar `all` para activar el catálogo completo. |
-| `EVALUATION_INTERVAL_MS` | `450` | Intervalo de evaluación del motor. |
-| `ORDER_BOOK_LIMIT` | `20` | Profundidad base del libro. Algunos exchanges usan límites seguros propios. |
-| `WS_RECONNECT_DELAY_MS` | `2000` | Espera antes de reconectar un WebSocket fallido. |
-| `WS_FAILURE_THRESHOLD` | `5` | Fallas consecutivas antes de activar REST fallback. |
-| `POLL_INTERVAL_MS` | `1200` | Frecuencia del polling REST cuando está activo. |
-| `REST_RECOVERY_ATTEMPT_MS` | `60000` | Tiempo antes de intentar volver de REST a WebSocket. |
-| `MIN_TRADE_BTC` | `0.002` | Tamaño mínimo ejecutable en BTC. |
-| `MAX_TRADE_BTC` | `0.015` | Tamaño máximo simulado por trade. |
-| `MIN_NET_BPS` | `0.75` | Edge neto mínimo para arbitraje cross-exchange. |
-| `TRIANGULAR_ENABLED` | `true` | Activa detección triangular y ciclos dinámicos. |
-| `TRIANGULAR_QUOTE_SIZE` | `650` | Notional inicial para evaluar ciclos. |
-| `DEMO_MIN_EXECUTION_GAP_MS` | `22000` | Separación mínima entre fills simulados en demo. |
-| `MAX_VOLATILITY_PCT` | `2.4` | Umbral de volatilidad para circuit breaker. |
-| `VOLATILITY_MIN_SAMPLES` | `8` | Muestras mínimas antes de activar pausa por volatilidad. |
-| `PAUSE_AFTER_LOSS_MS` | `60000` | Cooldown del sistema de riesgo. |
-| `RISK_BUDGET_HOUR_USD` | `75` | Presupuesto de pérdida por hora antes de pausar. |
-| `REDIS_URL` | vacío | Activa Redis Pub/Sub cuando se proporciona. |
-| `DATABASE_URL` | vacío | Activa persistencia durable en Postgres cuando se proporciona. |
-| `PERSISTENCE_ENABLED` | `true` | Activa Postgres o SQLite como almacén de eventos. |
-
----
-
-## API
-
-| Endpoint | Descripción |
-| --- | --- |
-| `GET /api/health` | Salud del runtime. |
-| `GET /api/snapshot` | Snapshot completo para el dashboard. |
-| `GET /api/metrics` | Métricas operativas compactas. |
-| `GET /metrics` | Métricas estilo Prometheus en texto. |
-| `GET /api/config` | Configuración activa y catálogo de exchanges. |
-| `GET /api/export/session` | Exportación completa de sesión para revisión. |
-| `GET /api/replay` | Eventos del ledger reproducible. |
-| `POST /api/control` | Cambia modo, ejecución, exchanges activos o activa stress de volatilidad. |
-| `POST /api/reset` | Reinicia la sesión runtime. |
-| `GET /events` | Stream SSE para actualizaciones en vivo del dashboard. |
-
----
-
-## Guía rápida del dashboard
-
-| Sección | Cómo interpretarla |
-| --- | --- |
-| `Realized P&L` | Ganancia capturada por ejecuciones simuladas después de costos modelados. |
-| `Bot Status` | Indica si el bot está corriendo, pausado por riesgo o con ejecución manual apagada. |
-| `Best Opportunity` | Mejor edge neto actual después de comisiones, slippage, latencia y riesgo. |
-| `Detected Signals` | Total de oportunidades retenidas en el historial de la sesión. |
-| `Speed` | Frescura de libros y p95 de edad del book para evaluar latencia. |
-| `Data Health` | Venues activos, salud de streams y exchanges degradados. |
-| `Live Market` | Bid, ask y profundidad por exchange. |
-| `Current Decision` | Explica por qué la oportunidad principal se ejecuta, se rechaza o se bloquea. |
-| `Real Costs` | Compara rentabilidad prefunded contra rentabilidad con costos de settlement. |
-| `Priority Queue` | Oportunidades rankeadas después de deduplicación y score por valor esperado. |
-| `Signal History` | Historial de señales con filtros para Cross, Partial Cross, Triangular y Dynamic 4-leg. |
-| `Executed Trades` | Fills ejecutados con tipo, hora, P&L, EV y estado parcial/completo. |
-| `Exchanges` | Selección visual de exchanges activos, con máximo de 5 para mantener baja latencia. |
-| `Wallets` | Saldos simulados y exposición por venue. |
-| `System / Infra` | Redis, base de datos, streams, timeline de riesgo y estado de auditoría. |
-
----
-
-## Balance del modo demo
-
-El modo demo es determinístico y está controlado para presentaciones. Genera:
-
-- shocks cross-exchange de BTC;
-- situaciones de liquidez parcial;
-- edges triangulares clásicos;
-- señales ocasionales de ciclos dinámicos de 4 pasos;
-- eventos de volatilidad para validar el circuit breaker.
-
-El simulador evita dos extremos:
-
-1. **Demasiado quieto**: los jueces tendrían que esperar mucho para ver actividad.
-2. **Demasiado falso**: ganancias enormes en pocos minutos reducirían credibilidad.
-
-El comportamiento actual busca una cadencia legible: pocos trades por minuto, P&L moderado, fills parciales visibles y una mezcla entre oportunidades normales y ciclos.
-
----
-
-## Pruebas
-
-Ejecutar:
-
-```bash
-npm run test
-npm run check
-```
-
-La suite cubre:
-
-- estimación de fills en múltiples niveles del order book;
-- fills parciales;
-- deduplicación de rutas cross-exchange;
-- rentabilidad triangular;
-- detección de ciclos dinámicos de 4 pasos;
-- balance demo entre señales cross, parciales y cíclicas;
-- reactivación del circuit breaker;
-- botón de stress de volatilidad;
-- límites seguros de order book por exchange;
-- puntaje automático de salud del proveedor;
-- selección de perfiles de exchanges;
-- cambio de exchanges sin perder P&L;
-- rebalanceo de inventario;
-- ordenamiento por valor esperado;
-- endpoint de métricas cuando FastAPI TestClient está disponible;
-- exportación de sesión y replay ledger.
-
----
-
-## Parámetros de despliegue
-
-La aplicación está preparada para correr como un servicio web Python que construye el frontend React y sirve la SPA desde FastAPI.
-
-Configuración recomendada:
-
-```text
-Repositorio: https://github.com/rvvictor/Challenge-CODING-CHALLENGE-MEXICO
-Comando de build: pip install -r requirements.txt && npm --prefix frontend ci && npm --prefix frontend run build
-Comando de inicio: python -m backend.app.main
-```
-
-Variables recomendadas:
-
-```text
-MARKET_MODE=demo
-AUTO_EXECUTION=true
-EXCHANGE_PROFILE=speed
-```
-
-Variables opcionales:
-
-```text
-DATABASE_URL=<url-de-postgres-si-se-configura>
-REDIS_URL=<url-de-redis-si-se-configura>
-```
-
-Para evaluación local o demo rápida, también se puede iniciar con:
-
-```text
-MARKET_MODE=demo
-```
+- **Comisiones**: nivel de entrada publicado por cada venue (julio 2026), sin descuentos por
+  volumen — deliberadamente conservador; un bot siempre activo alcanzaría mejores niveles.
+- **Impacto de mercado**: `book_walk` valora la profundidad visible; `sqrt_impact`/`almgren_lite`
+  añaden el costo de empujar el precio más allá del libro.
+- **Latencia**: costo de riesgo por latencia promedio de la pierna; probabilidad de captura
+  por decaimiento exponencial de half-life — simplificaciones declaradas.
+- **Modelo de spreads (OU)**: resolución de una vela (1 min); la ventana real de arbitraje es
+  de segundos (Kaiko 2025), así que las duraciones reportadas son cotas superiores.
+- **Triangular**: el P&L neto se acredita a USDT; el inventario intermedio de la ruta no se
+  mueve físicamente — una simplificación declarada, no un error de contabilidad del cross-exchange
+  (ese sí conserva BTC exactamente).
 
 ---
 
 ## Notas importantes
 
-- Aurelion es un sistema de análisis, simulación y paper trading para el challenge.
-- No envía órdenes reales ni opera dinero real.
-- No incluye API keys, llaves privadas ni permisos de exchanges.
-- `ccxt.pro` se usa cuando está disponible para WebSockets reales; `ccxt` abierto funciona como base para REST fallback.
-- Redis es opcional. El dashboard funciona con Server-Sent Events incluso sin Redis.
-- Postgres es opcional. Si `DATABASE_URL` no está configurado, Aurelion puede persistir eventos localmente con SQLite.
-- El modo demo es la ruta recomendada para jueces porque es determinística, visual e independiente de bloqueos de red o restricciones de exchanges.
-- En `auto` y `live` es normal ver menos trades rentables porque el mercado real es más competitivo y los costos eliminan muchas oportunidades.
+- Aurelion es software de análisis, simulación y paper trading — **no ejecuta órdenes con
+  dinero real ni incluye llaves con permiso de retiro**, por diseño.
+- `ccxt.pro` se usa cuando está disponible; si no, cae a `ccxt` REST.
+- Redis y Postgres son opcionales; el sistema funciona completo sin ninguno de los dos.
+- El modo `demo` es la ruta recomendada para evaluación: determinística, visual e
+  independiente de bloqueos de red.
 
 ---
 
 ## Autor
 
-**Victor Ruiz**  
-Proyecto para **CODING CHALLENGE MEXICO**
+**Victor Ruiz** — Proyecto para **CODING CHALLENGE MÉXICO**
