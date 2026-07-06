@@ -35,9 +35,10 @@ movimiento adverso — y el sistema **se niega a operar** cuando esos costos sup
 
 <div align="center">
 
-![Vista principal de Aurelion](docs/screenshots/dashboard-overview.png)
-![Vista extendida de Aurelion](docs/screenshots/dashboard-wide.png)
-
+![Vista principal de Aurelion](docs/screenshots/img1.png)
+![Vista extendida de Aurelion](docs/screenshots/img2.png)
+![Vista extendida de Aurelion](docs/screenshots/img3.png)
+![Vista extendida de Aurelion](docs/screenshots/img4.png)
 </div>
 
 ---
@@ -114,11 +115,22 @@ cuando cualquier bot basado en API pública puede reaccionar.
 | --- | --- |
 | Backend | Python 3.11+, FastAPI, Uvicorn, asyncio |
 | Datos de mercado | `ccxt.pro` (WebSocket) con respaldo `ccxt` REST |
-| Frontend | React 19, Vite, lucide-react |
+| Frontend | React 19, Vite 7, lucide-react (Node 20+) |
 | Tiempo real | Server-Sent Events, con snapshot REST como respaldo |
 | Persistencia | SQLite local (por defecto) o Postgres vía `DATABASE_URL`, con retención automática |
 | Mensajería | Redis Pub/Sub opcional |
 | IA | Claude (Anthropic) opcional para el co-piloto; funciona sin llave |
+
+### Decisiones de arquitectura y por qué
+
+| Decisión | Por qué, en vez de la alternativa obvia |
+| --- | --- |
+| Un solo proceso `asyncio`, sin cola de tareas ni workers | El tick del motor, el broadcast SSE y la API viven en el mismo loop de eventos; a la latencia objetivo (~3–6 ms de decisión) coordinar procesos separados (Celery, RQ) añadiría más overhead del que resuelve para un solo dashboard en vivo. |
+| Server-Sent Events, no WebSocket, hacia el navegador | El flujo dashboard→navegador es unidireccional; SSE trae reconexión nativa vía `EventSource` sin lógica propia de heartbeat/reintento. Las acciones que sí mutan estado (`/api/control`, `/api/params`) van por POST normal, no por el socket. |
+| `ccxt.pro` (WebSocket) con caída a `ccxt` REST | Suscripción en vivo cuando el venue/red lo permite; si el WS falla o el entorno lo bloquea, cae a polling REST sin tumbar el proceso — el modo `auto` reporta esa degradación en vez de ocultarla. |
+| SQLite por defecto, Postgres opcional vía `DATABASE_URL` | Cero configuración para correr o evaluar localmente; el mismo código de persistencia funciona contra Postgres sin cambios cuando se necesita concurrencia o durabilidad real. |
+| Estado del motor en memoria + auditoría durable aparte | Las decisiones de arbitraje no pueden esperar una escritura a disco; el ledger durable se escribe fuera del loop caliente (`asyncio.to_thread` para las rutas costosas) y se auto-poda (ver Despliegue) para no crecer sin límite. |
+| Techo de ejecución en `testnet` (sandbox, dinero falso) | Decisión de seguridad, no de alcance técnico: no existe una ruta de código hacia dinero real ni llaves con permiso de retiro. Ver [`docs/SECURITY-live-readiness.md`](docs/SECURITY-live-readiness.md) para el checklist explícito de qué faltaría, y quién lo aprobaría, para graduar a capital real. |
 
 ---
 
@@ -141,6 +153,13 @@ escucha del servidor — usar `localhost` en el navegador).
 npm run check     # compila el backend y construye el frontend
 npm run test      # suite de pruebas del backend (unittest)
 ```
+
+**Cobertura de pruebas:** 142 pruebas (`unittest`) en 26 clases — motores de arbitraje y scoring,
+registro de parámetros, modelos cuantitativos seleccionables, backtest y aprendizaje, retención de
+persistencia, Stress Lab, co-piloto, seguridad del token de control, pasarela de ejecución
+(paper/testnet), contabilidad multi-activo, radar de red amplia, Research Lab, robustez ante datos
+corruptos/fuzzing, y el motor de validación estadística. Corren contra el mismo código que sirve el
+dashboard — no hay una versión "de prueba" separada del motor real.
 
 ---
 
@@ -206,7 +225,9 @@ docs/                         Arquitectura, seguridad live, hallazgos de investi
 | Endpoint | Qué devuelve |
 | --- | --- |
 | `GET /api/snapshot`, `GET /events` (SSE) | Estado completo del dashboard, en vivo. |
+| `GET /api/health`, `GET /api/config` | Estado mínimo del proceso; configuración activa (riesgo, exchanges, cadencia). |
 | `GET/POST /api/params` | Registro de parámetros, valores, presets; aplica cambios en vivo. |
+| `GET /api/execution` | Estado de la pasarela de ejecución (paper/testnet) y sus capacidades. |
 | `GET /api/backtest` | Replay determinístico (simulado o historial real) con hit rate, drawdown, Sharpe-like. |
 | `GET /api/validation` | Validación estadística del edge: CI bootstrap + prueba de significancia sobre varias ventanas. |
 | `GET /api/research/spread`, `POST /api/research/autotune` | Ajuste de modelo OU y entrenador de parámetros. |
@@ -237,6 +258,20 @@ comparten un rate limit por cliente.
 - **Triangular**: el P&L neto se acredita a USDT; el inventario intermedio de la ruta no se
   mueve físicamente — una simplificación declarada, no un error de contabilidad del cross-exchange
   (ese sí conserva BTC exactamente).
+
+---
+
+## Documentación técnica adicional
+
+El README cubre lo esencial; estos documentos entran en el detalle que un README no debería
+cargar:
+
+| Documento | Contenido |
+| --- | --- |
+| [`docs/architecture/ArchitectureReview.md`](docs/architecture/ArchitectureReview.md) | Revisión de arquitectura de 100% del código fuente desde seis ángulos (arquitecto, backend, quant, trading, seguridad, DevOps): fortalezas, debilidades, riesgos, deuda técnica y comparación explícita contra los criterios del challenge. |
+| [`docs/architecture/ResearchLabFindings.md`](docs/architecture/ResearchLabFindings.md) | Corrida real del Research Lab sobre datos de mercado en vivo — los números detrás de "casi no hay ganancias en auto/live" (vida media de dislocaciones, frecuencia, cuántas superan el muro de comisiones), con método y fuentes citadas para que sean reproducibles, no anecdóticos. |
+| [`docs/architecture/RoadmapAndRealWorldPath.md`](docs/architecture/RoadmapAndRealWorldPath.md) | Plan hacia adelante: qué está hecho, qué falta para un panel quant-aware, y el camino explícito hacia operar con datos/capital real. |
+| [`docs/SECURITY-live-readiness.md`](docs/SECURITY-live-readiness.md) | Runbook de seguridad: el camino etapa por etapa (observación → paper-live → testnet → capital real) y el checklist exacto que faltaría completar — hoy nada de eso está habilitado. |
 
 ---
 
