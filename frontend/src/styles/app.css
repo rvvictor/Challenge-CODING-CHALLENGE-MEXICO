@@ -411,13 +411,20 @@ small,
     "control decision system"
     "control decision models";
   gap: 10px;
-  align-items: start;
+  /* Stretch (the grid default) rather than start: Control and Decision span
+     both rows, so their height is set by whatever System+Models need
+     together. Without stretching, a shorter Control/Decision just left bare
+     page background showing below it once System+Models ran taller — this
+     makes both fill that full span instead, so each card's own background
+     covers the space instead of leaving a gap. */
 }
 
-.cockpitControl { grid-area: control; min-width: 0; }
-.cockpitDecision { grid-area: decision; display: grid; gap: 10px; align-content: start; min-width: 0; }
+.cockpitControl { grid-area: control; min-width: 0; display: flex; flex-direction: column; }
+.cockpitControl > * { flex: 1; min-height: 0; }
+.cockpitDecision { grid-area: decision; display: grid; grid-template-rows: auto auto 1fr; gap: 10px; min-width: 0; }
 .cockpitSystem { grid-area: system; min-width: 0; }
-.cockpitModels { grid-area: models; min-width: 0; }
+.cockpitModels { grid-area: models; min-width: 0; display: flex; flex-direction: column; }
+.cockpitModels > * { flex: 1; min-height: 0; }
 
 @media (max-width: 1280px) {
   .cockpit {
