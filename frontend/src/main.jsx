@@ -1094,14 +1094,18 @@ function Workspace({ snapshot, onExplainTrade, runBacktest, sweepDiscovery, runS
   return (
     <section className="surface systemPanel workspacePanel">
       <OpportunityTable opportunities={snapshot.queuedOpportunities} queue={snapshot.queue} now={snapshot.now} />
-      <section className="systemSection pnlCard" id="pnl">
-        <PanelTitle icon={ChartNoAxesCombined} title="P&L" pill={formatMoney(snapshot.metrics.cumulativePnl)} />
-        <PnlChart series={snapshot.pnlSeries} />
-        <PnlBreakdown totals={snapshot.totals} />
-      </section>
-      <Trades trades={snapshot.trades} metrics={snapshot.metrics} onExplainTrade={onExplainTrade} />
-      <OpportunityHistory opportunities={snapshot.opportunityHistory || snapshot.opportunities} metrics={snapshot.metrics} now={snapshot.now} />
-      <CalibrationPanel calibration={snapshot.calibration} enabled={snapshot.models?.calibrationEnabled} />
+      <div className="systemDuo">
+        <section className="systemSection pnlCard" id="pnl">
+          <PanelTitle icon={ChartNoAxesCombined} title="P&L" pill={formatMoney(snapshot.metrics.cumulativePnl)} />
+          <PnlChart series={snapshot.pnlSeries} />
+          <PnlBreakdown totals={snapshot.totals} />
+        </section>
+        <CalibrationPanel calibration={snapshot.calibration} enabled={snapshot.models?.calibrationEnabled} />
+      </div>
+      <div className="systemDuo">
+        <Trades trades={snapshot.trades} metrics={snapshot.metrics} onExplainTrade={onExplainTrade} />
+        <OpportunityHistory opportunities={snapshot.opportunityHistory || snapshot.opportunities} metrics={snapshot.metrics} now={snapshot.now} />
+      </div>
       <WideNetRadarPanel discovery={snapshot.discovery} sweepDiscovery={sweepDiscovery} />
       <Backtest runBacktest={runBacktest} />
       <ResearchLab runSpreadStudy={runSpreadStudy} runAutotune={runAutotune} applyParams={applyParams} loadResearchHistory={loadResearchHistory} />
@@ -1233,8 +1237,10 @@ function ExecutionPanel({ execution = {}, control }) {
 function InfrastructurePanel({ snapshot, control }) {
   return (
     <>
-      <ExecutionPanel execution={snapshot.execution} control={control} />
-      <SystemStatus snapshot={snapshot} />
+      <div className="systemDuo">
+        <ExecutionPanel execution={snapshot.execution} control={control} />
+        <SystemStatus snapshot={snapshot} />
+      </div>
       <ResiliencePanel engineHealth={snapshot.engineHealth} continuity={snapshot.continuity} />
       <LiveObservationPanel observation={snapshot.observation} mode={snapshot.mode} />
       <Streams streams={snapshot.streams} redis={snapshot.redis} />

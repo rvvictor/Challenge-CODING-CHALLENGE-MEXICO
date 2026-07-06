@@ -450,12 +450,21 @@ small,
   flex-direction: column;
 }
 
-/* No max-height/scroll here: every section renders in full so nothing inside
-   ever needs its own scrollbar. The `.surface` base's `overflow: hidden`
-   (used elsewhere to clip a card's rounded corners) is overridden back to
-   visible so a taller stack of sections is never clipped either — the panel
-   simply grows to fit its content instead of scrolling or clipping it. */
+/* Fixed footprint: matches Control Room / Decision's height so the cockpit
+   stays balanced — six sections stacked would otherwise be much taller than
+   its neighbors. Bounded, with its own scroll for the rest — the panel's
+   size never changes as values change, only the scroll position does. The
+   compound selector (rather than relying on source order) beats .surface's
+   own `overflow: hidden`, which would otherwise clip this instead of
+   scrolling it. The large below-cockpit workspace panel opts back out via
+   .workspacePanel below — it has no neighboring column height to match. */
 .surface.systemPanel {
+  max-height: 800px;
+  overflow-y: auto;
+}
+
+.surface.systemPanel.workspacePanel {
+  max-height: none;
   overflow: visible;
 }
 
@@ -463,15 +472,42 @@ small,
   background: var(--paper);
 }
 
-.systemPanel > .systemSection + .systemSection {
+.systemPanel > * + * {
   border-top: 1px solid var(--line);
 }
 
-/* Wallets and exchange coverage tile into multiple columns instead of a
-   single scrolling column, so every wallet/venue is visible at once with no
-   internal scrollbar. */
+/* Bounded + scrollable so a longer venue/wallet list changes an internal
+   scrollbar, never the panel's own height. */
+.systemSection .coverageGrid,
 .systemSection .wallets {
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  max-height: 168px;
+  overflow-y: auto;
+}
+
+/* Two related panels side by side in one slot of the seamless stack instead
+   of each forcing full width (e.g. P&L next to Calibration) — a divider down
+   the middle instead of between rows. Falls back to stacked on narrow
+   screens, same as the cockpit's own responsive breakpoint. */
+.systemDuo {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: start;
+}
+
+.systemDuo > .systemSection + .systemSection {
+  border-top: none;
+  border-left: 1px solid var(--line);
+}
+
+@media (max-width: 760px) {
+  .systemDuo {
+    grid-template-columns: 1fr;
+  }
+
+  .systemDuo > .systemSection + .systemSection {
+    border-left: none;
+    border-top: 1px solid var(--line);
+  }
 }
 
 .surface {
