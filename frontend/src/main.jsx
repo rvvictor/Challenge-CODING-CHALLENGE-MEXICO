@@ -662,7 +662,7 @@ function Streams({ streams, redis }) {
 
 function GlobalMarket({ globalMarket }) {
   return (
-    <section className="surface">
+    <section className="systemSection" id="globalctx">
       <PanelTitle icon={Globe2} title="Contexto global" pill={globalMarket.status || "cargando"} />
       <div className="globalGrid">
         <article>
@@ -690,7 +690,7 @@ function LatencySloPanel({ slo = {} }) {
   const update = slo.updateLatencyMs || {};
   const decision = slo.decisionMs;
   return (
-    <section className={`surface sloPanel ${slo.status || "green"}`} id="speed">
+    <section className={`systemSection sloPanel ${slo.status || "green"}`} id="speed">
       <PanelTitle icon={Gauge} title="Velocidad" pill={slo.summary || "cargando"} />
       <div className="sloGrid">
         <article>
@@ -738,7 +738,7 @@ const STAGE_ORDER = [
 function DemoQualityPanel({ quality = {}, mode }) {
   const tone = scoreTone(Number(quality.score || 0));
   return (
-    <section className={`surface qualityPanel ${tone}`}>
+    <section className={`systemSection qualityPanel ${tone}`}>
       <PanelTitle icon={Sparkles} title="Calidad del demo" pill={mode === "demo" ? quality.label || "cargando" : "observando"} />
       <div className="qualityDial">
         <b>{Math.round(quality.score || 0)}</b>
@@ -766,7 +766,7 @@ function ExchangeCoverage({ coverage = {}, quality = [], health = {}, control })
     control({ activeExchanges: next });
   };
   return (
-    <section className="surface" id="exchanges">
+    <section className="systemSection" id="exchanges">
       <PanelTitle icon={Network} title="Casas de cambio" pill={`${coverage.activeCount || active.size} activas · ${health.demotedCount || 0} degradadas`} />
       <div className="coverageGrid" role="group" aria-label="Casas activas (2-5)">
         {universe.map((exchange) => {
@@ -1040,7 +1040,7 @@ function StressLab({ scenarios = {}, triggerScenario }) {
     }
   };
   return (
-    <section className="surface stressLab" id="stress">
+    <section className="systemSection stressLab" id="stress">
       <PanelTitle icon={FlaskConical} title="Laboratorio de estrés" pill={active.length ? `${active.length} activo${active.length > 1 ? "s" : ""}` : "estable"} />
       <div className="stressGrid" role="group" aria-label="Inyectar un escenario de estrés">
         {available.map((name) => (
@@ -1062,7 +1062,7 @@ function WalletsPanel({ snapshot }) {
   const lowSet = new Set(venueRows.filter((venue) => venue.low).map((venue) => venue.exchangeId));
   const fundableById = Object.fromEntries(venueRows.map((venue) => [venue.exchangeId, venue.tradesFundable]));
   return (
-    <section className="surface" id="wallets">
+    <section className="systemSection" id="wallets">
       <PanelTitle icon={DatabaseZap} title="Carteras" pill={formatMoney(snapshot.totals.markToMarket)} />
       {autonomy.sessionAutonomy != null && (
         <div className="autonomyBar">
@@ -1084,10 +1084,11 @@ function WalletsPanel({ snapshot }) {
   );
 }
 
-// Second tier: operational and portfolio panels, tiled in an auto-fit grid
-// right below the cockpit so most of them sit one short scroll (or none, on
-// a tall screen) away from the fold.
-function SecondaryGrid({ snapshot, control, onExplainTrade }) {
+// Second tier: operational panels, tiled in an auto-fit grid right below the
+// cockpit so most of them sit one short scroll (or none, on a tall screen)
+// away from the fold. Wallets and Exchanges now live in the cockpit's System
+// panel instead of here.
+function SecondaryGrid({ snapshot, onExplainTrade }) {
   return (
     <section className="secondary">
       <OpportunityTable opportunities={snapshot.queuedOpportunities} queue={snapshot.queue} now={snapshot.now} />
@@ -1096,8 +1097,6 @@ function SecondaryGrid({ snapshot, control, onExplainTrade }) {
         <PnlChart series={snapshot.pnlSeries} />
         <PnlBreakdown totals={snapshot.totals} />
       </section>
-      <WalletsPanel snapshot={snapshot} />
-      <ExchangeCoverage coverage={snapshot.exchangeCoverage} quality={snapshot.venueQuality} health={snapshot.venueHealth} control={control} />
       <Trades trades={snapshot.trades} metrics={snapshot.metrics} onExplainTrade={onExplainTrade} />
       <OpportunityHistory opportunities={snapshot.opportunityHistory || snapshot.opportunities} metrics={snapshot.metrics} now={snapshot.now} />
       <CalibrationPanel calibration={snapshot.calibration} enabled={snapshot.models?.calibrationEnabled} />
@@ -1230,10 +1229,7 @@ function InfrastructurePanel({ snapshot, control }) {
       <ExecutionPanel execution={snapshot.execution} control={control} />
       <SystemStatus snapshot={snapshot} />
       <ResiliencePanel engineHealth={snapshot.engineHealth} continuity={snapshot.continuity} />
-      <LatencySloPanel slo={snapshot.latencySlo} />
       <LiveObservationPanel observation={snapshot.observation} mode={snapshot.mode} />
-      <DemoQualityPanel quality={snapshot.demoQuality} mode={snapshot.mode} />
-      <GlobalMarket globalMarket={snapshot.globalMarket || {}} />
       <Streams streams={snapshot.streams} redis={snapshot.redis} />
       <section className="surface">
         <PanelTitle icon={ShieldAlert} title="Cronología de riesgo" pill={`${snapshot.riskEvents.length} eventos`} />
@@ -1593,11 +1589,11 @@ function ResearchLab({ runSpreadStudy, runAutotune, applyParams, loadResearchHis
           <b> con qué frecuencia aparecen</b> y <b>qué fracción desaparece antes de poder ejecutarse</b>.
         </p>
         <div className="radarActions">
-          <button type="button" className="iconButton" onClick={fitModels} disabled={studyBusy}>
+          <button type="button" className="actionButton" onClick={fitModels} disabled={studyBusy}>
             <Activity size={12} /> {studyBusy ? "ajustando con historia real..." : "ajustar modelos con historia real"}
           </button>
           {study?.summary?.medianHalfLifeMs != null && (
-            <button type="button" className="iconButton" onClick={applyMeasuredHalfLife} disabled={halfLifeApplied}>
+            <button type="button" className="actionButton" onClick={applyMeasuredHalfLife} disabled={halfLifeApplied}>
               <Zap size={12} /> {halfLifeApplied ? "vida media medida aplicada ✓" : "aplicar vida media medida (acotada)"}
             </button>
           )}
@@ -1665,7 +1661,7 @@ function ResearchLab({ runSpreadStudy, runAutotune, applyParams, loadResearchHis
             <input type="checkbox" checked={robust} onChange={(event) => setRobust(event.target.checked)} />
             robusto (todos los regímenes)
           </label>
-          <button type="button" className="iconButton" onClick={train} disabled={trainBusy}>
+          <button type="button" className="actionButton" onClick={train} disabled={trainBusy}>
             <Brain size={12} /> {trainBusy ? (robust ? "entrenando en todos los regímenes..." : "entrenando...") : "entrenar parámetros"}
           </button>
         </div>
@@ -1695,7 +1691,7 @@ function ResearchLab({ runSpreadStudy, runAutotune, applyParams, loadResearchHis
               ))}
             </div>
             <div className="radarActions">
-              <button type="button" className="iconButton" onClick={applyLearned} disabled={!training.best || applied}>
+              <button type="button" className="actionButton" onClick={applyLearned} disabled={!training.best || applied}>
                 <Zap size={12} /> {applied ? "preset aprendido aplicado ✓" : "aplicar preset aprendido"}
               </button>
               <small>se aplica por el mismo registro que cualquier cambio manual — visible en la Sala de control, reversible con reiniciar</small>
@@ -1783,7 +1779,7 @@ function WideNetRadarPanel({ discovery = {}, sweepDiscovery }) {
         )}
       </div>
       <div className="radarActions">
-        <button type="button" className="iconButton" onClick={runSweep} disabled={busy}>
+        <button type="button" className="actionButton" onClick={runSweep} disabled={busy}>
           <RefreshCw size={12} /> {busy ? "barriendo..." : "barrer ahora"}
         </button>
         <small>datos públicos de solo lectura · sin llaves API · modelo de comisiones: taker de nivel de entrada + margen de deslizamiento por tramo</small>
@@ -1845,24 +1841,44 @@ function ModelsPanel({ models = {}, metrics = {} }) {
   );
 }
 
+// Consolidated system panel: six secondary panels merged into one seamless
+// card instead of six separate floating ones, ordered lowest to highest
+// priority for evaluation — global reference price first, decision-critical
+// speed last. Each child keeps its own compact sub-header (its PanelTitle);
+// a hairline divider between them replaces the gap and repeated card chrome.
+function SystemPanel({ snapshot, control, triggerScenario }) {
+  return (
+    <section className="surface systemPanel">
+      <GlobalMarket globalMarket={snapshot.globalMarket || {}} />
+      <DemoQualityPanel quality={snapshot.demoQuality} mode={snapshot.mode} />
+      <WalletsPanel snapshot={snapshot} />
+      <ExchangeCoverage coverage={snapshot.exchangeCoverage} quality={snapshot.venueQuality} health={snapshot.venueHealth} control={control} />
+      <StressLab scenarios={snapshot.scenarios} triggerScenario={triggerScenario} />
+      <LatencySloPanel slo={snapshot.latencySlo} />
+    </section>
+  );
+}
+
 // Every section below is always rendered — nothing is hidden behind a tab
 // click. The nav is a plain anchor list (native, keyboard- and screen-reader-
 // friendly) that jumps to a section already on the page; a scrollspy just
 // keeps it honest about where you are.
 // Tier 1 — the cockpit. Everything a visitor should see first, without
 // scrolling: the live parametrization (the committee's #1 factor), what the
-// engine is deciding right now and why, and the proof it's robust and
-// sophisticated. Control Room gets the largest, tallest cell on purpose.
-function Cockpit({ snapshot, loadParams, applyParams, triggerScenario, focusTrade }) {
+// engine is deciding right now and why (with the co-pilot's plain-language
+// narration directly beneath it), and the system panel + models proving it's
+// robust and sophisticated. Control Room and Decision get the largest, tallest
+// cells on purpose — both span the full cockpit height.
+function Cockpit({ snapshot, loadParams, applyParams, triggerScenario, focusTrade, control }) {
   return (
     <section className="cockpit">
       <div className="cockpitControl"><ControlRoom loadParams={loadParams} applyParams={applyParams} /></div>
       <div className="cockpitDecision">
         <EdgeExplainability opportunities={snapshot.queuedOpportunities} />
         <RealityCheck opportunities={snapshot.queuedOpportunities} />
+        <CoPilot snapshot={snapshot} focusTrade={focusTrade} />
       </div>
-      <div className="cockpitCopilot"><CoPilot snapshot={snapshot} focusTrade={focusTrade} /></div>
-      <div className="cockpitStress"><StressLab scenarios={snapshot.scenarios} triggerScenario={triggerScenario} /></div>
+      <div className="cockpitSystem"><SystemPanel snapshot={snapshot} control={control} triggerScenario={triggerScenario} /></div>
       <div className="cockpitModels"><ModelsPanel models={snapshot.models} metrics={snapshot.metrics} /></div>
     </section>
   );
@@ -2153,10 +2169,10 @@ function App() {
           applyParams={applyParams}
           triggerScenario={triggerScenario}
           focusTrade={explainTrade}
+          control={control}
         />
         <SecondaryGrid
           snapshot={snapshot}
-          control={control}
           onExplainTrade={(id) => setExplainTrade({ id, nonce: Date.now() })}
         />
         <DeepGrid
@@ -2194,7 +2210,7 @@ class ErrorBoundary extends React.Component {
         <main className="loading">
           <div className="sigil"><ShieldAlert size={24} /></div>
           <span>Algo salió mal al renderizar el panel.</span>
-          <button type="button" className="iconButton" style={{ marginTop: 14, padding: "8px 16px" }} onClick={() => window.location.reload()}>Recargar</button>
+          <button type="button" className="actionButton" style={{ marginTop: 14, padding: "8px 16px" }} onClick={() => window.location.reload()}>Recargar</button>
         </main>
       );
     }

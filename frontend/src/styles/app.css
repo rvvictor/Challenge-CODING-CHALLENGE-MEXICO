@@ -296,6 +296,31 @@ small,
   place-items: center;
 }
 
+/* Icon + text-label action button (Research Lab, Wide-Net Radar, etc.). Unlike
+   .iconButton (a fixed 32px square for a single glyph), this sizes to its
+   content so a longer Spanish label never gets squeezed into a 32px box and
+   wrapped mid-word under its own icon. */
+.actionButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.actionButton:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
 .layout {
   width: min(1560px, calc(100% - 24px));
   margin: 10px auto 28px;
@@ -379,26 +404,30 @@ small,
 .cockpit {
   display: grid;
   grid-template-columns: minmax(460px, 1.5fr) minmax(280px, 0.85fr) minmax(280px, 0.85fr);
+  /* Decision (edge + reality + co-pilot, stacked) now spans both rows, same as
+     Control Room — the co-pilot lives directly under the decision it explains
+     instead of in its own cell. System (stress lab, exchanges, wallets, demo
+     quality, global context, speed — one seamless panel) takes the cell the
+     co-pilot used to occupy. */
   grid-template-areas:
-    "control decision copilot"
-    "control stress   models";
+    "control decision system"
+    "control decision models";
   gap: 10px;
   align-items: start;
 }
 
-.cockpitControl { grid-area: control; }
-.cockpitDecision { grid-area: decision; display: grid; gap: 10px; align-content: start; }
-.cockpitCopilot { grid-area: copilot; }
-.cockpitStress { grid-area: stress; }
-.cockpitModels { grid-area: models; }
+.cockpitControl { grid-area: control; min-width: 0; }
+.cockpitDecision { grid-area: decision; display: grid; gap: 10px; align-content: start; min-width: 0; }
+.cockpitSystem { grid-area: system; min-width: 0; }
+.cockpitModels { grid-area: models; min-width: 0; }
 
 @media (max-width: 1280px) {
   .cockpit {
     grid-template-columns: 1fr 1fr;
     grid-template-areas:
       "control  control"
-      "decision copilot"
-      "stress   models";
+      "decision system"
+      "decision models";
   }
 }
 
@@ -408,10 +437,46 @@ small,
     grid-template-areas:
       "control"
       "decision"
-      "copilot"
-      "stress"
+      "system"
       "models";
   }
+}
+
+/* --- System panel: six secondary panels (global context, demo quality,
+   wallets, exchanges, stress lab, speed) consolidated into ONE seamless card
+   instead of six separate floating ones — ordered lowest to highest
+   priority. Each child keeps its own .panelTitle as a sub-header; a hairline
+   border between them replaces the gap + repeated card chrome. ------------ */
+.systemPanel {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Fixed footprint: six sections stacked would otherwise nearly double
+   Control Room's height and unbalance the cockpit. Bounded to roughly match
+   its neighbors, with its own scroll for the rest — the panel's size never
+   changes as values change, only the scroll position does. The compound
+   selector (rather than relying on source order) beats .surface's own
+   `overflow: hidden`, which would otherwise clip this instead of scrolling it. */
+.surface.systemPanel {
+  max-height: 800px;
+  overflow-y: auto;
+}
+
+.systemSection {
+  background: var(--paper);
+}
+
+.systemPanel > .systemSection + .systemSection {
+  border-top: 1px solid var(--line);
+}
+
+/* Bounded + scrollable so a longer venue/wallet list changes an internal
+   scrollbar, never the panel's own height. */
+.systemSection .coverageGrid,
+.systemSection .wallets {
+  max-height: 168px;
+  overflow-y: auto;
 }
 
 /* --- Tier 2 & 3: operational panels and deep dives, tiled so the page
@@ -615,10 +680,15 @@ small,
 
 .edgeBody {
   display: grid;
-  grid-template-columns: minmax(190px, 0.8fr) minmax(190px, 0.8fr) minmax(240px, 1fr);
+  /* auto-fit + a modest minimum: the cockpit's decision column is narrower
+     than this used to assume (~350-450px), and a rigid 3-column minimum
+     (190+190+240px) forced real overflow there. This reflows to 2 or even 1
+     column instead of clipping. */
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 8px;
   padding: 8px;
   align-items: stretch;
+  min-width: 0;
 }
 
 .decisionStamp,
