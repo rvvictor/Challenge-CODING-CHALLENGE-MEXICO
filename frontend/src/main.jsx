@@ -456,7 +456,7 @@ function OpportunityTable({ opportunities, queue = {}, now }) {
   const fallback = visible.length ? visible : opportunities;
   const rows = fallback.slice(0, 7);
   return (
-    <section className="surface queue" id="opportunities">
+    <section className="systemSection queue" id="opportunities">
       <PanelTitle icon={Triangle} title="Cola de prioridad" pill={queue.paused ? "riesgo en pausa" : `${queue.executable || 0} ejecutables`} />
       <div className="queueStats">
         <span><b>{queue.received || 0}</b> analizadas</span>
@@ -611,7 +611,7 @@ function OpportunityHistory({ opportunities = [], metrics = {}, now }) {
   });
   const rows = filtered.slice(0, 18);
   return (
-    <section className="surface history" id="signals">
+    <section className="systemSection history" id="signals">
       <PanelTitle icon={ListChecks} title="Historial de señales" pill={`${rows.length} recientes`} />
       <div className="historyToolbar" role="group" aria-label="Filtrar señales">
         {filters.map(([id, label]) => (
@@ -643,7 +643,7 @@ function Streams({ streams, redis }) {
   const redisLabel = redis.enabled ? redis.status : "opcional apagado";
   const streamTone = (stream) => stream.disabled ? "disabled" : stream.restFallback ? "rest" : "ws";
   return (
-    <section className="surface streams">
+    <section className="systemSection streams">
       <PanelTitle icon={DatabaseZap} title="Infraestructura" pill={redisLabel} />
       <div className="streamList">
         {rows.slice(0, 12).map((stream) => (
@@ -892,7 +892,7 @@ function SystemStatus({ snapshot }) {
   const limit = Number(risk.riskBudgetHourUsd || 0);
   const ratio = limit > 0 ? Math.min(1, used / limit) : 0;
   return (
-    <section className="surface systemStatus">
+    <section className="systemSection systemStatus" id="diagnostics">
       <PanelTitle icon={DatabaseZap} title="Sistema" pill={risk.paused ? "detenido" : "armado"} />
       <div className="systemGrid">
         <article>
@@ -923,7 +923,7 @@ function ResiliencePanel({ engineHealth = {}, continuity = {} }) {
   const faults = engineHealth.tickErrors || 0;
   const armed = engineHealth.watchdog === "armed";
   return (
-    <section className="surface resiliencePanel" id="resilience">
+    <section className="systemSection resiliencePanel" id="resilience">
       <PanelTitle icon={ShieldAlert} title="Resiliencia" pill={armed ? "vigilante armado" : "—"} />
       <div className="systemGrid">
         <article>
@@ -958,7 +958,7 @@ function ResiliencePanel({ engineHealth = {}, continuity = {} }) {
 function LiveObservationPanel({ observation = {}, mode }) {
   const routes = observation.topRoutes || [];
   return (
-    <section className="surface radarPanel" id="observation">
+    <section className="systemSection radarPanel" id="observation">
       <PanelTitle icon={History} title="Observación en vivo" pill={observation.recording ? `${observation.samples} muestras` : "solo en vivo"} />
       <p className="radarNote">
         Sobre libros y costos reales, por ruta: con qué frecuencia aparece, qué fracción supera el muro de comisiones y la
@@ -1084,15 +1084,17 @@ function WalletsPanel({ snapshot }) {
   );
 }
 
-// Second tier: operational panels, tiled in an auto-fit grid right below the
-// cockpit so most of them sit one short scroll (or none, on a tall screen)
-// away from the fold. Wallets and Exchanges now live in the cockpit's System
-// panel instead of here.
-function SecondaryGrid({ snapshot, onExplainTrade }) {
+// Everything below the cockpit — queue, P&L, trades, history, calibration,
+// wide-net discovery, backtest, research lab, infrastructure/diagnostics, and
+// the judge map — merged into ONE seamless card instead of many separately
+// floating ones, same systemSection/divider treatment as the cockpit's System
+// panel. Nothing from the old split is missing, only regrouped. Wallets and
+// Exchanges live in the cockpit's System panel, not here.
+function Workspace({ snapshot, onExplainTrade, runBacktest, sweepDiscovery, runSpreadStudy, runAutotune, loadResearchHistory, applyParams, control }) {
   return (
-    <section className="secondary">
+    <section className="surface systemPanel workspacePanel">
       <OpportunityTable opportunities={snapshot.queuedOpportunities} queue={snapshot.queue} now={snapshot.now} />
-      <section className="surface pnlCard" id="pnl">
+      <section className="systemSection pnlCard" id="pnl">
         <PanelTitle icon={ChartNoAxesCombined} title="P&L" pill={formatMoney(snapshot.metrics.cumulativePnl)} />
         <PnlChart series={snapshot.pnlSeries} />
         <PnlBreakdown totals={snapshot.totals} />
@@ -1100,6 +1102,11 @@ function SecondaryGrid({ snapshot, onExplainTrade }) {
       <Trades trades={snapshot.trades} metrics={snapshot.metrics} onExplainTrade={onExplainTrade} />
       <OpportunityHistory opportunities={snapshot.opportunityHistory || snapshot.opportunities} metrics={snapshot.metrics} now={snapshot.now} />
       <CalibrationPanel calibration={snapshot.calibration} enabled={snapshot.models?.calibrationEnabled} />
+      <WideNetRadarPanel discovery={snapshot.discovery} sweepDiscovery={sweepDiscovery} />
+      <Backtest runBacktest={runBacktest} />
+      <ResearchLab runSpreadStudy={runSpreadStudy} runAutotune={runAutotune} applyParams={applyParams} loadResearchHistory={loadResearchHistory} />
+      <InfrastructurePanel snapshot={snapshot} control={control} />
+      <JudgeGuide />
     </section>
   );
 }
@@ -1148,7 +1155,7 @@ function Trades({ trades, metrics = {}, onExplainTrade }) {
     return true;
   });
   return (
-    <section className="surface trades" id="trades">
+    <section className="systemSection trades" id="trades">
       <PanelTitle icon={ArrowRightLeft} title="Operaciones ejecutadas" pill={`${visibleTrades.length}/${trades.length} visibles`} />
       <div className="tradeToolbar" role="group" aria-label="Filtrar operaciones">
         {filters.map(([id, label]) => (
@@ -1196,7 +1203,7 @@ function ExecutionPanel({ execution = {}, control }) {
   const guard = execution.guard || {};
   const modes = execution.available || [];
   return (
-    <section className="surface executionPanel" id="execution">
+    <section className="systemSection executionPanel" id="execution">
       <PanelTitle icon={Network} title="Pasarela de ejecución" pill={execution.mode || "paper"} />
       <div className="execBody">
         <div className="execCaps">
@@ -1225,13 +1232,13 @@ function ExecutionPanel({ execution = {}, control }) {
 
 function InfrastructurePanel({ snapshot, control }) {
   return (
-    <div className="infraDeck" id="diagnostics">
+    <>
       <ExecutionPanel execution={snapshot.execution} control={control} />
       <SystemStatus snapshot={snapshot} />
       <ResiliencePanel engineHealth={snapshot.engineHealth} continuity={snapshot.continuity} />
       <LiveObservationPanel observation={snapshot.observation} mode={snapshot.mode} />
       <Streams streams={snapshot.streams} redis={snapshot.redis} />
-      <section className="surface">
+      <section className="systemSection">
         <PanelTitle icon={ShieldAlert} title="Cronología de riesgo" pill={`${snapshot.riskEvents.length} eventos`} />
         <div className="events compactEvents">
           {snapshot.riskEvents.slice(0, 10).map((event) => (
@@ -1244,7 +1251,7 @@ function InfrastructurePanel({ snapshot, control }) {
           {!snapshot.riskEvents.length && <div className="empty">Sin eventos de riesgo</div>}
         </div>
       </section>
-    </div>
+    </>
   );
 }
 
@@ -1436,7 +1443,7 @@ function Backtest({ runBacktest }) {
   const fellBack = dq?.actual === "simulated-fallback";
 
   return (
-    <section className="surface backtest" id="backtest">
+    <section className="systemSection backtest" id="backtest">
       <PanelTitle icon={History} title="Backtest / Repetición" pill={result ? `${result.executed} operaciones` : "inactivo"} />
       <div className="backtestToolbar tradeToolbar">
         <span role="group" aria-label="Fuente de datos" className="btGroup">
@@ -1499,7 +1506,7 @@ function CalibrationPanel({ calibration, enabled }) {
   if (!calibration) return null;
   const venues = calibration.venues || [];
   return (
-    <section className="surface calibration" id="calibration">
+    <section className="systemSection calibration" id="calibration">
       <PanelTitle icon={Brain} title="Autocalibración" pill={enabled ? "aplicada" : "rastreando"} />
       <div className="calBody">
         {venues.length ? venues.map((venue) => (
@@ -1580,8 +1587,8 @@ function ResearchLab({ runSpreadStudy, runAutotune, applyParams, loadResearchHis
   };
 
   return (
-    <div className="researchLab" id="research">
-      <section className="surface radarPanel">
+    <>
+      <section className="systemSection radarPanel" id="research">
         <PanelTitle icon={Activity} title="Dinámica de spreads (ajustada con datos reales)" pill={study ? `${study.pairsFitted}/${study.pairsTotal} pares` : "modelo OU"} />
         <p className="radarNote">
           Ajusta un modelo de reversión a la media (Ornstein-Uhlenbeck) a la historia real de spread de cada par de casas y mide
@@ -1632,7 +1639,7 @@ function ResearchLab({ runSpreadStudy, runAutotune, applyParams, loadResearchHis
         {study?.summary?.note && <div className="radarActions"><small>{study.summary.note}</small></div>}
       </section>
 
-      <section className="surface radarPanel">
+      <section className="systemSection radarPanel">
         <PanelTitle icon={Brain} title="Entrenador de parámetros" pill={training ? `${training.trials} pruebas` : "estilo hyperopt"} />
         <p className="radarNote">
           Entrena un preset repitiendo el mercado a través de los <b>mismos motores</b> muchas veces con distintos
@@ -1700,7 +1707,7 @@ function ResearchLab({ runSpreadStudy, runAutotune, applyParams, loadResearchHis
         )}
       </section>
 
-      <section className="surface radarPanel">
+      <section className="systemSection radarPanel">
         <PanelTitle icon={History} title="Sesiones aprendidas (persistidas)" pill={`${history.length} guardadas`} />
         <p className="radarNote">
           Cada estudio y cada entrenamiento se guarda en disco — el bot conserva lo que aprendió entre reinicios.
@@ -1723,7 +1730,7 @@ function ResearchLab({ runSpreadStudy, runAutotune, applyParams, loadResearchHis
           {!history.length && <div className="empty">Aún no hay investigación persistida — ejecuta un ajuste o un entrenamiento arriba</div>}
         </div>
       </section>
-    </div>
+    </>
   );
 }
 
@@ -1740,7 +1747,7 @@ function WideNetRadarPanel({ discovery = {}, sweepDiscovery }) {
     try { await sweepDiscovery(); } finally { setBusy(false); }
   };
   return (
-    <section className="surface radarPanel" id="radar">
+    <section className="systemSection radarPanel" id="radar">
       <PanelTitle icon={Radar} title="Radar de red amplia" pill={discovery.enabled ? `${sweep.venuesLive ?? 0}/${discovery.universeCount || 0} casas` : "apagado"} />
       <p className="radarNote">
         Un explorador en segundo plano barre las {discovery.universeCount || 0} casas + {(discovery.bases || []).join("/")} desde tickers públicos por lotes —
@@ -1884,20 +1891,6 @@ function Cockpit({ snapshot, loadParams, applyParams, triggerScenario, focusTrad
   );
 }
 
-// Tier 3 — the deep dives: wide-net discovery, research/training, replay,
-// full diagnostics, and the evaluation map. Worth having, not worth
-// front-loading; a short scroll below the cockpit and the secondary grid.
-function DeepGrid({ snapshot, runBacktest, sweepDiscovery, runSpreadStudy, runAutotune, loadResearchHistory, applyParams, control }) {
-  return (
-    <section className="deep">
-      <WideNetRadarPanel discovery={snapshot.discovery} sweepDiscovery={sweepDiscovery} />
-      <Backtest runBacktest={runBacktest} />
-      <ResearchLab runSpreadStudy={runSpreadStudy} runAutotune={runAutotune} applyParams={applyParams} loadResearchHistory={loadResearchHistory} />
-      <InfrastructurePanel snapshot={snapshot} control={control} />
-      <JudgeGuide />
-    </section>
-  );
-}
 
 function coPilotContextKey(snapshot) {
   const top = snapshot?.queuedOpportunities?.[0] || snapshot?.opportunities?.[0];
@@ -2115,7 +2108,7 @@ const JUDGE_CRITERIA = [
 // this is simply the index for a page where every section is already open.
 function JudgeGuide() {
   return (
-    <section className="surface judgeGuide" id="overview">
+    <section className="systemSection judgeGuide" id="overview">
       <PanelTitle icon={ListChecks} title="Resumen" pill="mapa de esta página" />
       <p className="radarNote">
         Nada en esta página está oculto tras un clic — cada sección abajo está abierta, en vivo y apilada en esta misma página.
@@ -2171,12 +2164,9 @@ function App() {
           focusTrade={explainTrade}
           control={control}
         />
-        <SecondaryGrid
+        <Workspace
           snapshot={snapshot}
           onExplainTrade={(id) => setExplainTrade({ id, nonce: Date.now() })}
-        />
-        <DeepGrid
-          snapshot={snapshot}
           runBacktest={runBacktest}
           sweepDiscovery={sweepDiscovery}
           runSpreadStudy={runSpreadStudy}

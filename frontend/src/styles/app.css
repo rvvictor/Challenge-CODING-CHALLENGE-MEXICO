@@ -392,9 +392,7 @@ small,
 }
 
 .layout > .surface,
-.layout > .cockpit,
-.layout > .secondary,
-.layout > .deep {
+.layout > .cockpit {
   margin-top: 8px;
 }
 
@@ -452,15 +450,13 @@ small,
   flex-direction: column;
 }
 
-/* Fixed footprint: six sections stacked would otherwise nearly double
-   Control Room's height and unbalance the cockpit. Bounded to roughly match
-   its neighbors, with its own scroll for the rest — the panel's size never
-   changes as values change, only the scroll position does. The compound
-   selector (rather than relying on source order) beats .surface's own
-   `overflow: hidden`, which would otherwise clip this instead of scrolling it. */
+/* No max-height/scroll here: every section renders in full so nothing inside
+   ever needs its own scrollbar. The `.surface` base's `overflow: hidden`
+   (used elsewhere to clip a card's rounded corners) is overridden back to
+   visible so a taller stack of sections is never clipped either — the panel
+   simply grows to fit its content instead of scrolling or clipping it. */
 .surface.systemPanel {
-  max-height: 800px;
-  overflow-y: auto;
+  overflow: visible;
 }
 
 .systemSection {
@@ -471,27 +467,11 @@ small,
   border-top: 1px solid var(--line);
 }
 
-/* Bounded + scrollable so a longer venue/wallet list changes an internal
-   scrollbar, never the panel's own height. */
-.systemSection .coverageGrid,
+/* Wallets and exchange coverage tile into multiple columns instead of a
+   single scrolling column, so every wallet/venue is visible at once with no
+   internal scrollbar. */
 .systemSection .wallets {
-  max-height: 168px;
-  overflow-y: auto;
-}
-
-/* --- Tier 2 & 3: operational panels and deep dives, tiled so the page
-   grows in width before it grows in height. ------------------------------ */
-.secondary,
-.deep {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  gap: 10px;
-  align-items: start;
-}
-
-.researchLab,
-.infraDeck {
-  grid-column: 1 / -1;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
 
 .surface {
@@ -1310,13 +1290,6 @@ small,
   grid-template-columns: repeat(5, minmax(160px, 1fr));
   max-height: 250px;
   overflow: auto;
-}
-
-.infraDeck {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 12px;
-  align-items: start;
 }
 
 .compactEvents {
@@ -2178,13 +2151,6 @@ input:focus-visible,
 }
 
 /* --- Research & Training Lab ---------------------------------------------- */
-.researchLab {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  gap: 14px;
-  align-items: start;
-}
-
 .researchControl {
   display: inline-flex;
   align-items: center;
